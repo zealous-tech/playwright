@@ -394,6 +394,7 @@ class FrameSession {
   private _metricsOverride: Protocol.Emulation.setDeviceMetricsOverrideParameters | undefined;
   private _workerSessions = new Map<string, CRSession>();
   private _initScriptIds = new Map<InitScript, string>();
+  private _bufferedAttachedToTargetEvents: Protocol.Target.attachedToTargetPayload[] | undefined;
 
   constructor(crPage: CRPage, client: CRSession, targetId: string, parentSession: FrameSession | null) {
     this._client = client;
@@ -432,13 +433,13 @@ class FrameSession {
       eventsHelper.addEventListener(this._client, 'Runtime.executionContextCreated', event => this._onExecutionContextCreated(event.context)),
       eventsHelper.addEventListener(this._client, 'Runtime.executionContextDestroyed', event => this._onExecutionContextDestroyed(event.executionContextId)),
       eventsHelper.addEventListener(this._client, 'Runtime.executionContextsCleared', event => this._onExecutionContextsCleared()),
-      eventsHelper.addEventListener(this._client, 'Target.attachedToTarget', event => this._onAttachedToTarget(event)),
-      eventsHelper.addEventListener(this._client, 'Target.detachedFromTarget', event => this._onDetachedFromTarget(event)),
     ]);
   }
 
   private _addBrowserListeners() {
     this._eventListeners.push(...[
+      eventsHelper.addEventListener(this._client, 'Target.attachedToTarget', event => this._onAttachedToTarget(event)),
+      eventsHelper.addEventListener(this._client, 'Target.detachedFromTarget', event => this._onDetachedFromTarget(event)),
       eventsHelper.addEventListener(this._client, 'Inspector.targetCrashed', event => this._onTargetCrashed()),
       eventsHelper.addEventListener(this._client, 'Page.screencastFrame', event => this._onScreencastFrame(event)),
       eventsHelper.addEventListener(this._client, 'Page.windowOpen', event => this._onWindowOpen(event)),
@@ -476,6 +477,13 @@ class FrameSession {
     if (!this._isMainFrame())
       this._addRendererListeners();
     this._addBrowserListeners();
+
+    // Buffer attachedToTarget events until we receive the frame tree.
+    // This way we'll know where to insert oopif targets in the frame hierarchy.
+    // Note that we cannot send Target.setAutoAttach after Runtime.runIfWaitingForDebugger,
+    // so we have to buffer events instead.
+    this._bufferedAttachedToTargetEvents = [];
+
     const promises: Promise<any>[] = [
       this._client.send('Page.enable'),
       this._client.send('Page.getFrameTree').then(({ frameTree }) => {
@@ -483,6 +491,12 @@ class FrameSession {
           this._handleFrameTree(frameTree);
           this._addRendererListeners();
         }
+
+        // Now that we have the frame tree, it is possible to insert oopif targets at the right place.
+        const attachedToTargetEvents = this._bufferedAttachedToTargetEvents || [];
+        this._bufferedAttachedToTargetEvents = undefined;
+        for (const event of attachedToTargetEvents)
+          this._onAttachedToTarget(event);
 
         const localFrames = this._isMainFrame() ? this._page.frames() : [this._page.frameManager.frame(this._targetId)!];
         for (const frame of localFrames) {
@@ -708,12 +722,22 @@ class FrameSession {
   }
 
   _onAttachedToTarget(event: Protocol.Target.attachedToTargetPayload) {
+    if (this._bufferedAttachedToTargetEvents) {
+      this._bufferedAttachedToTargetEvents.push(event);
+      return;
+    }
+
     const session = this._client.createChildSession(event.sessionId);
 
     if (event.targetInfo.type === 'iframe') {
       // Frame id equals target id.
       const targetId = event.targetInfo.targetId;
-      const frame = this._page.frameManager.frame(targetId);
+      let frame = this._page.frameManager.frame(targetId);
+      if (!frame && event.targetInfo.parentFrameId) {
+        // When connecting to an existing page with an iframe, there is an "iframe" target,
+        // but no local frame is reported in getFrameTree. We can create a remote frame here.
+        frame = this._page.frameManager.frameAttached(targetId, event.targetInfo.parentFrameId);
+      }
       if (!frame)
         return; // Subtree may be already gone due to renderer/browser race.
       this._page.frameManager.removeChildFramesRecursively(frame);

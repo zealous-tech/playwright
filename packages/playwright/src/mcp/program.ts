@@ -17,11 +17,12 @@
 import { ProgramOption } from 'playwright-core/lib/utilsBundle';
 import * as mcpServer from './sdk/server';
 import { commaSeparatedList, dotenvFileLoader, headerParser, numberParser, resolveCLIConfig, semicolonSeparatedList } from './browser/config';
-import { Context } from './browser/context';
+import { setupExitWatchdog } from './browser/watchdog';
 import { contextFactory } from './browser/browserContextFactory';
 import { ProxyBackend } from './sdk/proxyBackend';
 import { BrowserServerBackend } from './browser/browserServerBackend';
 import { ExtensionContextFactory } from './extension/extensionContextFactory';
+import { runVSCodeTools } from './vscode/host';
 
 import type { Command } from 'playwright-core/lib/utilsBundle';
 import type { MCPProvider } from './sdk/proxyBackend';
@@ -38,6 +39,7 @@ export function decorateCommand(command: Command, version: string) {
       .option('--device <device>', 'device to emulate, for example: "iPhone 15"')
       .option('--executable-path <path>', 'path to the browser executable.')
       .option('--extension', 'Connect to a running browser instance (Edge/Chrome only). Requires the "Playwright MCP Bridge" browser extension to be installed.')
+      .option('--grant-permissions <permissions...>', 'List of permissions to grant to the browser context, for example "geolocation", "clipboard-read", "clipboard-write".', commaSeparatedList)
       .option('--headless', 'run browser in headless mode, headed by default')
       .option('--host <host>', 'host to bind server to. Default is localhost. Use 0.0.0.0 to bind to all interfaces.')
       .option('--ignore-https-errors', 'ignore https errors')
@@ -58,6 +60,7 @@ export function decorateCommand(command: Command, version: string) {
       .option('--user-data-dir <path>', 'path to the user data directory. If not specified, a temporary directory will be created.')
       .option('--viewport-size <size>', 'specify browser viewport size in pixels, for example "1280, 720"')
       .addOption(new ProgramOption('--connect-tool', 'Allow to switch between different browser connection methods.').hideHelp())
+      .addOption(new ProgramOption('--vscode', 'VS Code tools.').hideHelp())
       .addOption(new ProgramOption('--vision', 'Legacy option, use --caps=vision instead').hideHelp())
       .action(async options => {
         setupExitWatchdog();
@@ -80,6 +83,11 @@ export function decorateCommand(command: Command, version: string) {
             create: () => new BrowserServerBackend(config, extensionContextFactory)
           };
           await mcpServer.start(serverBackendFactory, config.server);
+          return;
+        }
+
+        if (options.vscode) {
+          await runVSCodeTools(config);
           return;
         }
 
@@ -114,22 +122,4 @@ export function decorateCommand(command: Command, version: string) {
         };
         await mcpServer.start(factory, config.server);
       });
-}
-
-function setupExitWatchdog() {
-  let isExiting = false;
-  const handleExit = async () => {
-    if (isExiting)
-      return;
-    isExiting = true;
-    // eslint-disable-next-line no-restricted-properties
-    setTimeout(() => process.exit(0), 15000);
-    await Context.disposeAll();
-    // eslint-disable-next-line no-restricted-properties
-    process.exit(0);
-  };
-
-  process.stdin.on('close', handleExit);
-  process.on('SIGINT', handleExit);
-  process.on('SIGTERM', handleExit);
 }

@@ -22,8 +22,12 @@ export class FailureTracker {
   private _failureCount = 0;
   private _hasWorkerErrors = false;
   private _rootSuite: Suite | undefined;
+  private _pauseOnError: boolean;
+  private _pauseAtEnd: boolean;
 
-  constructor(private _config: FullConfigInternal) {
+  constructor(private _config: FullConfigInternal, options?: { pauseOnError?: boolean, pauseAtEnd?: boolean }) {
+    this._pauseOnError = options?.pauseOnError ?? false;
+    this._pauseAtEnd = options?.pauseAtEnd ?? false;
   }
 
   onRootSuite(rootSuite: Suite) {
@@ -38,6 +42,14 @@ export class FailureTracker {
 
   onWorkerError() {
     this._hasWorkerErrors = true;
+  }
+
+  pauseOnError(): boolean {
+    return this._pauseOnError;
+  }
+
+  pauseAtEnd(): boolean {
+    return this._pauseAtEnd;
   }
 
   hasReachedMaxFailures() {

@@ -14,15 +14,22 @@
  * limitations under the License.
  */
 
-import type { z } from 'zod';
-import type * as mcp from '../sdk/exports';
-import type * as playwright from '../../../index';
+import { Context } from './context';
 
-export type BrowserTool<Input extends z.Schema = z.Schema> = {
-  schema: mcp.ToolSchema<Input>;
-  handle: (page: playwright.Page, params: z.output<Input>) => Promise<mcp.CallToolResult>;
-};
+export function setupExitWatchdog() {
+  let isExiting = false;
+  const handleExit = async () => {
+    if (isExiting)
+      return;
+    isExiting = true;
+    // eslint-disable-next-line no-restricted-properties
+    setTimeout(() => process.exit(0), 15000);
+    await Context.disposeAll();
+    // eslint-disable-next-line no-restricted-properties
+    process.exit(0);
+  };
 
-export function defineBrowserTool<Input extends z.Schema>(tool: BrowserTool<Input>): BrowserTool<Input> {
-  return tool;
+  process.stdin.on('close', handleExit);
+  process.on('SIGINT', handleExit);
+  process.on('SIGTERM', handleExit);
 }

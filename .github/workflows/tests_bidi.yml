@@ -40,11 +40,13 @@ jobs:
       if: github.event_name == 'workflow_dispatch'
       with:
         ref: ${{ github.event.inputs.ref }}
-    - uses: actions/setup-node@v4
+    - uses: actions/setup-node@v5
       with:
         node-version: 20
     - run: npm ci
     - run: npm run build
+    # Needed for video tests
+    - run: npx playwright install ffmpeg
     - run: npx playwright install --with-deps chromium
       if: matrix.channel == 'bidi-chromium'
     - if: matrix.channel == 'moz-firefox-nightly'

@@ -37,7 +37,7 @@ import customAgentTools from './tools/customAgentTools';
 import type { Tool } from './tools/tool';
 import type { FullConfig } from './config';
 
-export const allTools: Tool<any>[] = [
+export const browserTools: Tool<any>[] = [
   ...common,
   ...console,
   ...dialogs,
@@ -60,5 +60,5 @@ export const allTools: Tool<any>[] = [
 ];
 
 export function filteredTools(config: FullConfig) {
-  return allTools.filter(tool => tool.capability.startsWith('core') || config.capabilities?.includes(tool.capability));
+  return browserTools.filter(tool => tool.capability.startsWith('core') || config.capabilities?.includes(tool.capability));
 }

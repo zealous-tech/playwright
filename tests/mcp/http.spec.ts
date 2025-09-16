@@ -19,7 +19,7 @@ import fs from 'fs';
 import { ChildProcess, spawn } from 'child_process';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { test as baseTest, expect, programPath } from './fixtures';
+import { test as baseTest, expect, mcpServerPath } from './fixtures';
 
 import type { Config } from '../../packages/playwright/src/mcp/config';
 import { ListRootsRequestSchema } from 'packages/playwright/lib/mcp/sdk/bundle';
@@ -33,7 +33,7 @@ const test = baseTest.extend<{ serverEndpoint: (options?: { args?: string[], noP
         throw new Error('Process already running');
 
       cp = spawn('node', [
-        ...programPath,
+        ...mcpServerPath,
         ...(options?.noPort ? [] : ['--port=0']),
         '--user-data-dir=' + userDataDir,
         ...(mcpHeadless ? ['--headless'] : []),
@@ -254,7 +254,7 @@ test('http transport (default)', async ({ serverEndpoint }) => {
   expect(transport.sessionId, 'has session support').toBeDefined();
 });
 
-test('client should receive list roots request', async ({ serverEndpoint }) => {
+test('client should receive list roots request', async ({ serverEndpoint, server }) => {
   const { url } = await serverEndpoint();
   const transport = new StreamableHTTPClientTransport(url);
   const client = new Client({ name: 'test', version: '1.0.0' }, { capabilities: { roots: {} } });
@@ -275,6 +275,9 @@ test('client should receive list roots request', async ({ serverEndpoint }) => {
     };
   });
   await client.connect(transport);
-  await client.ping();
+  await client.callTool({
+    name: 'browser_navigate',
+    arguments: { url: server.HELLO_WORLD },
+  });
   expect(await rootsListedPromise).toBe('success');
 });

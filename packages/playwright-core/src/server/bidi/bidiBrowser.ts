@@ -69,6 +69,11 @@ export class BidiBrowser extends Browser {
       ],
     });
 
+    await browser._browserSession.send('network.addDataCollector', {
+      dataTypes: [bidi.Network.DataType.Response],
+      maxEncodedDataSize: 20_000_000, // same default as in CDP: https://source.chromium.org/chromium/chromium/src/+/main:third_party/blink/renderer/core/inspector/inspector_network_agent.cc;l=134;drc=4128411589187a396829a827f59a655bed876aa7
+    });
+
     if (options.persistent) {
       const context = new BidiBrowserContext(browser, undefined, options.persistent);
       browser._defaultContext = context;
@@ -202,6 +207,12 @@ export class BidiBrowserContext extends BrowserContext {
     if (this._options.locale) {
       promises.push(this._browser._browserSession.send('emulation.setLocaleOverride', {
         locale: this._options.locale,
+        userContexts: [this._userContextId()],
+      }));
+    }
+    if (this._options.timezoneId) {
+      promises.push(this._browser._browserSession.send('emulation.setTimezoneOverride', {
+        timezone: this._options.timezoneId,
         userContexts: [this._userContextId()],
       }));
     }
@@ -343,14 +354,20 @@ export class BidiBrowserContext extends BrowserContext {
   override async doUpdateDefaultViewport() {
     if (!this._options.viewport)
       return;
-    await this._browser._browserSession.send('browsingContext.setViewport', {
-      viewport: {
-        width: this._options.viewport.width,
-        height: this._options.viewport.height
-      },
-      devicePixelRatio: this._options.deviceScaleFactor || 1,
-      userContexts: [this._userContextId()],
-    });
+    await Promise.all([
+      this._browser._browserSession.send('browsingContext.setViewport', {
+        viewport: {
+          width: this._options.viewport.width,
+          height: this._options.viewport.height
+        },
+        devicePixelRatio: this._options.deviceScaleFactor || 1,
+        userContexts: [this._userContextId()],
+      }),
+      this._browser._browserSession.send('emulation.setScreenOrientationOverride', {
+        screenOrientation: getScreenOrientation(!!this._options.isMobile, this._options.viewport),
+        userContexts: [this._userContextId()],
+      })
+    ]);
   }
 
   override async doUpdateDefaultEmulatedMedia() {
@@ -466,6 +483,19 @@ function getProxyConfiguration(proxySettings?: types.ProxySettings): bidi.Sessio
   // TODO: support authentication.
 
   return proxy;
+}
+
+export function getScreenOrientation(isMobile: boolean, viewportSize: types.Size) {
+  const screenOrientation: bidi.Emulation.ScreenOrientation = {
+    type: 'landscape-primary',
+    natural: bidi.Emulation.ScreenOrientationNatural.Landscape
+  };
+  if (isMobile) {
+    screenOrientation.natural = bidi.Emulation.ScreenOrientationNatural.Portrait;
+    if (viewportSize.width <= viewportSize.height)
+      screenOrientation.type = 'portrait-primary';
+  }
+  return screenOrientation;
 }
 
 export namespace Network {

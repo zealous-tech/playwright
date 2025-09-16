@@ -19,7 +19,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { registry } from 'playwright-core/lib/server';
-import { ManualPromise, gracefullyProcessExitDoNotHang } from 'playwright-core/lib/utils';
+import { ManualPromise, gracefullyProcessExitDoNotHang, setPlaywrightTestProcessEnv } from 'playwright-core/lib/utils';
 
 import { loadConfig } from '../common/configLoader';
 import { Watcher } from '../fsWatcher';
@@ -71,6 +71,8 @@ export type RunTestsParams = {
   projects?: string[];
   reuseContext?: boolean;
   connectWsEndpoint?: string;
+  pauseOnError?: boolean;
+  pauseAtEnd?: boolean;
 };
 
 type FullResultStatus = reporterTypes.FullResult['status'];
@@ -107,6 +109,7 @@ export class TestRunner extends EventEmitter<TestRunnerEventMap> {
     watchTestDirs?: boolean;
     populateDependenciesOnList?: boolean;
   }) {
+    setPlaywrightTestProcessEnv();
     this._watchTestDirs = !!params.watchTestDirs;
     this._populateDependenciesOnList = !!params.populateDependenciesOnList;
   }
@@ -335,7 +338,7 @@ export class TestRunner extends EventEmitter<TestRunnerEventMap> {
       createLoadTask('out-of-process', { filterOnly: true, failOnLoadErrors: false, doNotRunDepsOutsideProjectFilter: true }),
       ...createRunTestsTasks(config),
     ];
-    const testRun = new TestRun(config, reporter);
+    const testRun = new TestRun(config, reporter, { pauseOnError: params.pauseOnError, pauseAtEnd: params.pauseAtEnd });
     const run = runTasks(testRun, tasks, 0, stop).then(async status => {
       this._testRun = undefined;
       return status;
@@ -431,6 +434,8 @@ async function resolveCtDirs(config: FullConfigInternal) {
 }
 
 export async function runAllTestsWithConfig(config: FullConfigInternal): Promise<FullResultStatus> {
+  setPlaywrightTestProcessEnv();
+
   const listOnly = config.cliListOnly;
 
   addGitCommitInfoPlugin(config);

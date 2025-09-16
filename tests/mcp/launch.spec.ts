@@ -18,7 +18,7 @@ import fs from 'fs';
 
 import { test, expect, formatOutput } from './fixtures';
 
-test('test reopen browser', async ({ startClient, server, mcpMode }) => {
+test('test reopen browser', async ({ startClient, server }) => {
   const { client, stderr } = await startClient();
   await client.callTool({
     name: 'browser_navigate',
@@ -165,5 +165,48 @@ test('isolated context with storage state', async ({ startClient, server }, test
     arguments: { url: server.PREFIX },
   })).toHaveResponse({
     pageState: expect.stringContaining(`Storage: session-value`),
+  });
+});
+
+test('persistent context already running', async ({ startClient, server, mcpBrowser }, testInfo) => {
+  const userDataDir = testInfo.outputPath('user-data-dir');
+  const { client } = await startClient({
+    args: [`--user-data-dir=${userDataDir}`],
+  });
+  await client.callTool({
+    name: 'browser_navigate',
+    arguments: { url: server.HELLO_WORLD },
+  });
+
+  const { client: client2, stderr } = await startClient({
+    args: [`--user-data-dir=${userDataDir}`],
+  });
+  const navigationPromise = client2.callTool({
+    name: 'browser_navigate',
+    arguments: { url: server.HELLO_WORLD },
+  });
+
+  const wait = await Promise.race([
+    navigationPromise.then(() => 'done'),
+    new Promise(resolve => setTimeout(resolve, 1_000)).then(() => 'timeout'),
+  ]);
+  expect(wait).toBe('timeout');
+
+  // Check that the second client is trying to launch the browser.
+  await expect.poll(() => formatOutput(stderr()), { timeout: 0 }).toEqual([
+    'create context',
+    'create browser context (persistent)',
+    'lock user data dir'
+  ]);
+
+  // Close first client's browser.
+  await client.callTool({
+    name: 'browser_close',
+    arguments: { url: server.HELLO_WORLD },
+  });
+
+  const result = await navigationPromise;
+  expect(result).toHaveResponse({
+    pageState: expect.stringContaining(`- generic [active] [ref=e1]: Hello, world!`),
   });
 });
