@@ -17,8 +17,11 @@ jobs:
           registry-url: https://npm.pkg.github.com/
           scope: '@zealous-tech'
       - name: Install playwright package dependencies
-        working-directory: ./packages/playwright
+        working-directory: ./
         run: npm i
+      - name: Build all packages
+        working-directory: ./
+        run: npm run build
       - name: Publish playwright package
         working-directory: ./packages/playwright
         run: npm publish
