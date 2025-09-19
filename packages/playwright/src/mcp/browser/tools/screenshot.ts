@@ -77,12 +77,11 @@ const screenshot = defineTabTool({
 
     // https://github.com/microsoft/playwright-mcp/issues/817
     // Never return large images to LLM, saving them to the file system is enough.
-    if (!params.fullPage) {
-      response.addImage({
-        contentType: fileType === 'png' ? 'image/png' : 'image/jpeg',
-        data: buffer
-      });
-    }
+    // @ZEALOUS UPDATE - removed if statement that prevents adding base64 image to response
+    response.addImage({
+      contentType: fileType === 'png' ? 'image/png' : 'image/jpeg',
+      data: buffer
+    });
   }
 });
 
