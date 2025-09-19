@@ -1,6 +1,6 @@
 {
   "name": "@playwright/experimental-ct-react",
-  "version": "1.56.0-0",
+  "version": "1.56.0-1",
   "description": "Playwright Component Testing for React",
   "repository": {
     "type": "git",
