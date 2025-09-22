@@ -21,7 +21,7 @@ import { ManualPromise } from 'playwright-core/lib/utils';
 import { callOnPageNoTrace, waitForCompletion } from './tools/utils';
 import { logUnhandledError } from '../log';
 import { ModalState } from './tools/tool';
-
+import { parseArguments, parseMethodChain, parseMethodCall, applyLocatorMethod } from './tools/helperFunctions';
 import type { Context } from './context';
 
 type PageEx = playwright.Page & {
@@ -248,8 +248,158 @@ export class Tab extends EventEmitter<TabEventsInterface> {
     await this._raceAgainstModalStates(() => waitForCompletion(this, callback));
   }
 
-  async refLocator(params: { element: string, ref: string }): Promise<playwright.Locator> {
-    return (await this.refLocators([params]))[0];
+  async refLocator(params: {
+    element: string,
+    ref: string,
+  }): Promise<playwright.Locator> {
+    // Check if ref contains code information
+    if (params.ref && params.ref.startsWith('###code')) {
+      const codeMatch = params.ref.match(/###code(.+)/);
+      if (codeMatch) {
+        const code = codeMatch[1].trim();
+        // Check if it's a Playwright command (starts with getBy or locator)
+        if (code.startsWith('getBy') || code.startsWith('locator')) {
+          try {
+            // Parse Playwright command safely
+            const locator = this.parsePlaywrightCommand(code);
+            return locator.describe(params.element);
+          } catch (error) {
+            throw new Error(`Failed to execute Playwright command "${code}": ${error instanceof Error ? error.message : String(error)}`);
+          }
+        } else {
+          throw new Error(`unknown Playwright command: ${code}`);
+        }
+      }
+    }
+    // If ref provided, get locator using ref
+    return  (await this.refLocators([{ element: params.element, ref: params.ref }]))[0];
+  }
+
+  private parsePlaywrightCommand(code: string): playwright.Locator {
+    // Parse getBy commands safely without eval (including method chains)
+    const getByMatch = code.match(/^getBy(\w+)\((.+)\)/);
+    if (getByMatch) {
+      const [, method, argsString] = getByMatch;
+      const methodName = `getBy${method}`;
+
+      // Check if method exists on page
+      if (typeof (this.page as any)[methodName] !== 'function') {
+        throw new Error(`Unknown Playwright method: ${methodName}`);
+      }
+
+      try {
+        // Check if this is a method chain (contains dots after the first getBy call)
+        const methodChainMatch = code.match(/^getBy(\w+)\((.+?)\)(.+)$/);
+        if (methodChainMatch) {
+          const [, methodName, selector, methodChain] = methodChainMatch;
+          const fullMethodName = `getBy${methodName}`;
+          
+          // Debug logging
+          console.log(`Parsing getBy method chain: ${code}`);
+          console.log(`Method: ${fullMethodName}`);
+          console.log(`Selector: "${selector}"`);
+          console.log(`Method chain: "${methodChain}"`);
+
+          // Parse the selector argument
+          const parsedArgs = parseArguments(selector);
+          
+          // Start with the base getBy method
+          const methodFunc = (this.page as any)[fullMethodName] as Function;
+          let locator = methodFunc.apply(this.page, parsedArgs);
+          
+          // Parse and apply method chain
+          const methods = parseMethodChain(methodChain);
+          for (const method of methods) {
+            locator = applyLocatorMethod(locator, method);
+          }
+          
+          return locator;
+        } else {
+          // Simple getBy without method chain
+          const parsedArgs = parseArguments(argsString);
+          
+          // Debug logging
+          console.log(`Parsing simple getBy command: ${code}`);
+          console.log(`Args string: "${argsString}"`);
+          console.log(`Parsed args:`, parsedArgs);
+
+          // Call the method with parsed arguments
+          const methodFunc = (this.page as any)[methodName] as Function;
+          return methodFunc.apply(this.page, parsedArgs);
+        }
+      } catch (parseError) {
+        console.error(`Parse error for getBy command: ${code}`);
+        console.error(`Parse error details:`, parseError);
+        throw new Error(`Failed to parse getBy command: ${parseError instanceof Error ? parseError.message : String(parseError)}`);
+      }
+    }
+
+    // Parse locator commands (including method chains)
+    const locatorMatch = code.match(/^locator\((.+)\)/);
+    if (locatorMatch) {
+      const [, argsString] = locatorMatch;
+      
+      try {
+        // Check if this is a method chain (contains dots after the first locator call)
+        const methodChainMatch = code.match(/^locator\((.+?)\)(.+)$/);
+        if (methodChainMatch) {
+          const [, selector, methodChain] = methodChainMatch;
+          
+          // Debug logging
+          console.log(`Parsing locator method chain: ${code}`);
+          console.log(`Selector: "${selector}"`);
+          console.log(`Method chain: "${methodChain}"`);
+
+          // Parse the selector argument
+          const parsedArgs = parseArguments(selector);
+          if (parsedArgs.length === 0) {
+            throw new Error('locator requires at least one argument (selector)');
+          }
+
+          const selectorValue = parsedArgs[0];
+          if (typeof selectorValue !== 'string') {
+            throw new Error('locator first argument must be a string selector');
+          }
+
+          // Start with the base locator
+          let locator = this.page.locator(selectorValue);
+          
+          // Parse and apply method chain
+          const methods = parseMethodChain(methodChain);
+          for (const method of methods) {
+            locator = applyLocatorMethod(locator, method);
+          }
+          
+          return locator;
+        } else {
+          // Simple locator without method chain
+          const parsedArgs = parseArguments(argsString);
+          
+          // Debug logging
+          console.log(`Parsing simple locator command: ${code}`);
+          console.log(`Args string: "${argsString}"`);
+          console.log(`Parsed args:`, parsedArgs);
+
+          // locator takes a selector string as first argument
+          if (parsedArgs.length === 0) {
+            throw new Error('locator requires at least one argument (selector)');
+          }
+
+          const selector = parsedArgs[0];
+          if (typeof selector !== 'string') {
+            throw new Error('locator first argument must be a string selector');
+          }
+
+          return this.page.locator(selector);
+        }
+      } catch (parseError) {
+        console.error(`Parse error for locator command: ${code}`);
+        console.error(`Parse error details:`, parseError);
+        throw new Error(`Failed to parse locator command: ${parseError instanceof Error ? parseError.message : String(parseError)}`);
+      }
+    }
+
+    throw new Error(`Invalid Playwright command format: ${code}. Expected getBy*() or locator() format.`);
   }
 
   async refLocators(params: { element: string, ref: string }[]): Promise<playwright.Locator[]> {
