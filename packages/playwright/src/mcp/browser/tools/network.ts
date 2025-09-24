@@ -43,11 +43,11 @@ const requests = defineTabTool({
         request: z.object({
           headers: z.boolean().default(true).describe('Include request headers in output'),
           body: z.boolean().default(true).describe('Include request body in output')
-        }).default({headers: true, body: true}),
+        }).default({headers: false, body: false}),
         response: z.object({
           headers: z.boolean().default(true).describe('Include response headers in output'),
           body: z.boolean().default(true).describe('Include response body in output')
-        }).default({headers: true, body: true})
+        }).default({headers: false, body: false})
       }).optional().describe('Controls what information to include in the output. If not provided, includes nothing')
     }),
     type: 'readOnly',
