@@ -152,60 +152,186 @@ async function getAllComputedStylesDirect(
 
 async function getAllDomPropsDirect(tab: any, ref: string, element: string) {
   const locator = await tab.refLocator({ ref, element });
-  const props = await locator.evaluate(
-      (el: Element) => {
-        if (!el)
-          return {};
+  const props = await locator.evaluate((el: Element) => {
+    if (!el)
+      return {};
 
-        const out: Record<string, any> = {};
+    const out: Record<string, any> = {};
 
-        // Collect all "own" properties of the element
-        for (const key of Object.keys(el)) {
-          try {
-            const val = (el as any)[key];
-            // filter only primitives for readability
-            if (['string', 'number', 'boolean'].includes(typeof val) || val === null)
-              out[key] = val;
+    // 1. Own element properties (primitives) - EXCLUDING textContent, value
+    for (const key of Object.keys(el)) {
+      try {
+        const val = (el as any)[key];
+        // Exclude properties that are collected by other tools
+        if (['string', 'number', 'boolean'].includes(typeof val) || val === null) {
+          // Exclude intersections with validate_element_text
+          if (!['textContent', 'value'].includes(key))
+            out[key] = val;
 
-          } catch (_) {
-            // skip getters with errors
-          }
         }
-        console.log('1111 Props:', out);
-        console.dir(out, { depth: null });
-
-        // + useful attributes
-        if (el.getAttributeNames) {
-          el.getAttributeNames().forEach((attr: string) => {
-            out[`attr:${attr}`] = el.getAttribute(attr);
-          });
-        }
-
-        // Handle special cases for common attributes
-        // For disabled attribute, check both the property and the attribute
-        if (el.hasAttribute('disabled'))
-          out['disabled'] = true;
-        else if ((el as any).disabled !== undefined)
-          out['disabled'] = (el as any).disabled;
-
-
-        // For checked attribute, check both the property and the attribute
-        if (el.hasAttribute('checked'))
-          out['checked'] = true;
-        else if ((el as any).checked !== undefined)
-          out['checked'] = (el as any).checked;
-
-
-        // For value attribute, prioritize the property over attribute
-        if ((el as any).value !== undefined)
-          out['value'] = (el as any).value;
-        else if (el.hasAttribute('value'))
-          out['value'] = el.getAttribute('value');
-
-
-        return out;
+      } catch (_) {
+        // skip getters with errors
       }
-  );
+    }
+
+    // 2. HTML attributes - EXCLUDING text attributes
+    if (el.getAttributeNames) {
+      el.getAttributeNames().forEach((attr: string) => {
+        // Exclude attributes that are collected by validate_element_text
+        const textAttributes = ['placeholder', 'defaultValue', 'aria-label', 'title', 'alt'];
+        if (!textAttributes.includes(attr)) {
+          // Add attributes directly without attr: prefix
+          out[attr] = el.getAttribute(attr);
+        }
+      });
+    }
+
+    // 3. Special cases
+    if (el.hasAttribute('disabled'))
+      out['disabled'] = true;
+    else if ((el as any).disabled !== undefined)
+      out['disabled'] = (el as any).disabled;
+
+    if (el.hasAttribute('checked'))
+      out['checked'] = true;
+    else if ((el as any).checked !== undefined)
+      out['checked'] = (el as any).checked;
+
+
+    // 4. Size and positioning
+    const rect = el.getBoundingClientRect();
+    out['boundingRect'] = {
+      top: rect.top,
+      right: rect.right,
+      bottom: rect.bottom,
+      left: rect.left,
+      width: rect.width,
+      height: rect.height,
+      x: rect.x,
+      y: rect.y
+    };
+
+    out['offsetTop'] = (el as any).offsetTop;
+    out['offsetLeft'] = (el as any).offsetLeft;
+    out['offsetWidth'] = (el as any).offsetWidth;
+    out['offsetHeight'] = (el as any).offsetHeight;
+    out['clientTop'] = (el as any).clientTop;
+    out['clientLeft'] = (el as any).clientLeft;
+    out['clientWidth'] = (el as any).clientWidth;
+    out['clientHeight'] = (el as any).clientHeight;
+    out['scrollTop'] = (el as any).scrollTop;
+    out['scrollLeft'] = (el as any).scrollLeft;
+    out['scrollWidth'] = (el as any).scrollWidth;
+    out['scrollHeight'] = (el as any).scrollHeight;
+
+    // 5. Visibility state (EXCLUDING CSS styles - this is validate_computed_styles)
+    out['isVisible'] = (el as any).offsetWidth > 0 && (el as any).offsetHeight > 0;
+
+    // 6. Form and element state (EXCLUDING value)
+    if (['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName)) {
+      out['form'] = (el as any).form?.id || (el as any).form?.name || null;
+      out['name'] = (el as any).name;
+      out['type'] = (el as any).type;
+      out['required'] = (el as any).required;
+      out['readOnly'] = (el as any).readOnly;
+      out['validity'] = {
+        valid: (el as any).validity?.valid,
+        valueMissing: (el as any).validity?.valueMissing,
+        typeMismatch: (el as any).validity?.typeMismatch,
+        patternMismatch: (el as any).validity?.patternMismatch,
+        tooLong: (el as any).validity?.tooLong,
+        tooShort: (el as any).validity?.tooShort,
+        rangeUnderflow: (el as any).validity?.rangeUnderflow,
+        rangeOverflow: (el as any).validity?.rangeOverflow,
+        stepMismatch: (el as any).validity?.stepMismatch,
+        badInput: (el as any).validity?.badInput,
+        customError: (el as any).validity?.customError
+      };
+    }
+
+    // 7. Accessibility properties (EXCLUDING aria-label, title - this is validate_element_text)
+    out['ariaDescribedBy'] = el.getAttribute('aria-describedby');
+    out['ariaLabelledBy'] = el.getAttribute('aria-labelledby');
+    out['ariaExpanded'] = el.getAttribute('aria-expanded');
+    out['ariaHidden'] = el.getAttribute('aria-hidden');
+    out['ariaSelected'] = el.getAttribute('aria-selected');
+    out['ariaChecked'] = el.getAttribute('aria-checked');
+    out['ariaDisabled'] = el.getAttribute('aria-disabled');
+    out['ariaRequired'] = el.getAttribute('aria-required');
+    out['ariaInvalid'] = el.getAttribute('aria-invalid');
+    out['role'] = el.getAttribute('role');
+    out['tabIndex'] = (el as any).tabIndex;
+
+    // 8. Events and interaction
+    out['contentEditable'] = (el as any).contentEditable;
+    out['draggable'] = (el as any).draggable;
+    out['spellcheck'] = (el as any).spellcheck;
+    out['isContentEditable'] = (el as any).isContentEditable;
+    out['accessKey'] = (el as any).accessKey;
+
+    // 9. Element metadata
+    out['tagName'] = el.tagName;
+    out['nodeName'] = el.nodeName;
+    out['nodeType'] = el.nodeType;
+    out['namespaceURI'] = el.namespaceURI;
+    out['localName'] = el.localName;
+    out['prefix'] = el.prefix;
+    out['baseURI'] = el.baseURI;
+    out['ownerDocument'] = el.ownerDocument?.URL || null;
+
+    // 10. Parent-child relationships
+    out['parentElement'] = el.parentElement?.tagName || null;
+    out['parentElementId'] = el.parentElement?.id || null;
+    out['parentElementClass'] = el.parentElement?.className || null;
+    out['childElementCount'] = el.childElementCount;
+    out['firstElementChild'] = el.firstElementChild?.tagName || null;
+    out['lastElementChild'] = el.lastElementChild?.tagName || null;
+    out['nextElementSibling'] = el.nextElementSibling?.tagName || null;
+    out['previousElementSibling'] = el.previousElementSibling?.tagName || null;
+
+    // 11. Special properties for different element types
+    if (el.tagName === 'IMG') {
+      out['naturalWidth'] = (el as any).naturalWidth;
+      out['naturalHeight'] = (el as any).naturalHeight;
+      out['complete'] = (el as any).complete;
+      // Exclude alt - this is validate_element_text
+    }
+
+    if (el.tagName === 'A') {
+      out['href'] = (el as any).href;
+      out['target'] = (el as any).target;
+      out['rel'] = (el as any).rel;
+      out['download'] = (el as any).download;
+    }
+
+    if (el.tagName === 'VIDEO' || el.tagName === 'AUDIO') {
+      out['duration'] = (el as any).duration;
+      out['currentTime'] = (el as any).currentTime;
+      out['paused'] = (el as any).paused;
+      out['ended'] = (el as any).ended;
+      out['muted'] = (el as any).muted;
+      out['volume'] = (el as any).volume;
+      out['playbackRate'] = (el as any).playbackRate;
+    }
+
+    // 12. CSS classes (EXCLUDING computed styles - this is validate_computed_styles)
+    out['className'] = el.className;
+    out['classList'] = Array.from(el.classList);
+    // Exclude style - this is validate_computed_styles
+
+    // 13. Data attributes
+    const dataAttrs: Record<string, string> = {};
+    el.getAttributeNames().forEach(attr => {
+      if (attr.startsWith('data-'))
+        dataAttrs[attr] = el.getAttribute(attr) || '';
+
+    });
+    if (Object.keys(dataAttrs).length > 0)
+      out['dataAttributes'] = dataAttrs;
+
+
+    return out;
+  });
 
   return props ?? {};
 }
@@ -317,13 +443,17 @@ function compareValues(actual: any, expected: any, operator: string) {
       return { passed: Number(actual) > Number(expected), actual };
     case 'less_than':
       return { passed: Number(actual) < Number(expected), actual };
+    case 'hasValue':
+      // Check if value exists (not null, undefined, or empty string)
+      const hasValue = actual !== null && actual !== undefined && actual !== '';
+      return { passed: hasValue === expected, actual: hasValue };
     default:
       return { passed: false, actual: `Unknown operator: ${operator}` };
   }
 }
 
 // Recursive function to search for text in all frames (including nested iframes)
-async function searchInAllFrames(
+async function searchTextInAllFrames(
   page: any,
   text: string,
   matchType: 'exact' | 'contains' | 'not-contains' = 'contains',
@@ -357,7 +487,7 @@ async function searchInAllFrames(
     for (let i = 0; i < iframeCount; i++) {
       try {
         const iframePage = page.frameLocator(`iframe >> nth=${i}`);
-        const nestedResults = await searchInAllFrames(iframePage, text, matchType, `${framePath} > iframe-${i + 1}`);
+        const nestedResults = await searchTextInAllFrames(iframePage, text, matchType, `${framePath} > iframe-${i + 1}`);
         results.push(...nestedResults);
       } catch (error) {
         console.log(`searchInAllFrames: Error searching in ${framePath} > iframe-${i + 1}:`, error);
@@ -819,6 +949,66 @@ function applyLocatorMethod(locator: playwright.Locator, methodInfo: { method: s
   }
 }
 
+interface CurlResponse {
+  stdout: string;
+  stderr: string;
+  statusCode?: number;
+  responseTime?: number;
+  contentLength?: number;
+  contentType?: string;
+  server?: string;
+  error?: string;
+}
+
+interface ParsedCurlResponse {
+  data: string | object;
+  statusCode?: number;
+  responseTime?: number;
+  contentLength?: number;
+  contentType?: string;
+  server?: string;
+  error?: string;
+  rawStderr?: string;
+}
+
+function parseCurlStderr(stderr: string): Partial<CurlResponse> {
+  const result: Partial<CurlResponse> = {};
+
+  const statusMatch = stderr.match(/< HTTP\/\d\.\d (\d+)/);
+  if (statusMatch)
+    result.statusCode = parseInt(statusMatch[1], 10);
+
+
+  const contentTypeMatch = stderr.match(/< Content-Type: ([^\r\n]+)/);
+  if (contentTypeMatch)
+    result.contentType = contentTypeMatch[1].trim();
+
+
+  const contentLengthMatch = stderr.match(/< Content-Length: (\d+)/);
+  if (contentLengthMatch)
+    result.contentLength = parseInt(contentLengthMatch[1], 10);
+
+
+  const serverMatch = stderr.match(/< Server: ([^\r\n]+)/);
+  if (serverMatch)
+    result.server = serverMatch[1].trim();
+
+
+  const timeMatch = stderr.match(/(\d+\.\d+) secs/);
+  if (timeMatch)
+    result.responseTime = parseFloat(timeMatch[1]);
+
+
+  if (stderr.includes('curl:') || stderr.includes('error:')) {
+    const errorMatch = stderr.match(/curl: \(\d+\) ([^\r\n]+)/);
+    if (errorMatch)
+      result.error = errorMatch[1].trim();
+
+  }
+
+  return result;
+}
+
 export async function runCommand(command: string): Promise<{ stdout: string; stderr: string }> {
   const CURL_PATTERN = /curl```([\s\S]*?)```/i;
   const execFileAsync = promisify(execFile);
@@ -989,5 +1179,173 @@ export async function runCommand(command: string): Promise<{ stdout: string; std
   return { stdout, stderr };
 }
 
+export async function runCommandClean(command: string): Promise<ParsedCurlResponse> {
+  const { stdout, stderr } = await runCommand(command);
+  const parsed = parseCurlStderr(stderr);
 
-export { pickActualValue, parseRGBColor, isColorInRange, getAllComputedStylesDirect, getAllDomPropsDirect, hasAlertDialog, getAlertDialogText, performRegexCheck, performRegexExtract, performRegexMatch, compareValues, searchInAllFrames, searchElementsByRoleInAllFrames, getElementTextWithFallbacks, getFullXPath, parseArguments, parseSingleArgument, convertToValidJson, parseMethodChain, parseMethodCall, applyLocatorMethod };
+  let data = stdout;
+  try {
+    const jsonData = JSON.parse(stdout);
+    data = jsonData;
+  } catch (error) {
+    console.log('Failed to parse JSON from curl stdout:', error instanceof Error ? error.message : String(error));
+
+  }
+
+  return {
+    data,
+    statusCode: parsed.statusCode,
+    responseTime: parsed.responseTime,
+    contentLength: parsed.contentLength,
+    contentType: parsed.contentType,
+    server: parsed.server,
+    error: parsed.error,
+    // rawStderr: stderr
+  };
+}
+
+
+/**
+ * Extract value from object using JSONPath-like syntax
+ * Supports:
+ * - Simple properties: "data.token", "statusCode"
+ * - Array indices: "data.books[0].title"
+ * - Array filters: "data.books[?(@.isbn=='9781449325862')].title"
+ * - Comparison operators: ==, !=, ===, !==, >, <, >=, <=
+ * - Boolean values: "data.users[?(@.active==true)]"
+ */
+function getValueByJsonPath(obj: any, path: string): any {
+  if (!path || path === '') return obj;
+  if (path === null || path === undefined) return undefined;
+
+  // More sophisticated parsing to handle brackets properly
+  const parts: string[] = [];
+  let current = '';
+  let bracketDepth = 0;
+
+  for (let i = 0; i < path.length; i++) {
+    const char = path[i];
+
+    if (char === '[') {
+      if (bracketDepth === 0 && current) {
+        parts.push(current);
+        current = '';
+      }
+      bracketDepth++;
+      current += char;
+    } else if (char === ']') {
+      bracketDepth--;
+      current += char;
+      if (bracketDepth === 0) {
+        parts.push(current);
+        current = '';
+      }
+    } else if (char === '.' && bracketDepth === 0) {
+      if (current) {
+        parts.push(current);
+        current = '';
+      }
+    } else {
+      current += char;
+    }
+  }
+
+  if (current)
+    parts.push(current);
+
+
+  let currentObj = obj;
+
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i];
+
+    if (currentObj === null || currentObj === undefined)
+      return undefined;
+
+
+    // Handle array notation with filters or indices
+    if (part.startsWith('[') && part.endsWith(']')) {
+      const content = part.slice(1, -1);
+
+      // Handle filter expressions like [?(@.isbn=='9781449325862')]
+      if (content.startsWith('?(@')) {
+        const filterResult = applyArrayFilter(currentObj, content);
+        if (filterResult === undefined)
+          return undefined;
+
+        currentObj = filterResult;
+      }
+      // Handle array indices like [0], [1]
+      else {
+        const index = parseInt(content, 10);
+        if (isNaN(index) || !Array.isArray(currentObj))
+          return undefined;
+
+        currentObj = currentObj[index];
+      }
+    }
+    // Handle object properties
+    else if (typeof currentObj === 'object' && !Array.isArray(currentObj)) {
+      currentObj = currentObj[part];
+    } else {
+      return undefined;
+    }
+  }
+
+  return currentObj;
+}
+
+function applyArrayFilter(arr: any[], filter: string): any {
+  if (!Array.isArray(arr))
+    return undefined;
+
+
+  // Parse filter like "?(@.isbn=='9781449325862')"
+  const match = filter.match(/\?\(@\.([^=!<>]+)([=!<>]+)(.+)\)/);
+  if (!match)
+    return undefined;
+
+
+  const [, field, operator, value] = match;
+  let cleanValue = value.replace(/^['"]|['"]$/g, ''); // Remove quotes
+  
+  // Handle boolean values
+  if (cleanValue === 'true') cleanValue = true;
+  else if (cleanValue === 'false') cleanValue = false;
+  else if (cleanValue === 'null') cleanValue = null;
+
+  // Find matching items
+  const results = arr.filter(item => {
+    if (typeof item !== 'object' || item === null)
+      return false;
+
+
+    const itemValue = item[field];
+
+    switch (operator) {
+      case '==':
+        return itemValue == cleanValue;
+      case '!=':
+        return itemValue != cleanValue;
+      case '===':
+        return itemValue === cleanValue;
+      case '!==':
+        return itemValue !== cleanValue;
+      case '>':
+        return Number(itemValue) > Number(cleanValue);
+      case '<':
+        return Number(itemValue) < Number(cleanValue);
+      case '>=':
+        return Number(itemValue) >= Number(cleanValue);
+      case '<=':
+        return Number(itemValue) <= Number(cleanValue);
+      default:
+        return false;
+    }
+  });
+
+  // Return first match, or all matches if multiple
+  return results.length === 1 ? results[0] : results;
+}
+
+export { pickActualValue, parseRGBColor, isColorInRange, getAllComputedStylesDirect, getAllDomPropsDirect, hasAlertDialog, getAlertDialogText, performRegexCheck, performRegexExtract, performRegexMatch, compareValues, searchTextInAllFrames, searchElementsByRoleInAllFrames, getElementTextWithFallbacks, getFullXPath, parseArguments, parseSingleArgument, convertToValidJson, parseMethodChain, parseMethodCall, applyLocatorMethod, getValueByJsonPath };
