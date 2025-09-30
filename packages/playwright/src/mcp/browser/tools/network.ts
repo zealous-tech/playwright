@@ -30,77 +30,179 @@ interface LogType {
   };
 }
 
+type Input = {
+  method?: string;   // e.g. "GET" (case-insensitive, exact match on token)
+  url?: string;      // full or partial URL substring, case-insensitive
+  endpoint?: string; // pathname substring, e.g. "/api/users", case-insensitive
+  keywords?: string[];
+  logType?: LogType;
+};
+
 const requests = defineTabTool({
   capability: 'core',
 
   schema: {
     name: 'browser_network_requests',
     title: 'Find specific network request',
-    description: 'Searches through network request logs and returns exactly ONE request that contains ALL specified keywords. Searches across method, URL, headers, and body content (case-insensitive). Use logType to control what information is included in the output - useful for extracting specific data like headers, body content, etc.',
+    description:
+      'Search network request logs and return exactly ONE entry that satisfies structured filters (method/url/endpoint) AND contains ALL specified keywords. Keywords are searched across method, URL, headers, and bodies (case-insensitive). Use logType to control which fields are included in the output.',
     inputSchema: z.object({
-      keywords: z.array(z.string()).min(1).describe('Array of keywords that must ALL be present in the request/response data. Returns the first request containing all keywords (e.g., ["GET", "api/users", "authorization"]).'),
-      logType: z.object({
-        request: z.object({
-          headers: z.boolean().default(true).describe('Include request headers in output'),
-          body: z.boolean().default(true).describe('Include request body in output')
-        }).default({headers: false, body: false}),
-        response: z.object({
-          headers: z.boolean().default(true).describe('Include response headers in output'),
-          body: z.boolean().default(true).describe('Include response body in output')
-        }).default({headers: false, body: false})
-      }).optional().describe('Controls what information to include in the output. If not provided, includes nothing')
+      method: z
+        .string()
+        .optional()
+        .describe('HTTP method to match (e.g., "GET"). Case-insensitive exact token match.'),
+      url: z
+        .string()
+        .optional()
+        .describe('Full or partial URL to match (substring, case-insensitive).'),
+      endpoint: z
+        .string()
+        .optional()
+        .describe('Pathname to match (substring of URL pathname, e.g., "/api/users", case-insensitive).'),
+      keywords: z
+        .array(z.string())
+        .default([])
+        .describe('Array of keywords that must ALL be present somewhere in the request/response data (case-insensitive).'),
+      logType: z
+        .object({
+          request: z
+            .object({
+              headers: z.boolean().default(true).describe('Include request headers in output'),
+              body: z.boolean().default(true).describe('Include request body in output'),
+            })
+            .default({ headers: false, body: false }),
+          response: z
+            .object({
+              headers: z.boolean().default(true).describe('Include response headers in output'),
+              body: z.boolean().default(true).describe('Include response body in output'),
+            })
+            .default({ headers: false, body: false }),
+        })
+        .optional()
+        .describe('Controls what information to include in the output. If not provided, includes nothing.'),
     }),
     type: 'readOnly',
   },
 
-  handle: async (tab, params, response) => {
-    const requests = tab.requests();
-    const keywordsLower = params.keywords.map(keyword => keyword.toLowerCase());
-    const logType = params.logType || {
-      request: {headers: false, body: false},
-      response: {headers: false, body: false}
-    };
+  handle: async (tab, params: Input, response) => {
+    const allRequests = tab.requests();
 
-    for (const [req, res] of requests.entries()) {
+    const {
+      method: methodFilter,
+      url: urlFilter,
+      endpoint: endpointFilter,
+      keywords = [],
+    } = params;
+
+    const logType: LogType =
+      params.logType || {
+        request: { headers: false, body: false },
+        response: { headers: false, body: false },
+      };
+
+    const methodNorm = methodFilter?.trim().toLowerCase();
+    const urlNorm = urlFilter?.trim().toLowerCase();
+    const endpointNorm = endpointFilter?.trim().toLowerCase();
+    const keywordsLower = keywords.map((k) => k.toLowerCase());
+
+    for (const [req, res] of allRequests.entries()) {
+      if (!matchesStructuredFilters(req, methodNorm, urlNorm, endpointNorm)) {
+        continue;
+      }
+      if (keywordsLower.length === 0) {
+        const out = await safeRender(req, res, logType);
+        response.addResult(out);
+        return;
+      }
+
       try {
-        const requestDetails = await renderRequestDetailed(req, res, logType);
-        const requestDetailsLower = requestDetails.toLowerCase();
-
-        const hasAllKeywords = keywordsLower.every(keyword =>
-          requestDetailsLower.includes(keyword)
-        );
-
-        if (hasAllKeywords) {
-          response.addResult(requestDetails);
+        const detailed = await renderRequestDetailed(req, res, logType);
+        const hasAll = containsAllKeywords(detailed, keywordsLower);
+        if (hasAll) {
+          response.addResult(detailed);
           return;
         }
-      } catch (error) {
-        const basicDetails = renderRequest(req, res);
-        const basicDetailsLower = basicDetails.toLowerCase();
-
-        const hasAllKeywords = keywordsLower.every(keyword =>
-          basicDetailsLower.includes(keyword)
-        );
-
-        if (hasAllKeywords) {
-          response.addResult(basicDetails);
+      } catch {
+        const basic = renderRequest(req, res);
+        const hasAll = containsAllKeywords(basic, keywordsLower);
+        if (hasAll) {
+          response.addResult(basic);
           return;
         }
       }
     }
-    throw new Error(`No network requests found containing ALL keywords: [${params.keywords.join(', ')}]`);
+
+    const parts: string[] = [];
+    if (methodFilter) parts.push(`method="${methodFilter}"`);
+    if (urlFilter) parts.push(`url~="${urlFilter}"`);
+    if (endpointFilter) parts.push(`endpoint~="${endpointFilter}"`);
+    if (keywords.length > 0) parts.push(`keywords=[${keywords.join(', ')}]`);
+
+    throw new Error(
+      `No network requests found that match filters (${parts.join(', ') || 'none'}) and contain ALL keywords.`
+    );
   },
 });
+
+function matchesStructuredFilters(
+  request: playwright.Request,
+  methodNorm?: string,
+  urlNorm?: string,
+  endpointNorm?: string
+): boolean {
+  if (methodNorm) {
+    const reqMethod = (request.method() || '').trim().toLowerCase();
+    if (reqMethod !== methodNorm) return false;
+  }
+
+  if (urlNorm) {
+    const reqUrl = (request.url() || '').toLowerCase();
+    if (!reqUrl.includes(urlNorm)) return false;
+  }
+
+  if (endpointNorm) {
+    try {
+      const u = new URL(request.url());
+      const pathname = (u.pathname || '').toLowerCase();
+      if (!pathname.includes(endpointNorm)) return false;
+    } catch {
+      const reqUrl = (request.url() || '').toLowerCase();
+      if (!reqUrl.includes(endpointNorm)) return false;
+    }
+  }
+
+  return true;
+}
+
+function containsAllKeywords(haystack: string, keywordsLower: string[]): boolean {
+  const text = haystack.toLowerCase();
+  return keywordsLower.every((kw) => text.includes(kw));
+}
 
 function renderRequest(request: playwright.Request, response: playwright.Response | null) {
   const result: string[] = [];
   result.push(`[${request.method().toUpperCase()}] ${request.url()}`);
-  if (response)
-    result.push(`=> [${response.status()}] ${response.statusText()}`);
+  if (response) result.push(`=> [${response.status()}] ${response.statusText()}`);
   return result.join(' ');
 }
 
-async function renderRequestDetailed(request: playwright.Request, response: playwright.Response | null, logType: LogType) {
+async function safeRender(
+  request: playwright.Request,
+  response: playwright.Response | null,
+  logType: LogType
+): Promise<string> {
+  try {
+    return await renderRequestDetailed(request, response, logType);
+  } catch {
+    return renderRequest(request, response);
+  }
+}
+
+async function renderRequestDetailed(
+  request: playwright.Request,
+  response: playwright.Response | null,
+  logType: LogType
+) {
   const result: string[] = [];
 
   result.push(`=== REQUEST ===`);
@@ -128,8 +230,8 @@ async function renderRequestDetailed(request: playwright.Request, response: play
     }
   }
 
+  result.push(`\n=== RESPONSE ===`);
   if (response) {
-    result.push(`\n=== RESPONSE ===`);
     result.push(`Status: ${response.status()} ${response.statusText()}`);
 
     if (logType.response.headers) {
@@ -163,12 +265,10 @@ async function renderRequestDetailed(request: playwright.Request, response: play
       }
     }
   } else {
-    result.push(`\n=== RESPONSE ===`);
     result.push(`Status: [No response received]`);
   }
+
   return result.join('\n');
 }
 
-export default [
-  requests,
-];
+export default [requests];
