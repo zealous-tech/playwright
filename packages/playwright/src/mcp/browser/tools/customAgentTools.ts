@@ -772,7 +772,7 @@ const validate_dom_properties = defineTabTool({
     name: 'validate_dom_properties',
     title: 'Validate DOM properties of element',
     description:
-      'Validate structural DOM properties and HTML attributes of elements (checked, disabled, className, id, type, tabIndex, etc.). Use for validating element state, CSS classes, form properties, and structural attributes. For text content validation (textContent, input values, placeholders), use validate_text_visible instead. Supports exact equality comparison with isEqual/notEqual operators. HTML attributes are accessible directly by name (e.g., "id", "class", "data-testid", "aria-expanded").',
+      'Validate structural DOM properties and HTML attributes of elements (checked, disabled, className, id, type, tabIndex, etc.). Use for validating element state, CSS classes, form properties, and structural attributes.  Supports exact equality comparison with isEqual/notEqual operators. HTML attributes are accessible directly by name (e.g., "id", "class", "data-testid", "aria-expanded").',
     inputSchema: validateDomPropsSchema,
     type: 'readOnly',
   },
