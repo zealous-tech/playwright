@@ -15,7 +15,7 @@
  */
 import { z } from 'zod';
 import { defineTabTool } from './tool.js';
-import { getAllComputedStylesDirect, pickActualValue, parseRGBColor, isColorInRange, getAllDomPropsDirect, performRegexCheck, searchInAllFrames, searchElementsByRoleInAllFrames, getElementTextWithFallbacks,  runCommand } from './helperFunctions.js';
+import { getAllComputedStylesDirect, pickActualValue, parseRGBColor, isColorInRange, getAllDomPropsDirect, performRegexCheck, searchTextInAllFrames, searchElementsByRoleInAllFrames, getElementTextWithFallbacks, runCommandClean, getValueByJsonPath, compareValues } from './helperFunctions.js';
 import { generateLocator } from './utils.js';
 import type * as playwright from 'playwright';
 
@@ -431,7 +431,7 @@ const validate_computed_styles = defineTabTool({
     name: 'validate_computed_styles',
     title: 'Validate computed styles of element',
     description:
-      "Validate element's computed styles against expected values using isEqual / notEqual / inRange operators. Supports RGB color range validation for color properties.",
+      "Validate element's CSS computed styles against expected values using isEqual / notEqual / inRange operators. Supports RGB color range validation for color properties.",
     inputSchema: validateStylesSchema,
     type: 'readOnly',
   },
@@ -503,7 +503,10 @@ const validate_computed_styles = defineTabTool({
         evidence = `Found element "${element}" with all ${results.length} style properties matching expected values`;
       } else {
         const failedChecks = results.filter(r => r.result === 'fail');
-        const failedStyles = failedChecks.map(c => `${c.style}: expected "${c.expected}", got "${c.actual}"`).join(', ');
+        const failedStyles = failedChecks.map(c => {
+          const expectedValue = typeof c.expected === 'object' ? JSON.stringify(c.expected) : c.expected;
+          return `${c.style}: expected "${expectedValue}", got "${c.actual}"`;
+        }).join(', ');
         evidence = `Found element "${element}" but ${failedChecks.length} style properties failed validation: ${failedStyles}`;
       }
 
@@ -549,7 +552,7 @@ const textValidationSchema = z.object({
 const validate_element_text = defineTabTool({
   capability: 'core',
   schema: {
-    name: 'browser_verify_text_visible',
+    name: 'validate_text_visible',
     title: 'Verify text visible',
     description:
         "Verify that text is visible on the page with exact/contains/not-contains matching. When ref is provided, first checks specific element's text content (including input values, placeholders, etc.). If no text found in element or ref is not provided, searches for visible text across all frames and iframes. It is recommended to always provide ref when possible for more precise validation.",
@@ -589,7 +592,7 @@ const validate_element_text = defineTabTool({
         try {
           // Start recursive search from main page using helper function
           console.log(`validate_element_text: Starting recursive search for text "${expectedText}"`);
-          const allElements = await searchInAllFrames(tab.page, expectedText, matchType);
+          const allElements = await searchTextInAllFrames(tab.page, expectedText, matchType);
           const totalElementCount = allElements.length;
 
           console.log(`validate_element_text: Total found ${totalElementCount} visible elements with text "${expectedText}" (recursive search)`);
@@ -747,9 +750,9 @@ const validate_element_text = defineTabTool({
 
 
 const domPropCheckSchema = z.object({
-  name: z.string(), // any DOM property
+  name: z.string().describe('DOM property name (e.g., "checked", "disabled", "className") or HTML attribute name (e.g., "id", "class", "data-testid", "aria-expanded")'),
   operator: z.enum(['isEqual', 'notEqual']).default('isEqual'),
-  expected: z.any(), // can be string, number, boolean
+  expected: z.any().describe('Expected value for the property or attribute'), // can be string, number, boolean
 });
 const domChecksSchema = z.array(domPropCheckSchema).min(1);
 
@@ -769,7 +772,7 @@ const validate_dom_properties = defineTabTool({
     name: 'validate_dom_properties',
     title: 'Validate DOM properties of element',
     description:
-      'Validate arbitrary DOM properties (like checked, disabled, value, innerText, etc.) against expected values.',
+      'Validate structural DOM properties and HTML attributes of elements (checked, disabled, className, id, type, tabIndex, etc.). Use for validating element state, CSS classes, form properties, and structural attributes. For text content validation (textContent, input values, placeholders), use validate_text_visible instead. Supports exact equality comparison with isEqual/notEqual operators. HTML attributes are accessible directly by name (e.g., "id", "class", "data-testid", "aria-expanded").',
     inputSchema: validateDomPropsSchema,
     type: 'readOnly',
   },
@@ -936,7 +939,7 @@ const validate_alert_in_snapshot = defineTabTool({
 
       console.log('Check alert in snapshot:', payload);
       const resultString = JSON.stringify(payload, null, 2);
-      console.log('Result string:', resultString);
+      // console.log('Result string:', resultString);
       response.addResult(resultString);
     } catch (error) {
       const errorMessage = `Failed to check alert dialog in snapshot. Error: ${error instanceof Error ? error.message : String(error)}`;
@@ -957,7 +960,7 @@ const validate_alert_in_snapshot = defineTabTool({
 
       console.error('Check alert in snapshot error:', errorPayload);
       const errorResultString = JSON.stringify(errorPayload, null, 2);
-      console.log('Error result string:', errorResultString);
+      // console.log('Error result string:', errorResultString);
       response.addResult(errorResultString);
       console.log('Error result added to response');
       console.log('Function completed with error');
@@ -972,8 +975,10 @@ const default_validation = defineTabTool({
     title: 'Default Validation Tool',
     description: 'Default tool for when LLM cannot find a suitable tool. Accepts ref and JavaScript code to parse and execute.',
     inputSchema: z.object({
-      refs: z.array(z.string()).describe('Array of element references from the page snapshot. Pass single ref as array with one element if needed.'),
-      jsCode: z.string().describe('JavaScript code to execute on each element. Function receives single element as parameter. Should return "pass" or "fail" as string. All elements must return "pass" for overall success.'),
+      refs: z.array(z.object({
+        ref: z.string().describe('Element reference from the page snapshot')
+      })).describe('Array of element reference objects from the page snapshot. Each object should have a "ref" key with string value.'),
+      jsCode: z.string().describe('JavaScript code to execute on each element. Function receives single element as parameter. Should return "pass" or "fail" as string. All elements must return "pass" for overall success. Do not use ref in the code - work directly with the element parameter.'),
     }),
     type: 'readOnly',
   },
@@ -984,7 +989,7 @@ const default_validation = defineTabTool({
       try {
         // Get element locators for all refs
         const locators = await Promise.all(
-            refs.map(ref => tab.refLocator({ ref, element: 'target element' }))
+            refs.map(refObj => tab.refLocator({ ref: refObj.ref, element: 'target element' }))
         );
         for (const locator of locators)
           console.log('generateLocator', await generateLocator(locator));
@@ -1045,9 +1050,10 @@ const default_validation = defineTabTool({
         const failed = isPass ? 0 : 1;
 
         // Generate evidence message
+        const refsList = refs.map(refObj => refObj.ref).join(', ');
         const evidence = isPass
-          ? `Successfully executed JavaScript code on ${refs.length} element(s) with refs: [${refs.join(', ')}]. Result: ${typeof result === 'object' ? JSON.stringify(result) : String(result)}`
-          : `JavaScript code execution failed on ${refs.length} element(s) with refs: [${refs.join(', ')}]. Result: ${typeof result === 'object' ? JSON.stringify(result) : String(result)}`;
+          ? `Successfully executed JavaScript code on ${refs.length} element(s) with refs: [${refsList}]. Result: ${typeof result === 'object' ? JSON.stringify(result) : String(result)}`
+          : `JavaScript code execution failed on ${refs.length} element(s) with refs: [${refsList}]. Result: ${typeof result === 'object' ? JSON.stringify(result) : String(result)}`;
 
         const payload = {
           refs,
@@ -1082,7 +1088,7 @@ const default_validation = defineTabTool({
             passed: 0,
             failed: 1,
             status: 'fail',
-            evidence: `Failed to execute JavaScript code on ${refs.length} element(s) with refs: [${refs.join(', ')}]. Error: ${error instanceof Error ? error.message : String(error)}`,
+            evidence: `Failed to execute JavaScript code on ${refs.length} element(s) with refs: [${refs.map(refObj => refObj.ref).join(', ')}]. Error: ${error instanceof Error ? error.message : String(error)}`,
           },
           checks: [{
             property: 'javascript_execution',
@@ -1103,21 +1109,116 @@ const default_validation = defineTabTool({
 });
 
 
+// const validate_response = defineTabTool({
+//   capability: 'core',
+//   schema: {
+//     name: 'validate_response',
+//     title: 'Validate Response using Regex Patterns',
+//     description: 'Validate response data using regex patterns. Types: regex_extract (extract value with pattern), regex_match (check pattern presence).',
+//     inputSchema: z.object({
+//       responseData: z.string().describe('Response data as string (can be JSON with stdout/stderr or raw response)'),
+//       checks: z.array(z.object({
+//         type: z.enum(['regex_extract', 'regex_match']).describe('Type of validation check'),
+//         name: z.string().describe('Name/description of the check for logging purposes'),
+//         pattern: z.string().describe('Regex pattern to extract or match against'),
+//         expected: z.any().optional().describe('Expected value for comparison (not needed for regex_match)'),
+//         operator: z.enum(['equals', 'not_equals', 'contains', 'not_contains', 'greater_than', 'less_than']).optional().default('equals').describe('Comparison operator (not needed for regex_match)'),
+//         extractGroup: z.number().optional().default(1).describe('Regex capture group to extract (default: 1, only for regex_extract)'),
+//       })).min(1).describe('Array of validation checks to perform'),
+//     }),
+//     type: 'readOnly',
+//   },
+//   handle: async (tab, params, response) => {
+//     const { responseData, checks } = params;
+
+//     try {
+//       // Perform all checks
+//       const results = checks.map(check => {
+//         const result = performRegexCheck(responseData, check);
+//         return {
+//           type: check.type,
+//           name: check.name,
+//           pattern: check.pattern,
+//           expected: check.expected,
+//           operator: check.operator,
+//           extractGroup: check.extractGroup,
+//           actual: result.actual,
+//           result: result.passed ? 'pass' : 'fail',
+//         };
+//       });
+
+//       const passedCount = results.filter(r => r.result === 'pass').length;
+//       const status = passedCount === results.length ? 'pass' : 'fail';
+
+//       // Generate evidence message
+//       let evidence = '';
+//       if (status === 'pass') {
+//         evidence = `All ${results.length} regex validation checks passed successfully`;
+//       } else {
+//         const failedChecks = results.filter(r => r.result === 'fail');
+//         const failedDetails = failedChecks.map(c =>
+//           `${c.name} (pattern: ${c.pattern}, expected: ${c.expected}, got: ${c.actual})`
+//         ).join(', ');
+//         evidence = `${passedCount}/${results.length} checks passed. Failed: ${failedDetails}`;
+//       }
+
+//       const payload = {
+//         responseData: responseData.length > 500 ? responseData.slice(0, 500) + '...' : responseData,
+//         summary: {
+//           total: results.length,
+//           passed: passedCount,
+//           failed: results.length - passedCount,
+//           status,
+//           evidence,
+//         },
+//         checks: results,
+//       };
+
+//       console.log('Validate cURL response regex:', payload);
+//       response.addResult(JSON.stringify(payload, null, 2));
+
+//     } catch (error) {
+//       const errorPayload = {
+//         responseData: responseData.length > 500 ? responseData.slice(0, 500) + '...' : responseData,
+//         summary: {
+//           total: checks.length,
+//           passed: 0,
+//           failed: checks.length,
+//           status: 'fail',
+//           evidence: `Failed to validate cURL response with regex. Error: ${error instanceof Error ? error.message : String(error)}`,
+//         },
+//         checks: checks.map(check => ({
+//           type: check.type,
+//           name: check.name,
+//           pattern: check.pattern,
+//           expected: check.expected,
+//           operator: check.operator,
+//           extractGroup: check.extractGroup,
+//           actual: 'error',
+//           result: 'fail',
+//         })),
+//         error: error instanceof Error ? error.message : String(error),
+//       };
+
+//       console.error('Validate cURL response regex error:', errorPayload);
+//       response.addResult(JSON.stringify(errorPayload, null, 2));
+//     }
+//   },
+// });
+
 const validate_response = defineTabTool({
   capability: 'core',
   schema: {
     name: 'validate_response',
-    title: 'Validate Response using Regex Patterns',
-    description: 'Validate response data using regex patterns. Types: regex_extract (extract value with pattern), regex_match (check pattern presence).',
+    title: 'Validate Response using JSON Path',
+    description: 'Validate response object using JSON path expressions to extract and compare values.',
     inputSchema: z.object({
-      responseData: z.string().describe('Response data as string (can be JSON with stdout/stderr or raw response)'),
+      responseData: z.string().describe('Response data as JSON string'),
       checks: z.array(z.object({
-        type: z.enum(['regex_extract', 'regex_match']).describe('Type of validation check'),
         name: z.string().describe('Name/description of the check for logging purposes'),
-        pattern: z.string().describe('Regex pattern to extract or match against'),
-        expected: z.any().optional().describe('Expected value for comparison (not needed for regex_match)'),
-        operator: z.enum(['equals', 'not_equals', 'contains', 'not_contains', 'greater_than', 'less_than']).optional().default('equals').describe('Comparison operator (not needed for regex_match)'),
-        extractGroup: z.number().optional().default(1).describe('Regex capture group to extract (default: 1, only for regex_extract)'),
+        jsonPath: z.string().describe('JSONPath syntax: Properties (data.token), Array indices (data.books[0].title), Filters (data.books[?(@.price>30)].title), Operators (==, !=, >, <, >=, <=), Boolean values (data.users[?(@.active==true)])'),
+        expected: z.any().optional().describe('Expected value for comparison'),
+        operator: z.enum(['equals', 'not_equals', 'greater_than', 'less_than', 'hasValue']).optional().default('equals').describe('Comparison operator. hasValue checks if value exists at jsonPath (expected should be true/false)')
       })).min(1).describe('Array of validation checks to perform'),
     }),
     type: 'readOnly',
@@ -1126,18 +1227,28 @@ const validate_response = defineTabTool({
     const { responseData, checks } = params;
 
     try {
+      // Parse JSON string to object
+      const parsedResponseData = JSON.parse(responseData);
+
       // Perform all checks
       const results = checks.map(check => {
-        const result = performRegexCheck(responseData, check);
+        // Extract value using JSON path
+        const actualValue = getValueByJsonPath(parsedResponseData, check.jsonPath);
+
+        // Compare values if expected is provided
+        let passed = true;
+        if (check.expected !== undefined) {
+          const comparisonResult = compareValues(actualValue, check.expected, check.operator);
+          passed = comparisonResult.passed;
+        }
+
         return {
-          type: check.type,
           name: check.name,
-          pattern: check.pattern,
+          jsonPath: check.jsonPath,
           expected: check.expected,
           operator: check.operator,
-          extractGroup: check.extractGroup,
-          actual: result.actual,
-          result: result.passed ? 'pass' : 'fail',
+          actual: actualValue,
+          result: passed ? 'pass' : 'fail',
         };
       });
 
@@ -1147,17 +1258,24 @@ const validate_response = defineTabTool({
       // Generate evidence message
       let evidence = '';
       if (status === 'pass') {
-        evidence = `All ${results.length} regex validation checks passed successfully`;
+        evidence = `All ${results.length} JSON path validation checks passed successfully`;
       } else {
         const failedChecks = results.filter(r => r.result === 'fail');
         const failedDetails = failedChecks.map(c =>
-          `${c.name} (pattern: ${c.pattern}, expected: ${c.expected}, got: ${c.actual})`
+          `${c.name} (path: ${c.jsonPath}, expected: ${c.expected}, got: ${c.actual})`
         ).join(', ');
         evidence = `${passedCount}/${results.length} checks passed. Failed: ${failedDetails}`;
       }
 
       const payload = {
-        responseData: responseData.length > 500 ? responseData.slice(0, 500) + '...' : responseData,
+        responseData: {
+          ...parsedResponseData,
+          data: typeof parsedResponseData.data === 'object' ?
+            (JSON.stringify(parsedResponseData.data).length > 500 ?
+              JSON.stringify(parsedResponseData.data).slice(0, 500) + '...' :
+              parsedResponseData.data) :
+            (parsedResponseData.data.length > 500 ? parsedResponseData.data.slice(0, 500) + '...' : parsedResponseData.data)
+        },
         summary: {
           total: results.length,
           passed: passedCount,
@@ -1168,33 +1286,47 @@ const validate_response = defineTabTool({
         checks: results,
       };
 
-      console.log('Validate cURL response regex:', payload);
+      console.log('Validate response JSON path:', payload);
       response.addResult(JSON.stringify(payload, null, 2));
 
     } catch (error) {
+      // Try to parse responseData for error display, fallback to original string if parsing fails
+      let displayResponseData;
+      try {
+        const parsedForDisplay = JSON.parse(responseData);
+        displayResponseData = {
+          ...parsedForDisplay,
+          data: typeof parsedForDisplay.data === 'object' ?
+            (JSON.stringify(parsedForDisplay.data).length > 500 ?
+              JSON.stringify(parsedForDisplay.data).slice(0, 500) + '...' :
+              parsedForDisplay.data) :
+            (parsedForDisplay.data.length > 500 ? parsedForDisplay.data.slice(0, 500) + '...' : parsedForDisplay.data)
+        };
+      } catch {
+        displayResponseData = responseData.length > 500 ? responseData.slice(0, 500) + '...' : responseData;
+      }
+
       const errorPayload = {
-        responseData: responseData.length > 500 ? responseData.slice(0, 500) + '...' : responseData,
+        responseData: displayResponseData,
         summary: {
           total: checks.length,
           passed: 0,
           failed: checks.length,
           status: 'fail',
-          evidence: `Failed to validate cURL response with regex. Error: ${error instanceof Error ? error.message : String(error)}`,
+          evidence: `Failed to validate response with JSON path. Error: ${error instanceof Error ? error.message : String(error)}`,
         },
         checks: checks.map(check => ({
-          type: check.type,
           name: check.name,
-          pattern: check.pattern,
+          jsonPath: check.jsonPath,
           expected: check.expected,
           operator: check.operator,
-          extractGroup: check.extractGroup,
           actual: 'error',
           result: 'fail',
         })),
         error: error instanceof Error ? error.message : String(error),
       };
 
-      console.error('Validate cURL response regex error:', errorPayload);
+      console.error('Validate response JSON path error:', errorPayload);
       response.addResult(JSON.stringify(errorPayload, null, 2));
     }
   },
@@ -1264,13 +1396,13 @@ const validate_tab_exist = defineTabTool({
     inputSchema: z.object({
       url: z.string().describe('URL to check for in existing browser tabs'),
       matchType: z.enum(['exist', 'not-exist']).describe('Whether to check if tab exists or does not exist'),
-      exactMatch: z.boolean().optional().describe('Whether to require exact URL match (true) or partial match (false). Ignored when matchType is "not-exist"'),
+      exactMatch: z.boolean().optional().default(true).describe('Whether to require exact URL match (true) or partial match (false). Ignored when matchType is "not-exist"'),
       isCurrent: z.boolean().optional().describe('If true, also validates that the found tab is the current active tab'),
     }),
     type: 'readOnly',
   },
   handle: async (tab, params, response) => {
-    const { url, matchType, exactMatch = false, isCurrent } = params;
+    const { url, matchType, exactMatch, isCurrent } = params;
 
     try {
       // Get all tabs information from context
@@ -1283,7 +1415,7 @@ const validate_tab_exist = defineTabTool({
           // Get URL and title from page object
           const tabUrl = await tabItem.page.url() || 'unknown';
           const tabTitle = await tabItem.page.title() || 'Unknown';
-
+          tab.page.getByText;
           return {
             index,
             header: tabTitle,
@@ -1428,7 +1560,7 @@ const validateElementSchema = z.object({
 const validate_element = defineTabTool({
   capability: 'core',
   schema: {
-    name: 'validate_element',
+    name: 'validate_element_visible',
     title: 'Validate Element',
     description: 'Validate element visibility with ref-first search strategy. First tries to find element by ref, then falls back to role/accessibleName search if ref fails or is not provided.',
     inputSchema: validateElementSchema,
@@ -1637,16 +1769,22 @@ const make_request = defineTabTool({
     const { command, evidence } = makeRequestSchema.parse(params);
 
 
-    let toolResult = {
+    let toolResult: any = {
       success: false,
       apiResponse: {
-        stdout: '',
-        stderr: ''
+        data: '',
+        statusCode: undefined,
+        responseTime: undefined,
+        contentLength: undefined,
+        contentType: undefined,
+        server: undefined,
+        error: undefined,
+        rawStderr: undefined
       }
     };
 
     try {
-      const result = await runCommand(command);
+      const result = await runCommandClean(command);
       toolResult = {
         success: true,
         apiResponse: result
@@ -1655,13 +1793,79 @@ const make_request = defineTabTool({
       toolResult = {
         success: false,
         apiResponse: {
-          stdout: '',
-          stderr: error instanceof Error ? error.message : String(error)
+          data: '',
+          statusCode: undefined,
+          responseTime: undefined,
+          contentLength: undefined,
+          contentType: undefined,
+          server: undefined,
+          error: error instanceof Error ? error.message : String(error),
+          rawStderr: undefined
         }
       };
     }
 
     response.addResult(JSON.stringify(toolResult, null, 2));
+  },
+});
+
+const dataExtractionSchema = z.object({
+  name: z.string().describe('Variable name (will be prefixed with $$)'),
+  responseData: z.string().describe('Response data as JSON string to extract data from'),
+  jsonPath: z.string().describe('JSONPath syntax: Properties (data.token), Array indices (data.books[0].title), Filters (data.books[?(@.price>30)].title), Operators (==, !=, >, <, >=, <=), Boolean values (data.users[?(@.active==true)])'),
+});
+
+const data_extraction = defineTabTool({
+  capability: 'core',
+  schema: {
+    name: 'data_extraction',
+    title: 'Data Extraction',
+    description: 'Extract data from response object using JSON path and store with $$ prefix for variable naming',
+    inputSchema: dataExtractionSchema,
+    type: 'readOnly',
+  },
+  handle: async (tab, params, response) => {
+    const { name, responseData, jsonPath } = dataExtractionSchema.parse(params);
+
+    try {
+      // Parse JSON string to object
+      const parsedResponseData = JSON.parse(responseData);
+
+      // Extract value using JSON path
+      const extractedValue = getValueByJsonPath(parsedResponseData, jsonPath);
+
+      // Create object with $$ prefix
+      const result = {
+        [`$$${name}`]: extractedValue
+      };
+
+      const toolResult = {
+        success: true,
+        result: result,
+        extractedData: {
+          value: extractedValue,
+          variableName: `$$${name}`,
+        },
+        responseData: parsedResponseData,
+      };
+
+      console.log('Data extraction:', toolResult);
+      response.addResult(JSON.stringify(toolResult, null, 2));
+
+    } catch (error) {
+      const errorResult = {
+        success: false,
+        result: null,
+        error: error instanceof Error ? error.message : String(error),
+        extractedData: {
+          value: null,
+          variableName: `$$${name}`
+        }
+      };
+
+      console.error('Data extraction error:', errorResult);
+      response.addResult(JSON.stringify(errorResult, null, 2));
+    }
   },
 });
 
@@ -1679,5 +1883,5 @@ export default [
   validate_tab_exist,
   generate_locator,
   make_request,
-  // data_extraction,
+  data_extraction,
 ];
