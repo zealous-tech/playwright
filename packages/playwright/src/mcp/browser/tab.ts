@@ -295,10 +295,10 @@ export class Tab extends EventEmitter<TabEventsInterface> {
           const fullMethodName = `getBy${methodName}`;
           
           // Debug logging
-          console.log(`Parsing getBy method chain: ${code}`);
-          console.log(`Method: ${fullMethodName}`);
-          console.log(`Selector: "${selector}"`);
-          console.log(`Method chain: "${methodChain}"`);
+          // console.log(`Parsing getBy method chain: ${code}`);
+          // console.log(`Method: ${fullMethodName}`);
+          // console.log(`Selector: "${selector}"`);
+          // console.log(`Method chain: "${methodChain}"`);
 
           // Parse the selector argument
           const parsedArgs = parseArguments(selector);
@@ -319,9 +319,9 @@ export class Tab extends EventEmitter<TabEventsInterface> {
           const parsedArgs = parseArguments(argsString);
           
           // Debug logging
-          console.log(`Parsing simple getBy command: ${code}`);
-          console.log(`Args string: "${argsString}"`);
-          console.log(`Parsed args:`, parsedArgs);
+          //console.log(`Parsing simple getBy command: ${code}`);
+          //console.log(`Args string: "${argsString}"`);
+          //console.log(`Parsed args:`, parsedArgs);
 
           // Call the method with parsed arguments
           const methodFunc = (this.page as any)[methodName] as Function;
@@ -376,9 +376,9 @@ export class Tab extends EventEmitter<TabEventsInterface> {
           const parsedArgs = parseArguments(argsString);
           
           // Debug logging
-          console.log(`Parsing simple locator command: ${code}`);
-          console.log(`Args string: "${argsString}"`);
-          console.log(`Parsed args:`, parsedArgs);
+          //console.log(`Parsing simple locator command: ${code}`);
+          //console.log(`Args string: "${argsString}"`);
+          //console.log(`Parsed args:`, parsedArgs);
 
           // locator takes a selector string as first argument
           if (parsedArgs.length === 0) {
