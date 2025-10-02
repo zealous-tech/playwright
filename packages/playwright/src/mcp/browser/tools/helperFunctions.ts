@@ -126,7 +126,6 @@ function isColorInRange(actualColor: string, range: { minR: number; maxR: number
            rgb.b >= range.minB && rgb.b <= range.maxB;
 }
 
-
 async function getAllComputedStylesDirect(
   tab: any,
   ref: string,
@@ -268,6 +267,63 @@ async function getAllDomPropsDirect(tab: any, ref: string, element: string) {
     out['spellcheck'] = (el as any).spellcheck;
     out['isContentEditable'] = (el as any).isContentEditable;
     out['accessKey'] = (el as any).accessKey;
+
+    // 8.1. Clickability check
+    out['isClickable'] = (() => {
+      // Check if element is disabled
+      if (el.hasAttribute('disabled') || (el as any).disabled === true) {
+        return false;
+      }
+
+      // Check if element is hidden via CSS
+      const style = window.getComputedStyle(el);
+      if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
+        return false;
+      }
+
+      // Check if element has zero dimensions
+      if ((el as any).offsetWidth === 0 || (el as any).offsetHeight === 0) {
+        return false;
+      }
+
+      // Check if element is covered by another element
+      const rect = el.getBoundingClientRect();
+      const centerX = rect.left + rect.width / 2;
+      const centerY = rect.top + rect.height / 2;
+      const elementAtPoint = document.elementFromPoint(centerX, centerY);
+      
+      // If the element at the center point is not this element or its child, it's covered
+      if (elementAtPoint && !el.contains(elementAtPoint) && elementAtPoint !== el) {
+        return false;
+      }
+
+      // Check if element has pointer-events: none
+      if (style.pointerEvents === 'none') {
+        return false;
+      }
+
+      // Check if element is in a form that's disabled
+      if ((el as any).form && (el as any).form.disabled) {
+        return false;
+      }
+
+      // Check if element is a button, link, or has click handlers
+      const isInteractiveElement = ['BUTTON', 'A', 'INPUT', 'SELECT', 'TEXTAREA'].includes(el.tagName) ||
+                                  el.getAttribute('role') === 'button' ||
+                                  !!el.getAttribute('onclick') ||
+                                  !!el.getAttribute('data-testid') ||
+                                  !!el.getAttribute('data-cy') ||
+                                  !!el.getAttribute('data-test') ||
+                                  el.classList.contains('clickable') ||
+                                  el.classList.contains('btn') ||
+                                  el.classList.contains('button');
+
+      // Check if element has event listeners (this is a best-effort check)
+      const hasClickListeners = (el as any).onclick !== null ||
+                               (el as any).addEventListener !== undefined;
+
+      return isInteractiveElement || hasClickListeners || el.tagName === 'DIV' || el.tagName === 'SPAN';
+    })();
 
     // 9. Element metadata
     out['tagName'] = el.tagName;
@@ -790,13 +846,13 @@ function parseArguments(argsString: string): any[] {
 
 function parseSingleArgument(arg: string): any {
   arg = arg.trim();
-  console.log(`Parsing single argument: "${arg}"`);
+  //console.log(`Parsing single argument: "${arg}"`);
 
   // Handle string arguments first (both single and double quotes)
   if ((arg.startsWith("'") && arg.endsWith("'")) || (arg.startsWith('"') && arg.endsWith('"'))) {
     // String argument: 'Hello' or "Hello"
     const result = arg.slice(1, -1);
-    console.log(`Parsed as string: "${result}"`);
+    //console.log(`Parsed as string: "${result}"`);
     return result;
   }
 
@@ -819,7 +875,7 @@ function parseSingleArgument(arg: string): any {
     // Object argument: { name: 'Submit' } - use eval for simple cases
     try {
       const result = eval(`(${arg})`);
-      console.log(`Parsed object with eval:`, result);
+      //console.log(`Parsed object with eval:`, result);
       return result;
     } catch (evalError) {
       // Fallback to JSON parsing
@@ -831,7 +887,7 @@ function parseSingleArgument(arg: string): any {
     // Array argument: ['button', 'submit'] - use eval for simple cases
     try {
       const result = eval(`(${arg})`);
-      console.log(`Parsed array with eval:`, result);
+      //console.log(`Parsed array with eval:`, result);
       return result;
     } catch (evalError) {
       // Fallback to JSON parsing
@@ -1307,7 +1363,7 @@ function applyArrayFilter(arr: any[], filter: string): any {
 
 
   const [, field, operator, value] = match;
-  let cleanValue = value.replace(/^['"]|['"]$/g, ''); // Remove quotes
+  let cleanValue: any = value.replace(/^['"]|['"]$/g, ''); // Remove quotes
   
   // Handle boolean values
   if (cleanValue === 'true') cleanValue = true;

@@ -772,7 +772,7 @@ const validate_dom_properties = defineTabTool({
     name: 'validate_dom_properties',
     title: 'Validate DOM properties of element',
     description:
-      'Validate structural DOM properties and HTML attributes of elements (checked, disabled, className, id, type, tabIndex, etc.). Use for validating element state, CSS classes, form properties, and structural attributes.  Supports exact equality comparison with isEqual/notEqual operators. HTML attributes are accessible directly by name (e.g., "id", "class", "data-testid", "aria-expanded").',
+      'Validate structural DOM properties and HTML attributes of elements (checked, disabled,isClickable, className, id, type, tabIndex, etc.). Use for validating element state, CSS classes, form properties, and structural attributes.  Supports exact equality comparison with isEqual/notEqual operators. HTML attributes are accessible directly by name (e.g., "id", "class", "data-testid", "aria-expanded").',
     inputSchema: validateDomPropsSchema,
     type: 'readOnly',
   },
@@ -781,7 +781,7 @@ const validate_dom_properties = defineTabTool({
 
     await tab.waitForCompletion(async () => {
       const allProps = await getAllDomPropsDirect(tab, ref, element);
-      console.log('All DOM Props:', allProps);
+      //console.log('All DOM Props:', allProps);
 
       const results = checks.map(c => {
         const actual = allProps[c.name];
@@ -824,11 +824,11 @@ const validate_dom_properties = defineTabTool({
           evidence,
         },
         checks: results,
-        snapshot: allProps, // all properties for debugging
+        //props: allProps, // all properties for debugging
       };
 
       console.log('Validate DOM Properties:');
-      console.dir(payload, { depth: null });
+      console.log(payload);
       response.addResult(JSON.stringify(payload, null, 2));
     });
   },
