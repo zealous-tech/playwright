@@ -781,7 +781,7 @@ const validate_dom_properties = defineTabTool({
 
     await tab.waitForCompletion(async () => {
       const allProps = await getAllDomPropsDirect(tab, ref, element);
-      //console.log('All DOM Props:', allProps);
+      console.log('All DOM Props:', allProps);
 
       const results = checks.map(c => {
         const actual = allProps[c.name];
@@ -824,7 +824,7 @@ const validate_dom_properties = defineTabTool({
           evidence,
         },
         checks: results,
-        //props: allProps, // all properties for debugging
+        props: allProps, // all properties for debugging
       };
 
       console.log('Validate DOM Properties:');
@@ -1811,8 +1811,8 @@ const make_request = defineTabTool({
 
 const dataExtractionSchema = z.object({
   name: z.string().describe('Variable name (will be prefixed with $$)'),
-  responseData: z.string().describe('Response data as JSON string to extract data from'),
-  jsonPath: z.string().describe('JSONPath syntax: Properties (data.token), Array indices (data.books[0].title), Filters (data.books[?(@.price>30)].title), Operators (==, !=, >, <, >=, <=), Boolean values (data.users[?(@.active==true)])'),
+  data: z.string().describe('Data to extract from. If jsonPath is provided, should be JSON string. If jsonPath is not provided, can be any string data'),
+  jsonPath: z.string().optional().describe('JSONPath syntax: Properties (data.token), Array indices (data.books[0].title), Filters (data.books[?(@.price>30)].title), Operators (==, !=, >, <, >=, <=), Boolean values (data.users[?(@.active==true)]).'),
 });
 
 const data_extraction = defineTabTool({
@@ -1820,19 +1820,26 @@ const data_extraction = defineTabTool({
   schema: {
     name: 'data_extraction',
     title: 'Data Extraction',
-    description: 'Extract data from response object using JSON path and store with $$ prefix for variable naming',
+    description: 'Extract and store  value from data object using JSON path with $$ prefix for variable naming. If jsonPath is not provided, stores the data as is without JSON parsing',
     inputSchema: dataExtractionSchema,
     type: 'readOnly',
   },
   handle: async (tab, params, response) => {
-    const { name, responseData, jsonPath } = dataExtractionSchema.parse(params);
+    const { name, data, jsonPath } = dataExtractionSchema.parse(params);
 
     try {
-      // Parse JSON string to object
-      const parsedResponseData = JSON.parse(responseData);
+      let extractedValue;
+      let parsedResponseData;
 
-      // Extract value using JSON path
-      const extractedValue = getValueByJsonPath(parsedResponseData, jsonPath);
+      if (jsonPath) {
+        // If jsonPath is provided, parse as JSON and extract using path
+        parsedResponseData = JSON.parse(data);
+        extractedValue = getValueByJsonPath(parsedResponseData, jsonPath);
+      } else {
+        // If jsonPath is not provided, return data as is
+        extractedValue = data;
+        parsedResponseData = data;
+      }
 
       // Create object with $$ prefix
       const result = {
@@ -1846,7 +1853,7 @@ const data_extraction = defineTabTool({
           value: extractedValue,
           variableName: `$$${name}`,
         },
-        responseData: parsedResponseData,
+        data: parsedResponseData,
       };
 
       console.log('Data extraction:', toolResult);
