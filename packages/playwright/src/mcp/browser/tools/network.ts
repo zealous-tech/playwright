@@ -14,6 +14,12 @@
  * limitations under the License.
  */
 
+/*
+*
+*  @ZEALOUS UPDATE - updated network request extraction to provide all data with additional filtering
+*
+*/
+
 import {z} from 'zod';
 import {defineTabTool} from './tool.js';
 
@@ -32,10 +38,11 @@ interface LogType {
 
 type Input = {
   method?: string;   // e.g. "GET" (case-insensitive, exact match on token)
-  url?: string;      // full or partial URL substring, case-insensitive
-  endpoint?: string; // pathname substring, e.g. "/api/users", case-insensitive
+  url?: string;      // full or partial URL substring, case-insensitive, or regex pattern
+  endpoint?: string; // pathname substring, e.g. "/api/users", case-insensitive, or regex pattern
   keywords?: string[];
   logType?: LogType;
+  useRegex?: boolean; // if true, treat url and endpoint as regex patterns
 };
 
 const requests = defineTabTool({
@@ -45,7 +52,7 @@ const requests = defineTabTool({
     name: 'browser_network_requests',
     title: 'Find specific network request',
     description:
-      'Search network request logs and return exactly ONE entry that satisfies structured filters (method/url/endpoint) AND contains ALL specified keywords. Keywords are searched across method, URL, headers, and bodies (case-insensitive). Use logType to control which fields are included in the output.',
+      'Search network request logs and return exactly ONE entry that satisfies structured filters (method/url/endpoint) AND contains ALL specified keywords. Keywords are searched across method, URL, headers, and bodies (case-insensitive). Use logType to control which fields are included in the output. For full URLs like "https://example.com/api/books", use the "url" parameter. For path-only matching like "/api/books", use the "endpoint" parameter.',
     inputSchema: z.object({
       method: z
         .string()
@@ -54,15 +61,20 @@ const requests = defineTabTool({
       url: z
         .string()
         .optional()
-        .describe('Full or partial URL to match (substring, case-insensitive).'),
+        .describe('Full or partial URL to match including protocol and domain (e.g., "https://demoqa.com/BookStore/v1/Books"). Uses substring matching (case-insensitive). Can be a regex pattern if useRegex is true.'),
       endpoint: z
         .string()
         .optional()
-        .describe('Pathname to match (substring of URL pathname, e.g., "/api/users", case-insensitive).'),
+        .describe('Pathname with optional query params to match (e.g., "/BookStore/v1/Books" or "/api/users?id=123"). Uses path boundary matching to ensure "/book" does not match "/books" (case-insensitive). Can be a regex pattern if useRegex is true.'),
       keywords: z
         .array(z.string())
         .default([])
         .describe('Array of keywords that must ALL be present somewhere in the request/response data (case-insensitive).'),
+      useRegex: z
+        .boolean()
+        .optional()
+        .default(false)
+        .describe('If true, treat url and endpoint parameters as regular expression patterns. Defaults to false.'),
       logType: z
         .object({
           request: z
@@ -92,6 +104,7 @@ const requests = defineTabTool({
       url: urlFilter,
       endpoint: endpointFilter,
       keywords = [],
+      useRegex = false,
     } = params;
 
     const logType: LogType =
@@ -101,12 +114,12 @@ const requests = defineTabTool({
       };
 
     const methodNorm = methodFilter?.trim().toLowerCase();
-    const urlNorm = urlFilter?.trim().toLowerCase();
-    const endpointNorm = endpointFilter?.trim().toLowerCase();
+    const urlNorm = urlFilter?.trim();
+    const endpointNorm = endpointFilter?.trim();
     const keywordsLower = keywords.map((k) => k.toLowerCase());
 
     for (const [req, res] of allRequests.entries()) {
-      if (!matchesStructuredFilters(req, methodNorm, urlNorm, endpointNorm)) {
+      if (!matchesStructuredFilters(req, methodNorm, urlNorm, endpointNorm, useRegex)) {
         continue;
       }
       if (keywordsLower.length === 0) {
@@ -144,30 +157,144 @@ const requests = defineTabTool({
   },
 });
 
+/**
+ * Helper function to match paths with proper boundary checks.
+ * Ensures /endpoint doesn't match /endpoints, but allows flexible matching for query params.
+ *
+ * Examples:
+ * - matchesPathWithBoundaries("/api/endpoint", "/api/endpoint") => true
+ * - matchesPathWithBoundaries("/api/endpoint?id=1", "/api/endpoint") => true
+ * - matchesPathWithBoundaries("/api/endpoints", "/api/endpoint") => false
+ * - matchesPathWithBoundaries("/api/endpoint/123", "/api/endpoint") => true
+ */
+function matchesPathWithBoundaries(fullPath: string, searchPattern: string): boolean {
+  const fullPathLower = fullPath.toLowerCase();
+  const searchLower = searchPattern.toLowerCase();
+
+  // Find the position of the search pattern in the full path
+  const index = fullPathLower.indexOf(searchLower);
+
+  if (index === -1) {
+    return false; // Pattern not found
+  }
+
+  // Check what comes BEFORE the match (must be start of string or a boundary character)
+  if (index > 0) {
+    const beforeMatch = fullPathLower.charAt(index - 1);
+    // Valid boundaries before: '/', '?', '#', or start of string
+    const isValidBefore = beforeMatch === '/' || beforeMatch === '?' || beforeMatch === '#';
+    if (!isValidBefore) {
+      return false; // Pattern found in the middle of a word
+    }
+  }
+
+  // Check what comes after the match
+  const afterMatch = fullPathLower.substring(index + searchLower.length);
+
+  // Match is valid if:
+  // 1. Nothing comes after (exact match)
+  // 2. Next character is '/' (path continues with another segment)
+  // 3. Next character is '?' (query parameters start)
+  // 4. Next character is '#' (fragment starts)
+  return afterMatch === '' ||
+         afterMatch.startsWith('/') ||
+         afterMatch.startsWith('?') ||
+         afterMatch.startsWith('#');
+}
+
 function matchesStructuredFilters(
   request: playwright.Request,
   methodNorm?: string,
   urlNorm?: string,
-  endpointNorm?: string
+  endpointNorm?: string,
+  useRegex: boolean = false
 ): boolean {
+  const requestUrl = request.url();
+
   if (methodNorm) {
     const reqMethod = (request.method() || '').trim().toLowerCase();
     if (reqMethod !== methodNorm) return false;
   }
 
   if (urlNorm) {
-    const reqUrl = (request.url() || '').toLowerCase();
-    if (!reqUrl.includes(urlNorm)) return false;
+    const reqUrl = requestUrl || '';
+    if (useRegex) {
+      try {
+        const regex = new RegExp(urlNorm, 'i'); // case-insensitive
+        const match = regex.exec(reqUrl);
+        if (!match) return false;
+
+        // Check boundaries: ensure the match doesn't continue into another path segment
+        const matchEnd = match.index + match[0].length;
+        if (matchEnd < reqUrl.length) {
+          const nextChar = reqUrl.charAt(matchEnd);
+          // Valid boundaries after match: '/', '?', '#', or end of string
+          const isValidBoundary = nextChar === '/' || nextChar === '?' || nextChar === '#';
+          if (!isValidBoundary) return false;
+        }
+      } catch (e) {
+        // Fallback to boundary match if regex is invalid
+        if (!matchesPathWithBoundaries(reqUrl, urlNorm)) return false;
+      }
+    } else {
+      // Use boundary matching for URLs to prevent partial matches (e.g., /book shouldn't match /books)
+      if (!matchesPathWithBoundaries(reqUrl, urlNorm)) return false;
+    }
   }
 
   if (endpointNorm) {
+    // Normalize endpoint to ensure it starts with / if it's a path (not a full URL)
+    const normalizedEndpoint = endpointNorm.startsWith('/') || endpointNorm.includes('://')
+      ? endpointNorm
+      : '/' + endpointNorm;
+
     try {
-      const u = new URL(request.url());
-      const pathname = (u.pathname || '').toLowerCase();
-      if (!pathname.includes(endpointNorm)) return false;
+      const u = new URL(requestUrl);
+      const pathname = u.pathname || '';
+      const fullPath = pathname + u.search; // Include query parameters
+
+      if (useRegex) {
+        try {
+          const regex = new RegExp(normalizedEndpoint, 'i'); // case-insensitive
+          const match = regex.exec(fullPath);
+          if (!match) return false;
+
+          // Check boundaries: ensure the match doesn't continue into another path segment
+          const matchEnd = match.index + match[0].length;
+          if (matchEnd < fullPath.length) {
+            const nextChar = fullPath.charAt(matchEnd);
+            // Valid boundaries after match: '/', '?', '#', or end of string
+            const isValidBoundary = nextChar === '/' || nextChar === '?' || nextChar === '#';
+            if (!isValidBoundary) return false;
+          }
+        } catch (e) {
+          if (!matchesPathWithBoundaries(fullPath, normalizedEndpoint)) return false;
+        }
+      } else {
+        if (!matchesPathWithBoundaries(fullPath, normalizedEndpoint)) return false;
+      }
     } catch {
-      const reqUrl = (request.url() || '').toLowerCase();
-      if (!reqUrl.includes(endpointNorm)) return false;
+      const reqUrl = requestUrl || '';
+      if (useRegex) {
+        try {
+          const regex = new RegExp(normalizedEndpoint, 'i');
+          const match = regex.exec(reqUrl);
+          if (!match) return false;
+
+          // Check boundaries: ensure the match doesn't continue into another path segment
+          const matchEnd = match.index + match[0].length;
+          if (matchEnd < reqUrl.length) {
+            const nextChar = reqUrl.charAt(matchEnd);
+            // Valid boundaries after match: '/', '?', '#', or end of string
+            const isValidBoundary = nextChar === '/' || nextChar === '?' || nextChar === '#';
+            if (!isValidBoundary) return false;
+          }
+        } catch (e) {
+          if (!matchesPathWithBoundaries(reqUrl, normalizedEndpoint)) return false;
+        }
+      } else {
+        if (!matchesPathWithBoundaries(reqUrl, normalizedEndpoint)) return false;
+      }
     }
   }
 
