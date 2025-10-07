@@ -603,7 +603,14 @@ const validate_element_text = defineTabTool({
           if (matchType === 'contains') {
             passed = totalElementCount > 0; // Text must be visible (substring match)
           } else if (matchType === 'not-contains') {
-            passed = totalElementCount === 0; // Text should NOT be visible
+            // Special case: if expectedText is empty string, check if any non-empty text is visible
+            if (expectedText === '') {
+              // For empty string with not-contains, we need to check if there's any visible text
+              // This is a bit tricky with visibility search, so we'll use a different approach
+              passed = totalElementCount > 0; // If we find any elements, assume there's text
+            } else {
+              passed = totalElementCount === 0; // Text should NOT be visible
+            }
           } else { // exact
             passed = totalElementCount > 0; // Text must be visible (exact match)
           }
@@ -617,10 +624,17 @@ const validate_element_text = defineTabTool({
               evidence = `Text "${expectedText}" not found or not visible on page`;
 
           } else if (matchType === 'not-contains') {
-            if (passed)
-              evidence = `Text "${expectedText}" is not visible on page as expected`;
-            else
-              evidence = `Text "${expectedText}" is unexpectedly visible on page`;
+            if (expectedText === '') {
+              if (passed)
+                evidence = `Found non-empty text on page as expected`;
+              else
+                evidence = `No visible text found on page`;
+            } else {
+              if (passed)
+                evidence = `Text "${expectedText}" is not visible on page as expected`;
+              else
+                evidence = `Text "${expectedText}" is unexpectedly visible on page`;
+            }
 
           } else { // exact
             if (passed)
@@ -695,8 +709,14 @@ const validate_element_text = defineTabTool({
           passed = norm(actualText) === norm(expected);
         else if (matchType === 'contains')
           passed = norm(actualText).includes(norm(expected));
-        else if (matchType === 'not-contains')
-          passed = !norm(actualText).includes(norm(expected));
+        else if (matchType === 'not-contains') {
+          // Special case: if expectedText is empty string, check if element is not empty
+          if (expected === '') {
+            passed = actualText.trim().length > 0;
+          } else {
+            passed = !norm(actualText).includes(norm(expected));
+          }
+        }
 
 
         // Generate evidence message
@@ -706,16 +726,26 @@ const validate_element_text = defineTabTool({
             evidence = `Found element "${element}" with exact text match: "${actualText}"`;
           else if (matchType === 'contains')
             evidence = `Found element "${element}" containing expected text "${expectedText}" in: "${actualText}"`;
-          else if (matchType === 'not-contains')
-            evidence = `Found element "${element}" that correctly does not contain text "${expectedText}"`;
+          else if (matchType === 'not-contains') {
+            if (expected === '') {
+              evidence = `Found element "${element}" with non-empty text: "${actualText}"`;
+            } else {
+              evidence = `Found element "${element}" that correctly does not contain text "${expectedText}"`;
+            }
+          }
 
         } else {
           if (matchType === 'exact')
             evidence = `Element "${element}" text "${actualText}" does not exactly match expected "${expectedText}"`;
           else if (matchType === 'contains')
             evidence = `Element "${element}" text "${actualText}" does not contain expected text "${expectedText}"`;
-          else if (matchType === 'not-contains')
-            evidence = `Element "${element}" unexpectedly contains text "${expectedText}" in: "${actualText}"`;
+          else if (matchType === 'not-contains') {
+            if (expected === '') {
+              evidence = `Element "${element}" is empty or contains only whitespace`;
+            } else {
+              evidence = `Element "${element}" unexpectedly contains text "${expectedText}" in: "${actualText}"`;
+            }
+          }
 
         }
 
