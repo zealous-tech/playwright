@@ -17,6 +17,7 @@ import { z } from 'zod';
 import { defineTabTool } from './tool.js';
 import { getAllComputedStylesDirect, pickActualValue, parseRGBColor, isColorInRange, getAllDomPropsDirect, performRegexCheck, searchTextInAllFrames, searchElementsByRoleInAllFrames, getElementTextWithFallbacks, runCommandClean, getValueByJsonPath, compareValues } from './helperFunctions.js';
 import { generateLocator } from './utils.js';
+import { expect } from '@zealous-tech/playwright/test';
 import type * as playwright from 'playwright';
 
 const elementStyleSchema = z.object({
@@ -535,8 +536,8 @@ const textValidationSchema = z.object({
   element: z.string().describe(
       'Human-readable element description used to obtain permission to interact with the element'
   ),
-  ref: z.string().optional().describe(
-      "Exact target element reference from the page snapshot. If you don't have a specific element reference, omit this parameter entirely (don't pass 'null' or empty string) to search across the whole page snapshot"
+  ref: z.string().describe(
+      "Exact target element reference from the page snapshot. Required for text validation."
   ),
   expectedText: z.string().describe(
       'Expected text value to validate in the element or whole page'
@@ -555,7 +556,7 @@ const validate_element_text = defineTabTool({
     name: 'validate_text_visible',
     title: 'Verify text visible',
     description:
-        "Verify that text is visible on the page with exact/contains/not-contains matching. When ref is provided, first checks specific element's text content (including input values, placeholders, etc.). If no text found in element or ref is not provided, searches for visible text across all frames and iframes. It is recommended to always provide ref when possible for more precise validation.",
+        "Verify that text is visible in a specific element with exact/contains/not-contains matching. Requires element reference (ref) from page snapshot. Uses Playwright's expect assertions with built-in timeout for reliable text validation.",
     inputSchema: textValidationSchema,
     type: 'readOnly',
   },
@@ -564,216 +565,81 @@ const validate_element_text = defineTabTool({
       textValidationSchema.parse(rawParams);
 
     await tab.waitForCompletion(async () => {
+      let passed = false;
+      let evidence = '';
       let actualText = '';
-      let useVisibilitySearch = false;
 
-      if (ref) {
-        try {
-          const locator = await tab.refLocator({ ref, element });
-          console.log('generateLocator', await generateLocator(locator));
-          actualText = await getElementTextWithFallbacks(locator, tab, element);
-
-          // If still no text found, use visibility search
-          if (!actualText) {
-            console.log(`No text found in element ${element}, falling back to visibility search`);
-            useVisibilitySearch = true;
-          }
-        } catch (error) {
-          console.log(`Failed to find element with ref "${ref}" for ${element}, falling back to visibility search. Error: ${error instanceof Error ? error.message : String(error)}`);
-          useVisibilitySearch = true;
-        }
-      } else {
-        // No ref provided, use visibility search directly
-        useVisibilitySearch = true;
-      }
-
-      // Use visibility search if needed
-      if (useVisibilitySearch) {
-        try {
-          // Start recursive search from main page using helper function
-          console.log(`validate_element_text: Starting recursive search for text "${expectedText}"`);
-          const allElements = await searchTextInAllFrames(tab.page, expectedText, matchType);
-          const totalElementCount = allElements.length;
-
-          console.log(`validate_element_text: Total found ${totalElementCount} visible elements with text "${expectedText}" (recursive search)`);
-
-          // Determine if test passes based on matchType
-          // Playwright's getByText already handles the matching logic correctly
-          let passed: boolean;
-          if (matchType === 'contains') {
-            passed = totalElementCount > 0; // Text must be visible (substring match)
-          } else if (matchType === 'not-contains') {
-            // Special case: if expectedText is empty string, check if any non-empty text is visible
-            if (expectedText === '') {
-              // For empty string with not-contains, we need to check if there's any visible text
-              // This is a bit tricky with visibility search, so we'll use a different approach
-              passed = totalElementCount > 0; // If we find any elements, assume there's text
-            } else {
-              passed = totalElementCount === 0; // Text should NOT be visible
-            }
-          } else { // exact
-            passed = totalElementCount > 0; // Text must be visible (exact match)
-          }
-
-          // Generate evidence message
-          let evidence = '';
-          if (matchType === 'contains') {
-            if (passed)
-              evidence = `Found visible text "${expectedText}" on page as expected`;
-            else
-              evidence = `Text "${expectedText}" not found or not visible on page`;
-
-          } else if (matchType === 'not-contains') {
-            if (expectedText === '') {
-              if (passed)
-                evidence = `Found non-empty text on page as expected`;
-              else
-                evidence = `No visible text found on page`;
-            } else {
-              if (passed)
-                evidence = `Text "${expectedText}" is not visible on page as expected`;
-              else
-                evidence = `Text "${expectedText}" is unexpectedly visible on page`;
-            }
-
-          } else { // exact
-            if (passed)
-              evidence = `Found visible text "${expectedText}" with exact match on page`;
-            else
-              evidence = `Text "${expectedText}" not found with exact match or not visible on page`;
-
-          }
-
-          const payload = {
-            ref,
-            element,
-            summary: {
-              total: 1,
-              passed: passed ? 1 : 0,
-              failed: passed ? 0 : 1,
-              status: passed ? 'pass' : 'fail',
-              evidence,
-            },
-            checks: [{
-              property: 'text_visibility',
-              operator: matchType,
-              expected: expectedText,
-              actual: totalElementCount > 0 ? 'found' : 'not-found',
-              result: passed ? 'pass' : 'fail',
-            }],
-            scope: 'visibility_search',
-            matchType,
-            caseSensitive: !!caseSensitive,
-            totalFound: totalElementCount,
-          };
-
-          console.log('Validate element text (visibility search):', payload);
-          response.addResult(JSON.stringify(payload, null, 2));
-          return; // Exit early since we used visibility search
-
-        } catch (error) {
-          const errorMessage = `Failed to search for visible text. Error: ${error instanceof Error ? error.message : String(error)}`;
-          const errorPayload = {
-            ref,
-            element,
-            summary: {
-              total: 1,
-              passed: 0,
-              failed: 1,
-              status: 'fail',
-              evidence: errorMessage,
-            },
-            checks: [{
-              property: 'text_visibility',
-              operator: matchType,
-              expected: expectedText,
-              actual: 'error',
-              result: 'fail',
-            }],
-            error: error instanceof Error ? error.message : String(error),
-          };
-
-          console.error('Validate element text (visibility search) error:', errorPayload);
-          response.addResult(JSON.stringify(errorPayload, null, 2));
-          return; // Exit early on error
-        }
-      }
-
-      // This code runs only when ref is provided and text was found in the element
-      if (ref && !useVisibilitySearch) {
-        const norm = (s: string) => (caseSensitive ? s : s.toLowerCase());
-        const expected = expectedText;
-        let passed;
-        // Apply match type logic for specific element
-        if (matchType === 'exact')
-          passed = norm(actualText) === norm(expected);
-        else if (matchType === 'contains')
-          passed = norm(actualText).includes(norm(expected));
-        else if (matchType === 'not-contains') {
-          // Special case: if expectedText is empty string, check if element is not empty
-          if (expected === '') {
-            passed = actualText.trim().length > 0;
+      try {
+        const locator = await tab.refLocator({ ref, element });
+        console.log('generateLocator', await generateLocator(locator));
+        
+        // Use expect with appropriate matcher based on matchType
+        if (matchType === 'exact') {
+          await expect(locator).toHaveText(expectedText);
+          passed = true;
+          evidence = `Found element "${element}" with exact text match: "${expectedText}"`;
+        } else if (matchType === 'contains') {
+          await expect(locator).toContainText(expectedText);
+          passed = true;
+          evidence = `Found element "${element}" containing expected text "${expectedText}"`;
+        } else if (matchType === 'not-contains') {
+          if (expectedText === '') {
+            // For empty string with not-contains, check if element is not empty
+            // We need to get the text to check if it's not empty
+            await expect(locator).toContainText(/.+/);
+            
           } else {
-            passed = !norm(actualText).includes(norm(expected));
+            // For specific text with not-contains, use expect.not
+            await expect(locator).not.toContainText(expectedText);
+            passed = true;
+            evidence = `Found element "${element}" that correctly does not contain text "${expectedText}"`;
           }
         }
-
-
-        // Generate evidence message
-        let evidence = '';
-        if (passed) {
-          if (matchType === 'exact')
-            evidence = `Found element "${element}" with exact text match: "${actualText}"`;
-          else if (matchType === 'contains')
-            evidence = `Found element "${element}" containing expected text "${expectedText}" in: "${actualText}"`;
-          else if (matchType === 'not-contains') {
-            if (expected === '') {
-              evidence = `Found element "${element}" with non-empty text: "${actualText}"`;
-            } else {
-              evidence = `Found element "${element}" that correctly does not contain text "${expectedText}"`;
-            }
+        
+      } catch (error) {
+        passed = false;
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        
+        if (matchType === 'exact') {
+          evidence = `Element "${element}" does not have exact text match with expected "${expectedText}". Error: ${errorMessage}`;
+        } else if (matchType === 'contains') {
+          evidence = `Element "${element}" does not contain expected text "${expectedText}". Error: ${errorMessage}`;
+        } else if (matchType === 'not-contains') {
+          if (expectedText === '') {
+            evidence = `Element "${element}" is empty or contains only whitespace. Error: ${errorMessage}`;
+          } else {
+            evidence = `Element "${element}" unexpectedly contains text "${expectedText}". Error: ${errorMessage}`;
           }
-
-        } else {
-          if (matchType === 'exact')
-            evidence = `Element "${element}" text "${actualText}" does not exactly match expected "${expectedText}"`;
-          else if (matchType === 'contains')
-            evidence = `Element "${element}" text "${actualText}" does not contain expected text "${expectedText}"`;
-          else if (matchType === 'not-contains') {
-            if (expected === '') {
-              evidence = `Element "${element}" is empty or contains only whitespace`;
-            } else {
-              evidence = `Element "${element}" unexpectedly contains text "${expectedText}" in: "${actualText}"`;
-            }
-          }
-
         }
-
-        const payload = {
-          ref,
-          element,
-          summary: {
-            total: 1,
-            passed: passed ? 1 : 0,
-            failed: passed ? 0 : 1,
-            status: passed ? 'pass' : 'fail',
-            evidence,
-          },
-          checks: [{
-            property: 'text',
-            operator: matchType,
-            expected: expectedText,
-            actual: actualText.length > 300 ? actualText.slice(0, 300) + '…' : actualText,
-            result: passed ? 'pass' : 'fail',
-          }],
-          scope: 'element',
-          matchType,
-          caseSensitive: !!caseSensitive,
-        };
-
-        console.log('Validate element text (element search):', payload);
-        response.addResult(JSON.stringify(payload, null, 2));
+        
+        console.log(`Failed to validate element with ref "${ref}" for ${element}. Error: ${errorMessage}`);
       }
+
+      // Generate final payload
+      const payload = {
+        ref,
+        element,
+        summary: {
+          total: 1,
+          passed: passed ? 1 : 0,
+          failed: passed ? 0 : 1,
+          status: passed ? 'pass' : 'fail',
+          evidence,
+        },
+        checks: [{
+          property: 'text',
+          operator: matchType,
+          expected: expectedText,
+          actual: actualText || 'N/A',
+          result: passed ? 'pass' : 'fail',
+        }],
+        scope: 'element',
+        matchType,
+        caseSensitive: !!caseSensitive,
+      };
+
+      console.log('Validate element text:', payload);
+      response.addResult(JSON.stringify(payload, null, 2));
     });
   },
 });

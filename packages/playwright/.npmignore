@@ -1,2 +1,4 @@
 src
 bundles
+*.tgz
+zealous-tech-playwright-*.tgz
