@@ -15,7 +15,7 @@
  */
 import { z } from 'zod';
 import { defineTabTool } from './tool.js';
-import { getAllComputedStylesDirect, pickActualValue, parseRGBColor, isColorInRange, getAllDomPropsDirect, performRegexCheck, searchTextInAllFrames, searchElementsByRoleInAllFrames, getElementTextWithFallbacks, runCommandClean, getValueByJsonPath, compareValues } from './helperFunctions.js';
+import { getAllComputedStylesDirect, pickActualValue, parseRGBColor, isColorInRange, getAllDomPropsDirect, performRegexCheck, searchTextInAllFrames, searchElementsByRoleInAllFrames, getElementTextWithFallbacks, runCommandClean, getValueByJsonPath, compareValues, checkElementVisibilityUnique } from './helperFunctions.js';
 import { generateLocator } from './utils.js';
 import { expect } from '@zealous-tech/playwright/test';
 import type * as playwright from 'playwright';
@@ -550,7 +550,7 @@ const textValidationSchema = z.object({
   ),
 });
 
-const validate_element_text = defineTabTool({
+const validate_text_visible = defineTabTool({
   capability: 'core',
   schema: {
     name: 'validate_text_visible',
@@ -571,11 +571,10 @@ const validate_element_text = defineTabTool({
 
       try {
         const locator = await tab.refLocator({ ref, element });
-        console.log('generateLocator', await generateLocator(locator));
         
         // Use expect with appropriate matcher based on matchType
         if (matchType === 'exact') {
-          await expect(locator).toHaveText(expectedText);
+          await expect(locator).toHaveText(expectedText, {useInnerText:true});
           passed = true;
           evidence = `Found element "${element}" with exact text match: "${expectedText}"`;
         } else if (matchType === 'contains') {
@@ -585,9 +584,9 @@ const validate_element_text = defineTabTool({
         } else if (matchType === 'not-contains') {
           if (expectedText === '') {
             // For empty string with not-contains, check if element is not empty
-            // We need to get the text to check if it's not empty
             await expect(locator).toContainText(/.+/);
-            
+            passed = true;
+            evidence = `Found element "${element}" with non-empty text`;
           } else {
             // For specific text with not-contains, use expect.not
             await expect(locator).not.toContainText(expectedText);
@@ -887,8 +886,8 @@ const default_validation = defineTabTool({
         const locators = await Promise.all(
             refs.map(refObj => tab.refLocator({ ref: refObj.ref, element: 'target element' }))
         );
-        for (const locator of locators)
-          console.log('generateLocator', await generateLocator(locator));
+        // for (const locator of locators)
+        //   console.log('generateLocator', await generateLocator(locator));
 
         // Execute the JavaScript code on each element and collect results
         const results = await Promise.all(
@@ -1453,7 +1452,7 @@ const validateElementSchema = z.object({
   ),
 });
 
-const validate_element = defineTabTool({
+const validate_element_visible = defineTabTool({
   capability: 'core',
   schema: {
     name: 'validate_element_visible',
@@ -1479,51 +1478,89 @@ const validate_element = defineTabTool({
         try {
           console.log(`validate_element: Attempting to find element by ref="${ref}"`);
           const locator = await tab.refLocator({ ref, element: 'target element' });
-          // Check if element exists and is visible
-          const count = await locator.count();
-          if (count > 0) {
+          
+          // For 'contains' matchType, use expect.toBeVisible() directly
+          if (matchType === 'contains') {
+            await expect(locator).toBeVisible();
             existsInDOM = true;
-            isVisible = await locator.isVisible();
+            isVisible = true;
             searchMethod = 'ref';
-            console.log(`validate_element: Found element by ref, count=${count}, isVisible=${isVisible}`);
+            console.log(`validate_element: Element found by ref and is visible`);
           } else {
-            console.log(`validate_element: Element not found by ref, falling back to role/accessibleName search`);
+            // For 'not-contains' matchType, check visibility without expect
+            isVisible = await locator.isVisible();
+            existsInDOM = true;
+            searchMethod = 'ref';
+            console.log(`validate_element: Element found by ref, isVisible=${isVisible}`);
           }
+          
+          // Determine the result based on matchType
+          const passed = matchType === 'contains' ? isVisible : !isVisible;
+          evidence = matchType === 'contains' 
+            ? `Element found by ref is visible as expected`
+            : `Element found by ref is not visible as expected`;
+        
+          const payload = {
+            ref,
+            role,
+            accessibleName,
+            matchType,
+            isVisible,
+            existsInDOM: true,
+            searchMethod: 'ref',
+            summary: {
+              total: 1,
+              passed: passed ? 1 : 0,
+              failed: passed ? 0 : 1,
+              status: passed ? 'pass' : 'fail',
+              evidence,
+            },
+            checks: [{
+              property: 'visibility',
+              operator: matchType,
+              expected: matchType === 'contains' ? 'visible' : 'not-visible',
+              actual: isVisible ? 'visible' : 'not-visible',
+              result: passed ? 'pass' : 'fail',
+            }],
+          };
+
+          console.log('Validate element (ref search):', payload);
+          response.addResult(JSON.stringify(payload, null, 2));
+          return; // Exit early since ref search was successful
+          
         } catch (error) {
-          console.log(`validate_element: Error finding element by ref, falling back to role/accessibleName search. Error: ${error instanceof Error ? error.message : String(error)}`);
+          console.log(`validate_element: Element not found by ref or not visible, falling back to role/accessibleName search. Error: ${error instanceof Error ? error.message : String(error)}`);
+          // Continue to fallback search
         }
       }
 
       // Step 2: Fallback to role/accessibleName search if ref search failed or ref not provided
       if (!ref || !existsInDOM) {
-        console.log(`validate_element: Starting role/accessibleName search for role="${role}" with accessibleName="${accessibleName}"`);
+        console.log(`validate_element: Starting parallel recursive role/accessibleName search for role="${role}" with accessibleName="${accessibleName}"`);
 
-        // Start recursive search from main page using helper function
-        const allElements = await searchElementsByRoleInAllFrames(tab.page, role, accessibleName);
-        const totalElementCount = allElements.length;
-
-        console.log(`validate_element: Total found ${totalElementCount} elements with role="${role}" and name="${accessibleName}" (recursive search)`);
-
-        if (totalElementCount > 0) {
-          existsInDOM = true;
-          searchMethod = 'role/accessibleName';
-
-          // Check visibility of all found elements - if any is visible, set isVisible to true
-          try {
-            for (let i = 0; i < allElements.length; i++) {
-              const elementVisible = await allElements[i].element.isVisible();
-              if (elementVisible) {
-                isVisible = true;
-                console.log(`validate_element: Found visible element by role/accessibleName at index ${i}, isVisible=${isVisible}`);
-                break; // Exit loop as soon as we find one visible element
-              }
-            }
-            if (!isVisible)
-              console.log(`validate_element: Found ${totalElementCount} elements by role/accessibleName but none are visible`);
-
-          } catch (error) {
-            console.log(`validate_element: Could not check visibility:`, error);
+        try {
+          // Use parallel recursive search with uniqueness validation
+          const result = await checkElementVisibilityUnique(tab.page, role, accessibleName);
+          
+          if (result.found && result.unique) {
+            existsInDOM = true;
+            isVisible = true;
+            searchMethod = 'role/accessibleName-parallel-recursive';
+            console.log(`validate_element: Found exactly 1 visible element by role/accessibleName in frame "${result.frame}" (level ${result.level})`);
+          }
+        } catch (error) {
+          console.log(`validate_element: Parallel recursive search failed:`, error);
+          
+          // Check if error is due to multiple elements found
+          if (error instanceof Error && error.message.includes('Multiple elements found')) {
+            existsInDOM = true; // Elements exist but multiple found
+            isVisible = true;   // At least one is visible (since expect.toBeVisible() succeeded)
+            searchMethod = 'role/accessibleName-parallel-recursive';
+            // This will be handled in the final result determination
+          } else {
+            existsInDOM = false;
             isVisible = false;
+            searchMethod = 'role/accessibleName-parallel-recursive';
           }
         }
       }
@@ -1564,26 +1601,44 @@ const validate_element = defineTabTool({
       }
 
       // Step 4: Element found, determine if test passes based on matchType
-      let passed: boolean;
-      if (matchType === 'contains') {
-        passed = isVisible; // Element must be present AND visible
-      } else { // matchType === "not-contains"
-        passed = !isVisible; // Element should NOT be visible (can exist in DOM but hidden)
+      let passed: boolean = false;
+      let multipleElementsFound = false;
+      
+      // Check if we have multiple elements (this is always a failure)
+      if (searchMethod === 'role/accessibleName-parallel-recursive' && existsInDOM && isVisible) {
+        // Check if the error was due to multiple elements
+        try {
+          await checkElementVisibilityUnique(tab.page, role, accessibleName);
+          // If we get here, there's exactly 1 element
+        } catch (error) {
+          if (error instanceof Error && error.message.includes('Multiple elements found')) {
+            multipleElementsFound = true;
+            passed = false; // Multiple elements is always a failure
+            evidence = error.message;
+          }
+        }
       }
+      
+      if (!multipleElementsFound) {
+        if (matchType === 'contains') {
+          passed = isVisible; // Element must be present AND visible
+        } else { // matchType === "not-contains"
+          passed = !isVisible; // Element should NOT be visible (can exist in DOM but hidden)
+        }
 
-      // Generate evidence message
-      if (matchType === 'contains') {
-        if (passed)
-          evidence = `Element with role "${role}" and accessible name "${accessibleName}" is visible to user as expected (found via ${searchMethod})`;
-        else
-          evidence = `Element with role "${role}" and accessible name "${accessibleName}" exists in DOM but is not visible to user (found via ${searchMethod})`;
+        // Generate evidence message
+        if (matchType === 'contains') {
+          if (passed)
+            evidence = `Element with role "${role}" and accessible name "${accessibleName}" is visible to user as expected (found via ${searchMethod})`;
+          else
+            evidence = `Element with role "${role}" and accessible name "${accessibleName}" exists in DOM but is not visible to user (found via ${searchMethod})`;
 
-      } else { // matchType === "not-contains"
-        if (passed)
-          evidence = `Element with role "${role}" and accessible name "${accessibleName}" is not visible to user as expected (found via ${searchMethod})`;
-        else
-          evidence = `Element with role "${role}" and accessible name "${accessibleName}" is unexpectedly visible to user (found via ${searchMethod})`;
-
+        } else { // matchType === "not-contains"
+          if (passed)
+            evidence = `Element with role "${role}" and accessible name "${accessibleName}" is not visible to user as expected (found via ${searchMethod})`;
+          else
+            evidence = `Element with role "${role}" and accessible name "${accessibleName}" is unexpectedly visible to user (found via ${searchMethod})`;
+        }
       }
 
       const payload = {
@@ -1777,9 +1832,9 @@ export default [
   extract_svg_from_element,
   extract_image_urls,
   validate_computed_styles,
-  validate_element_text,
+  validate_text_visible,
   validate_dom_properties,
-  validate_element,
+  validate_element_visible,
   validate_alert_in_snapshot,
   default_validation,
   validate_response,

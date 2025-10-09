@@ -16,7 +16,7 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import type * as playwright from 'playwright';
-
+import { expect } from '@zealous-tech/playwright/test';
 const camelToKebab = (prop: string) =>
   prop.replace(/[A-Z]/g, m => `-${m.toLowerCase()}`);
 
@@ -1404,4 +1404,82 @@ function applyArrayFilter(arr: any[], filter: string): any {
   return results.length === 1 ? results[0] : results;
 }
 
-export { pickActualValue, parseRGBColor, isColorInRange, getAllComputedStylesDirect, getAllDomPropsDirect, hasAlertDialog, getAlertDialogText, performRegexCheck, performRegexExtract, performRegexMatch, compareValues, searchTextInAllFrames, searchElementsByRoleInAllFrames, getElementTextWithFallbacks, getFullXPath, parseArguments, parseSingleArgument, convertToValidJson, parseMethodChain, parseMethodCall, applyLocatorMethod, getValueByJsonPath };
+/**
+ * Check element visibility with parallel recursive search across all frames
+ * Ensures exactly 1 element is found with the specified role and accessibleName
+ */
+async function checkElementVisibilityUnique(page: any, role: string, accessibleName: string) {
+  const { expect } = await import('@zealous-tech/playwright/test');
+  
+  const searchPromises = [];
+  
+  // Add search in main frame
+  searchPromises.push(
+    expect(page.getByRole(role, { name: accessibleName })).toBeVisible()
+      .then(() => ({ found: true, frame: 'main', level: 0 }))
+      .catch(() => ({ found: false, frame: 'main', level: 0 }))
+  );
+  
+  // Recursively collect all iframes at all levels
+  const allFrames = await collectAllFrames(page, 0);
+  
+  // Create promises for all frames
+  for (const frameInfo of allFrames) {
+    searchPromises.push(
+      expect(frameInfo.frame.getByRole(role, { name: accessibleName })).toBeVisible({timeout:2000})
+        .then(() => ({ found: true, frame: frameInfo.name, level: frameInfo.level }))
+        .catch(() => ({ found: false, frame: frameInfo.name, level: frameInfo.level }))
+    );
+  }
+  
+  // Wait for all search results in parallel
+  const results = await Promise.all(searchPromises);
+  
+  // Count found elements
+  const foundResults = results.filter(result => result.found);
+  
+  if (foundResults.length === 0) {
+    throw new Error(`Element with role "${role}" and name "${accessibleName}" not found in any frame`);
+  } else if (foundResults.length === 1) {
+    return { 
+      found: true, 
+      unique: true, 
+      count: 1, 
+      frame: foundResults[0].frame,
+      level: foundResults[0].level
+    };
+  } else {
+    // Multiple elements found - this is an error
+    const frames = foundResults.map(r => r.frame).join(', ');
+    throw new Error(`Multiple elements found with role "${role}" and name "${accessibleName}" in frames: ${frames}. Expected exactly 1 element.`);
+  }
+}
+
+/**
+ * Recursively collect all frames (main + all iframes at all levels)
+ */
+async function collectAllFrames(page: any, level: number): Promise<Array<{frame: any, name: string, level: number}>> {
+  const frames = [];
+  const iframes = page.locator('iframe');
+  const iframeCount = await iframes.count();
+  
+  for (let i = 0; i < iframeCount; i++) {
+    const iframe = page.frameLocator(`iframe >> nth=${i}`);
+    const frameName = `iframe-${level}-${i}`;
+    
+    frames.push({ frame: iframe, name: frameName, level });
+    
+    // Recursively collect nested iframes
+    try {
+      const nestedFrames = await collectAllFrames(iframe, level + 1);
+      frames.push(...nestedFrames);
+    } catch (error) {
+      // Ignore errors when accessing nested frames
+      continue;
+    }
+  }
+  
+  return frames;
+}
+
+export { pickActualValue, parseRGBColor, isColorInRange, getAllComputedStylesDirect, getAllDomPropsDirect, hasAlertDialog, getAlertDialogText, performRegexCheck, performRegexExtract, performRegexMatch, compareValues, searchTextInAllFrames, searchElementsByRoleInAllFrames, getElementTextWithFallbacks, getFullXPath, parseArguments, parseSingleArgument, convertToValidJson, parseMethodChain, parseMethodCall, applyLocatorMethod, getValueByJsonPath, checkElementVisibilityUnique };
