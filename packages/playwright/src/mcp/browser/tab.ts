@@ -260,9 +260,10 @@ export class Tab extends EventEmitter<TabEventsInterface> {
         // Check if it's a Playwright command (starts with getBy or locator)
         if (code.startsWith('getBy') || code.startsWith('locator')) {
           try {
-            // Parse Playwright command safely
-            const locator = this.parsePlaywrightCommand(code);
-            return locator.describe(params.element);
+              const getLocator = new Function('page', `return page.${code}`);
+              const locator = getLocator(this.page);   
+            //const locator = this.parsePlaywrightCommand(code);
+              return locator.describe(params.element);
           } catch (error) {
             throw new Error(`Failed to execute Playwright command "${code}": ${error instanceof Error ? error.message : String(error)}`);
           }
