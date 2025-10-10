@@ -17,8 +17,52 @@ import { z } from 'zod';
 import { defineTabTool } from './tool.js';
 import { getAllComputedStylesDirect, pickActualValue, parseRGBColor, isColorInRange, getAllDomPropsDirect, performRegexCheck, searchTextInAllFrames, searchElementsByRoleInAllFrames, getElementTextWithFallbacks, runCommandClean, getValueByJsonPath, compareValues, checkElementVisibilityUnique } from './helperFunctions.js';
 import { generateLocator } from './utils.js';
+
+// Helper function to convert string to RegExp if it looks like a regex
+function stringToRegExp(str: string): string | RegExp {
+  // Check if string looks like a regex pattern (starts and ends with /)
+  if (str.startsWith('/') && str.endsWith('/') && str.length > 2) {
+    const pattern = str.slice(1, -1); // Remove leading and trailing /
+    try {
+      return new RegExp(pattern);
+    } catch (e) {
+      // If RegExp creation fails, return original string
+      return str;
+    }
+  }
+  return str;
+}
+
+// Helper function to convert string values to RegExp in objects
+function convertStringToRegExp(obj: any): any {
+  if (typeof obj === 'string') {
+    return stringToRegExp(obj);
+  }
+  
+  if (Array.isArray(obj)) {
+    return obj.map(convertStringToRegExp);
+  }
+  
+  if (obj && typeof obj === 'object') {
+    const converted: any = {};
+    for (const [key, value] of Object.entries(obj)) {
+      // Convert specific fields that can contain RegExp values
+      if (key === 'expected' || key === 'value' || key === 'values' || 
+          key === 'name' || key === 'description' || key === 'errorMessage' ||
+          key === 'id' || key === 'role') {
+        converted[key] = convertStringToRegExp(value);
+      } else {
+        converted[key] = value;
+      }
+    }
+    return converted;
+  }
+  
+  return obj;
+}
 import { expect } from '@zealous-tech/playwright/test';
 import type * as playwright from 'playwright';
+import { convertSelectOptionValues } from 'playwright-core/lib/client/elementHandle.js';
 
 const elementStyleSchema = z.object({
   element: z.string().describe('Human-readable element description used to obtain permission to interact with the element'),
@@ -723,6 +767,682 @@ const validate_dom_properties = defineTabTool({
       };
 
       console.log('Validate DOM Properties:');
+      console.log(payload);
+      response.addResult(JSON.stringify(payload, null, 2));
+    });
+  },
+});
+
+// Individual assertion argument schemas
+const toBeAttachedArgsSchema = z.object({
+  attached: z.boolean().optional().describe('Whether the element should be attached to Document or ShadowRoot'),
+  timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+});
+
+const toBeCheckedArgsSchema = z.object({
+  checked: z.boolean().optional().describe('Provides state to assert for. Asserts for input to be checked by default. This option can\'t be used when indeterminate is set to true.'),
+  indeterminate: z.boolean().optional().describe('Asserts that the element is in the indeterminate (mixed) state. Only supported for checkboxes and radio buttons. This option can\'t be true when checked is provided.'),
+  timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+});
+
+const toBeDisabledArgsSchema = z.object({
+  timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+});
+
+const toBeEditableArgsSchema = z.object({
+  editable: z.boolean().optional().describe('Whether the element should be editable'),
+  timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+});
+
+const toBeEmptyArgsSchema = z.object({
+  timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+});
+
+const toBeEnabledArgsSchema = z.object({
+  enabled: z.boolean().optional().describe('Whether the element should be enabled'),
+  timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+});
+
+const toBeFocusedArgsSchema = z.object({
+  timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+});
+
+const toBeHiddenArgsSchema = z.object({
+  timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+});
+
+const toBeInViewportArgsSchema = z.object({
+  ratio: z.number().optional().describe('The minimal ratio of the element to intersect viewport. If equals to 0, then element should intersect viewport at any positive ratio. Defaults to 0'),
+  timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+});
+
+const toBeVisibleArgsSchema = z.object({
+  visible: z.boolean().optional().describe('Whether the element should be visible'),
+  timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+});
+
+const toContainClassArgsSchema = z.object({
+  expected: z.union([z.string(), z.array(z.string())]).describe('A string containing expected class names, separated by spaces, or a list of such strings to assert multiple elements'),
+  timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+});
+
+const toContainTextArgsSchema = z.object({
+  expected: z.union([z.string(), z.instanceof(RegExp), z.array(z.union([z.string(), z.instanceof(RegExp)]))]).describe('Expected substring or RegExp or a list of those'),
+  ignoreCase: z.boolean().optional().describe('Whether to perform case-insensitive match. ignoreCase option takes precedence over the corresponding regular expression flag if specified'),
+  timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+  useInnerText: z.boolean().optional().describe('Whether to use element.innerText instead of element.textContent when retrieving DOM node text'),
+});
+
+const toHaveAccessibleDescriptionArgsSchema = z.object({
+  description: z.union([z.string(), z.instanceof(RegExp)]).describe('Expected accessible description'),
+  ignoreCase: z.boolean().optional().describe('Whether to perform case-insensitive match. ignoreCase option takes precedence over the corresponding regular expression flag if specified'),
+  timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+});
+
+const toHaveAccessibleErrorMessageArgsSchema = z.object({
+  errorMessage: z.union([z.string(), z.instanceof(RegExp)]).describe('Expected accessible error message'),
+  ignoreCase: z.boolean().optional().describe('Whether to perform case-insensitive match. ignoreCase option takes precedence over the corresponding regular expression flag if specified'),
+  timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+});
+
+const toHaveAccessibleNameArgsSchema = z.object({
+  name: z.union([z.string(), z.instanceof(RegExp)]).describe('Expected accessible name'),
+  ignoreCase: z.boolean().optional().describe('Whether to perform case-insensitive match. ignoreCase option takes precedence over the corresponding regular expression flag if specified'),
+  timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+});
+
+const toHaveAttributeArgsSchema = z.object({
+  name: z.string().describe('Attribute name'),
+  timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+});
+
+const toHaveAttributeValueArgsSchema = z.object({
+  name: z.string().describe('Attribute name'),
+  value: z.union([z.string(), z.instanceof(RegExp)]).describe('Expected attribute value'),
+  ignoreCase: z.boolean().optional().describe('Whether to perform case-insensitive match. ignoreCase option takes precedence over the corresponding regular expression flag if specified'),
+  timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+});
+
+const toHaveClassArgsSchema = z.object({
+  expected: z.union([z.string(), z.instanceof(RegExp), z.array(z.union([z.string(), z.instanceof(RegExp)]))]).describe('Expected class or RegExp or a list of those'),
+  timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+});
+
+const toHaveCountArgsSchema = z.object({
+  count: z.number().describe('Expected count'),
+  timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+});
+
+const toHaveCSSArgsSchema = z.object({
+  name: z.string().describe('CSS property name'),
+  value: z.union([z.string(), z.instanceof(RegExp)]).describe('CSS property value'),
+  timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+});
+
+const toHaveIdArgsSchema = z.object({
+  id: z.union([z.string(), z.instanceof(RegExp)]).describe('Element id'),
+  timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+});
+
+const toHaveJSPropertyArgsSchema = z.object({
+  name: z.string().describe('Property name'),
+  value: z.any().describe('Property value'),
+  timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+});
+
+const toHaveRoleArgsSchema = z.object({
+  role: z.enum(['alert', 'alertdialog', 'application', 'article', 'banner', 'blockquote', 'button', 'caption', 'cell', 'checkbox', 'code', 'columnheader', 'combobox', 'complementary', 'contentinfo', 'definition', 'deletion', 'dialog', 'directory', 'document', 'emphasis', 'feed', 'figure', 'form', 'generic', 'grid', 'gridcell', 'group', 'heading', 'img', 'insertion', 'link', 'list', 'listbox', 'listitem', 'log', 'main', 'marquee', 'math', 'meter', 'menu', 'menubar', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'navigation', 'none', 'note', 'option', 'paragraph', 'presentation', 'progressbar', 'radio', 'radiogroup', 'region', 'row', 'rowgroup', 'rowheader', 'scrollbar', 'search', 'searchbox', 'separator', 'slider', 'spinbutton', 'status', 'strong', 'subscript', 'superscript', 'switch', 'tab', 'table', 'tablist', 'tabpanel', 'term', 'textbox', 'time', 'timer', 'toolbar', 'tooltip', 'tree', 'treegrid', 'treeitem']).describe('Required aria role'),
+  timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+});
+
+const toHaveScreenshotArgsSchema = z.object({
+  name: z.union([z.string(), z.array(z.string())]).describe('Snapshot name'),
+  animations: z.enum(['disabled', 'allow']).optional().describe('When set to "disabled", stops CSS animations, CSS transitions and Web Animations'),
+  caret: z.enum(['hide', 'initial']).optional().describe('When set to "hide", screenshot will hide text caret'),
+  mask: z.array(z.any()).optional().describe('Specify locators that should be masked when the screenshot is taken'),
+  maskColor: z.string().optional().describe('Specify the color of the overlay box for masked elements, in CSS color format'),
+  maxDiffPixelRatio: z.number().min(0).max(1).optional().describe('An acceptable ratio of pixels that are different to the total amount of pixels, between 0 and 1'),
+  maxDiffPixels: z.number().optional().describe('An acceptable amount of pixels that could be different'),
+  omitBackground: z.boolean().optional().describe('Hides default white background and allows capturing screenshots with transparency'),
+  scale: z.enum(['css', 'device']).optional().describe('When set to "css", screenshot will have a single pixel per each css pixel on the page'),
+  stylePath: z.union([z.string(), z.array(z.string())]).optional().describe('File name containing the stylesheet to apply while making the screenshot'),
+  threshold: z.number().min(0).max(1).optional().describe('An acceptable perceived color difference in the YIQ color space between the same pixel in compared images, between zero (strict) and one (lax)'),
+  timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+});
+
+const toHaveScreenshotOptionsArgsSchema = z.object({
+  animations: z.enum(['disabled', 'allow']).optional().describe('When set to "disabled", stops CSS animations, CSS transitions and Web Animations'),
+  caret: z.enum(['hide', 'initial']).optional().describe('When set to "hide", screenshot will hide text caret'),
+  mask: z.array(z.any()).optional().describe('Specify locators that should be masked when the screenshot is taken'),
+  maskColor: z.string().optional().describe('Specify the color of the overlay box for masked elements, in CSS color format'),
+  maxDiffPixelRatio: z.number().min(0).max(1).optional().describe('An acceptable ratio of pixels that are different to the total amount of pixels, between 0 and 1'),
+  maxDiffPixels: z.number().optional().describe('An acceptable amount of pixels that could be different'),
+  omitBackground: z.boolean().optional().describe('Hides default white background and allows capturing screenshots with transparency'),
+  scale: z.enum(['css', 'device']).optional().describe('When set to "css", screenshot will have a single pixel per each css pixel on the page'),
+  stylePath: z.union([z.string(), z.array(z.string())]).optional().describe('File name containing the stylesheet to apply while making the screenshot'),
+  threshold: z.number().min(0).max(1).optional().describe('An acceptable perceived color difference in the YIQ color space between the same pixel in compared images, between zero (strict) and one (lax)'),
+  timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+});
+
+
+const toHaveTextArgsSchema = z.object({
+  expected: z.union([z.string(), z.instanceof(RegExp), z.array(z.union([z.string(), z.instanceof(RegExp)]))]).describe('Expected string or RegExp or a list of those'),
+  ignoreCase: z.boolean().optional().describe('Whether to perform case-insensitive match. ignoreCase option takes precedence over the corresponding regular expression flag if specified'),
+  timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+  useInnerText: z.boolean().optional().describe('Whether to use element.innerText instead of element.textContent when retrieving DOM node text'),
+});
+
+
+const toHaveValueArgsSchema = z.object({
+  value: z.union([z.string(), z.instanceof(RegExp)]).describe('Expected value'),
+  timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+});
+
+const toHaveValuesArgsSchema = z.object({
+  values: z.array(z.union([z.string(), z.instanceof(RegExp)])).describe('Expected options currently selected'),
+  timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+});
+
+const toMatchAriaSnapshotArgsSchema = z.object({
+  expected: z.string().describe('Expected accessibility snapshot'),
+  timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+});
+
+const toMatchAriaSnapshotOptionsArgsSchema = z.object({
+  name: z.string().optional().describe('Name of the snapshot to store in the snapshot folder corresponding to this test. Generates sequential names if not specified'),
+  timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+});
+
+
+
+
+// Union schema for all assertion arguments
+const assertionArgumentsSchema = z.discriminatedUnion('assertionType', [
+  z.object({ assertionType: z.literal('toBeAttached'), ...toBeAttachedArgsSchema.shape }),
+  z.object({ assertionType: z.literal('toBeChecked'), ...toBeCheckedArgsSchema.shape }),
+  z.object({ assertionType: z.literal('toBeDisabled'), ...toBeDisabledArgsSchema.shape }),
+  z.object({ assertionType: z.literal('toBeEditable'), ...toBeEditableArgsSchema.shape }),
+  z.object({ assertionType: z.literal('toBeEmpty'), ...toBeEmptyArgsSchema.shape }),
+  z.object({ assertionType: z.literal('toBeEnabled'), ...toBeEnabledArgsSchema.shape }),
+  z.object({ assertionType: z.literal('toBeFocused'), ...toBeFocusedArgsSchema.shape }),
+  z.object({ assertionType: z.literal('toBeHidden'), ...toBeHiddenArgsSchema.shape }),
+  z.object({ assertionType: z.literal('toBeInViewport'), ...toBeInViewportArgsSchema.shape }),
+  z.object({ assertionType: z.literal('toBeVisible'), ...toBeVisibleArgsSchema.shape }),
+  z.object({ assertionType: z.literal('toContainClass'), ...toContainClassArgsSchema.shape }),
+  z.object({ assertionType: z.literal('toContainText'), ...toContainTextArgsSchema.shape }),
+  z.object({ assertionType: z.literal('toHaveAccessibleDescription'), ...toHaveAccessibleDescriptionArgsSchema.shape }),
+  z.object({ assertionType: z.literal('toHaveAccessibleErrorMessage'), ...toHaveAccessibleErrorMessageArgsSchema.shape }),
+  z.object({ assertionType: z.literal('toHaveAccessibleName'), ...toHaveAccessibleNameArgsSchema.shape }),
+  z.object({ assertionType: z.literal('toHaveAttribute'), ...toHaveAttributeArgsSchema.shape }),
+  z.object({ assertionType: z.literal('toHaveAttributeValue'), ...toHaveAttributeValueArgsSchema.shape }),
+  z.object({ assertionType: z.literal('toHaveClass'), ...toHaveClassArgsSchema.shape }),
+  z.object({ assertionType: z.literal('toHaveCount'), ...toHaveCountArgsSchema.shape }),
+  z.object({ assertionType: z.literal('toHaveCSS'), ...toHaveCSSArgsSchema.shape }),
+  z.object({ assertionType: z.literal('toHaveId'), ...toHaveIdArgsSchema.shape }),
+  z.object({ assertionType: z.literal('toHaveJSProperty'), ...toHaveJSPropertyArgsSchema.shape }),
+  z.object({ assertionType: z.literal('toHaveRole'), ...toHaveRoleArgsSchema.shape }),
+  z.object({ assertionType: z.literal('toHaveScreenshot'), ...toHaveScreenshotArgsSchema.shape }),
+  z.object({ assertionType: z.literal('toHaveScreenshotOptions'), ...toHaveScreenshotOptionsArgsSchema.shape }),
+  z.object({ assertionType: z.literal('toHaveText'), ...toHaveTextArgsSchema.shape }),
+  z.object({ assertionType: z.literal('toHaveValue'), ...toHaveValueArgsSchema.shape }),
+  z.object({ assertionType: z.literal('toHaveValues'), ...toHaveValuesArgsSchema.shape }),
+  z.object({ assertionType: z.literal('toMatchAriaSnapshot'), ...toMatchAriaSnapshotArgsSchema.shape }),
+  z.object({ assertionType: z.literal('toMatchAriaSnapshotOptions'), ...toMatchAriaSnapshotOptionsArgsSchema.shape }),
+]);
+
+// Schema for DOM assertions using Playwright expect assertions
+const domAssertionCheckSchema = z.object({
+  negate: z.boolean().optional().default(false).describe('Whether to negate the assertion (use .not)'),
+  timeout: z.number().optional().describe('Timeout in milliseconds for the assertion'),
+  assertion: assertionArgumentsSchema.describe('Assertion type and its specific arguments'),
+});
+
+const domAssertionChecksSchema = z.array(domAssertionCheckSchema).min(1);
+
+const validateDomAssertionsSchema = baseDomInputSchema.extend({
+  checks: domAssertionChecksSchema,
+});
+
+const validate_dom_assertions = defineTabTool({
+  capability: 'core',
+  schema: {
+    name: 'validate_dom_assertions',
+    title: 'Validate DOM properties using Playwright assertions',
+    description: 'Validate DOM properties using Playwright expect assertions (toBeEnabled, toBeDisabled, toBeVisible, etc.).',
+    inputSchema: validateDomAssertionsSchema,
+    type: 'readOnly',
+  },
+  handle: async (tab, rawParams, response) => {
+    const { ref, element, checks } = validateDomAssertionsSchema.parse(rawParams);
+
+    await tab.waitForCompletion(async () => {
+      const locator = await tab.refLocator({ ref, element });
+      const results = [];
+
+      for (const check of checks) {
+        const { negate, timeout = 2000, assertion: args } = check;
+        if (!args || !args.assertionType) {
+          throw new Error('Each check must have assertion with assertionType');
+        }
+        // Convert string RegExp patterns to actual RegExp objects
+        const convertedArgs = convertStringToRegExp(args);
+        const { assertionType: name } = convertedArgs;
+        let result = {
+          assertion: name,
+          negate,
+          result: 'fail' as 'pass' | 'fail',
+          error: '',
+          actual: '',
+          arguments: args,
+        };
+
+        try {
+          // Create the assertion
+          const assertion = negate ? expect(locator).not : expect(locator);
+          
+          // Prepare final args - merge timeout from top-level with converted args
+          const finalArgs = { ...convertedArgs, ...(timeout && { timeout }) };
+
+          // Execute the specific assertion by calling the method dynamically
+          let assertionResult;
+          switch (name) {
+            case 'toBeEnabled':
+              if (!convertedArgs || convertedArgs.assertionType !== 'toBeEnabled') {
+                throw new Error('toBeEnabled requires proper arguments structure');
+              }
+              const { enabled } = convertedArgs;
+              if (enabled !== undefined) {
+                assertionResult = await assertion.toBeEnabled({ enabled, ...finalArgs });
+                result.actual = `enabled=${enabled}`;
+              } else {
+                assertionResult = await assertion.toBeEnabled(finalArgs);
+                result.actual = 'enabled';
+              }
+              break;
+
+            case 'toBeDisabled':
+              if (!args || args.assertionType !== 'toBeDisabled') {
+                throw new Error('toBeDisabled requires proper arguments structure');
+              }
+              assertionResult = await assertion.toBeDisabled(finalArgs);
+              result.actual = 'disabled';
+              break;
+
+            case 'toBeVisible':
+              if (!args || args.assertionType !== 'toBeVisible') {
+                throw new Error('toBeVisible requires proper arguments structure');
+              }
+              assertionResult = await assertion.toBeVisible(finalArgs);
+              result.actual = 'visible';
+              break;
+
+            case 'toBeHidden':
+              if (!args || args.assertionType !== 'toBeHidden') {
+                throw new Error('toBeHidden requires proper arguments structure');
+              }
+              assertionResult = await assertion.toBeHidden(finalArgs);
+              result.actual = 'hidden';
+              break;
+
+            case 'toBeInViewport':
+              if (!args || args.assertionType !== 'toBeInViewport') {
+                throw new Error('toBeInViewport requires proper arguments structure');
+              }
+              assertionResult = await assertion.toBeInViewport(finalArgs);
+              result.actual = 'in viewport';
+              break;
+
+            case 'toBeChecked':
+              if (!args || args.assertionType !== 'toBeChecked') {
+                throw new Error('toBeChecked requires proper arguments structure');
+              }
+              const { checked, indeterminate } = args;
+              
+              // Validate that checked and indeterminate are not both provided
+              if (checked !== undefined && indeterminate === true) {
+                throw new Error('toBeChecked: checked and indeterminate options cannot be used together');
+              }
+              
+              if (checked !== undefined) {
+                assertionResult = await assertion.toBeChecked({ checked, ...finalArgs });
+                result.actual = `checked=${checked}`;
+              } else if (indeterminate === true) {
+                assertionResult = await assertion.toBeChecked({ indeterminate: true, ...finalArgs });
+                result.actual = 'indeterminate=true';
+              } else {
+                assertionResult = await assertion.toBeChecked(finalArgs);
+                result.actual = 'checked';
+              }
+              break;
+
+
+            case 'toBeFocused':
+              if (!args || args.assertionType !== 'toBeFocused') {
+                throw new Error('toBeFocused requires proper arguments structure');
+              }
+              assertionResult = await assertion.toBeFocused(finalArgs);
+              result.actual = 'focused';
+              break;
+
+            case 'toBeEditable':
+              if (!args || args.assertionType !== 'toBeEditable') {
+                throw new Error('toBeEditable requires proper arguments structure');
+              }
+              const { editable } = args;
+              if (editable !== undefined) {
+                assertionResult = await assertion.toBeEditable({ editable, ...finalArgs });
+                result.actual = `editable=${editable}`;
+              } else {
+                assertionResult = await assertion.toBeEditable(finalArgs);
+                result.actual = 'editable';
+              }
+              break;
+
+            case 'toBeEmpty':
+              if (!args || args.assertionType !== 'toBeEmpty') {
+                throw new Error('toBeEmpty requires proper arguments structure');
+              }
+              assertionResult = await assertion.toBeEmpty(finalArgs);
+              result.actual = 'empty';
+              break;
+
+            case 'toBeAttached':
+              if (!args || args.assertionType !== 'toBeAttached') {
+                throw new Error('toBeAttached requires proper arguments structure');
+              }
+              const { attached } = args;
+              if (attached !== undefined) {
+                assertionResult = await assertion.toBeAttached({ attached, ...finalArgs });
+                result.actual = `attached=${attached}`;
+              } else {
+                assertionResult = await assertion.toBeAttached(finalArgs);
+                result.actual = 'attached';
+              }
+              break;
+
+            case 'toHaveAttribute':
+              if (!args || args.assertionType !== 'toHaveAttribute') {
+                throw new Error('toHaveAttribute requires proper arguments structure');
+              }
+              const { name: attrName } = args;
+              if (!attrName) {
+                throw new Error('toHaveAttribute requires "name" argument (string)');
+              }
+              assertionResult = await assertion.toHaveAttribute(attrName, finalArgs);
+              result.actual = `attribute "${attrName}" exists`;
+              break;
+
+            case 'toHaveAttributeValue':
+              if (!args || args.assertionType !== 'toHaveAttributeValue') {
+                throw new Error('toHaveAttributeValue requires proper arguments structure');
+              }
+              const { name: attrValueName, value: attrValueValue } = args;
+              if (!attrValueName) {
+                throw new Error('toHaveAttributeValue requires "name" argument (string)');
+              }
+              if (!attrValueValue) {
+                throw new Error('toHaveAttributeValue requires "value" argument (string or RegExp)');
+              }
+              assertionResult = await assertion.toHaveAttribute(attrValueName, attrValueValue, finalArgs);
+              result.actual = `attribute "${attrValueName}"="${attrValueValue}"`;
+              break;
+
+            case 'toHaveText':
+              if (!args || args.assertionType !== 'toHaveText') {
+                throw new Error('toHaveText requires proper arguments structure');
+              }
+              const { expected: textExpected } = args;
+              if (!textExpected) {
+                throw new Error('toHaveText requires "expected" argument (string, RegExp, or Array<string | RegExp>)');
+              }
+              assertionResult = await assertion.toHaveText(textExpected, finalArgs);
+              result.actual = `text "${Array.isArray(textExpected) ? textExpected.join(', ') : textExpected}"`;
+              break;
+
+            case 'toContainText':
+              if (!args || args.assertionType !== 'toContainText') {
+                throw new Error('toContainText requires proper arguments structure');
+              }
+              const { expected: containExpected } = args;
+              if (!containExpected) {
+                throw new Error('toContainText requires "expected" argument (string, RegExp, or Array<string | RegExp>)');
+              }
+              assertionResult = await assertion.toContainText(containExpected, finalArgs);
+              result.actual = `contains text "${Array.isArray(containExpected) ? containExpected.join(', ') : containExpected}"`;
+              break;
+
+            case 'toHaveValue':
+              if (!args || args.assertionType !== 'toHaveValue') {
+                throw new Error('toHaveValue requires proper arguments structure');
+              }
+              const { value: valueExpected } = args;
+              if (valueExpected === undefined) {
+                throw new Error('toHaveValue requires "value" argument (string or RegExp)');
+              }
+              assertionResult = await assertion.toHaveValue(valueExpected, finalArgs);
+              result.actual = `value "${valueExpected}"`;
+              break;
+
+            case 'toHaveValues':
+              if (!args || args.assertionType !== 'toHaveValues') {
+                throw new Error('toHaveValues requires proper arguments structure');
+              }
+              const { values: valuesExpected } = args;
+              if (!valuesExpected || !Array.isArray(valuesExpected)) {
+                throw new Error('toHaveValues requires "values" argument (Array<string | RegExp>)');
+              }
+              assertionResult = await assertion.toHaveValues(valuesExpected, finalArgs);
+              result.actual = `values [${valuesExpected.join(', ')}]`;
+              break;
+
+            case 'toMatchAriaSnapshot':
+              if (!args || args.assertionType !== 'toMatchAriaSnapshot') {
+                throw new Error('toMatchAriaSnapshot requires proper arguments structure');
+              }
+              const { expected: ariaSnapshotExpected } = args;
+              if (!ariaSnapshotExpected) {
+                throw new Error('toMatchAriaSnapshot requires "expected" argument (string)');
+              }
+              assertionResult = await assertion.toMatchAriaSnapshot(ariaSnapshotExpected, finalArgs);
+              result.actual = `aria snapshot "${ariaSnapshotExpected}"`;
+              break;
+
+            case 'toMatchAriaSnapshotOptions':
+              if (!args || args.assertionType !== 'toMatchAriaSnapshotOptions') {
+                throw new Error('toMatchAriaSnapshotOptions requires proper arguments structure');
+              }
+              const { name, timeout } = args;
+              const ariaSnapshotOptionsArgs = { name, timeout };
+              assertionResult = await assertion.toMatchAriaSnapshot(ariaSnapshotOptionsArgs);
+              result.actual = 'aria snapshot (with options)';
+              break;
+
+            case 'toContainClass':
+              if (!args || args.assertionType !== 'toContainClass') {
+                throw new Error('toContainClass requires proper arguments structure');
+              }
+              const { expected: containClassExpected } = args;
+              if (!containClassExpected) {
+                throw new Error('toContainClass requires "expected" argument (string or Array<string>)');
+              }
+              assertionResult = await assertion.toContainClass(containClassExpected, finalArgs);
+              result.actual = `contains class "${Array.isArray(containClassExpected) ? containClassExpected.join(' ') : containClassExpected}"`;
+              break;
+
+            case 'toHaveClass':
+              if (!args || args.assertionType !== 'toHaveClass') {
+                throw new Error('toHaveClass requires proper arguments structure');
+              }
+              const { expected: classExpected } = args;
+              if (!classExpected) {
+                throw new Error('toHaveClass requires "expected" argument (string, RegExp, or Array<string | RegExp>)');
+              }
+              assertionResult = await assertion.toHaveClass(classExpected, finalArgs);
+              result.actual = `class "${Array.isArray(classExpected) ? classExpected.join(' ') : classExpected}"`;
+              break;
+
+            case 'toHaveCount':
+              if (!args || args.assertionType !== 'toHaveCount') {
+                throw new Error('toHaveCount requires proper arguments structure');
+              }
+              const { count } = args;
+              if (count === undefined) {
+                throw new Error('toHaveCount requires "count" argument (number)');
+              }
+              assertionResult = await assertion.toHaveCount(count, finalArgs);
+              result.actual = `count ${count}`;
+              break;
+
+            case 'toHaveCSS':
+              if (!args || args.assertionType !== 'toHaveCSS') {
+                throw new Error('toHaveCSS requires proper arguments structure');
+              }
+              const { name: cssName, value: cssValue } = args;
+              if (!cssName || !cssValue) {
+                throw new Error('toHaveCSS requires "name" and "value" arguments');
+              }
+              assertionResult = await assertion.toHaveCSS(cssName, cssValue, finalArgs);
+              result.actual = `CSS ${cssName}="${cssValue}"`;
+              break;
+
+            case 'toHaveId':
+              if (!args || args.assertionType !== 'toHaveId') {
+                throw new Error('toHaveId requires proper arguments structure');
+              }
+              const { id } = args;
+              if (!id) {
+                throw new Error('toHaveId requires "id" argument (string or RegExp)');
+              }
+              assertionResult = await assertion.toHaveId(id, finalArgs);
+              result.actual = `id "${id}"`;
+              break;
+
+            case 'toHaveJSProperty':
+              if (!args || args.assertionType !== 'toHaveJSProperty') {
+                throw new Error('toHaveJSProperty requires proper arguments structure');
+              }
+              const { name: jsPropertyName, value: jsPropertyValue } = args;
+              if (!jsPropertyName || jsPropertyValue === undefined) {
+                throw new Error('toHaveJSProperty requires "name" and "value" arguments');
+              }
+              assertionResult = await assertion.toHaveJSProperty(jsPropertyName, jsPropertyValue, finalArgs);
+              result.actual = `JS property ${jsPropertyName}="${JSON.stringify(jsPropertyValue)}"`;
+              break;
+
+            case 'toHaveRole':
+              if (!args || args.assertionType !== 'toHaveRole') {
+                throw new Error('toHaveRole requires proper arguments structure');
+              }
+              const { role } = args;
+              if (!role) {
+                throw new Error('toHaveRole requires "role" argument (ARIA role)');
+              }
+              assertionResult = await assertion.toHaveRole(role, finalArgs);
+              result.actual = `role "${role}"`;
+              break;
+
+            case 'toHaveScreenshot':
+              if (!args || args.assertionType !== 'toHaveScreenshot') {
+                throw new Error('toHaveScreenshot requires proper arguments structure');
+              }
+              const { name: screenshotName } = args;
+              if (!screenshotName) {
+                throw new Error('toHaveScreenshot requires "name" argument (snapshot name)');
+              }
+              assertionResult = await assertion.toHaveScreenshot(screenshotName, finalArgs);
+              result.actual = `screenshot "${Array.isArray(screenshotName) ? screenshotName.join(', ') : screenshotName}"`;
+              break;
+
+            case 'toHaveScreenshotOptions':
+              if (!args || args.assertionType !== 'toHaveScreenshotOptions') {
+                throw new Error('toHaveScreenshotOptions requires proper arguments structure');
+              }
+              assertionResult = await assertion.toHaveScreenshot(finalArgs);
+              result.actual = 'screenshot (with options)';
+              break;
+
+
+            case 'toHaveAccessibleDescription':
+              if (!args || args.assertionType !== 'toHaveAccessibleDescription') {
+                throw new Error('toHaveAccessibleDescription requires proper arguments structure');
+              }
+              const { description } = args;
+              if (!description) {
+                throw new Error('toHaveAccessibleDescription requires "description" argument');
+              }
+              assertionResult = await assertion.toHaveAccessibleDescription(description, finalArgs);
+              result.actual = `accessible description "${description}"`;
+              break;
+
+            case 'toHaveAccessibleErrorMessage':
+              if (!args || args.assertionType !== 'toHaveAccessibleErrorMessage') {
+                throw new Error('toHaveAccessibleErrorMessage requires proper arguments structure');
+              }
+              const { errorMessage } = args;
+              if (!errorMessage) {
+                throw new Error('toHaveAccessibleErrorMessage requires "errorMessage" argument (string or RegExp)');
+              }
+              assertionResult = await assertion.toHaveAccessibleErrorMessage(errorMessage, finalArgs);
+              result.actual = `accessible error message "${errorMessage}"`;
+              break;
+
+            case 'toHaveAccessibleName':
+              if (!args || args.assertionType !== 'toHaveAccessibleName') {
+                throw new Error('toHaveAccessibleName requires proper arguments structure');
+              }
+              const { name: accessibleName } = args;
+              if (!accessibleName) {
+                throw new Error('toHaveAccessibleName requires "name" argument (string or RegExp)');
+              }
+              assertionResult = await assertion.toHaveAccessibleName(accessibleName, finalArgs);
+              result.actual = `accessible name "${accessibleName}"`;
+              break;
+
+            default:
+              throw new Error(`Unsupported assertion: ${name}`);
+          }
+
+          result.result = 'pass';
+          console.log(`validate_dom_assertions: ${name}${negate ? ' (negated)' : ''} passed for element "${element}"`);
+
+        } catch (error) {
+          result.result = 'fail';
+          result.error = error instanceof Error ? error.message : String(error);
+          console.log(`validate_dom_assertions: ${name}${negate ? ' (negated)' : ''} failed for element "${element}": ${result.error}`);
+        }
+
+        results.push(result);
+      }
+
+      // Calculate summary
+      const passedCount = results.filter(r => r.result === 'pass').length;
+      const failedCount = results.length - passedCount;
+
+      // Generate evidence message
+      let evidence = '';
+      if (passedCount === results.length) {
+        evidence = `All ${results.length} Playwright assertions passed for element "${element}"`;
+      } else {
+        const failedChecks = results.filter(r => r.result === 'fail');
+        const failedAssertions = failedChecks.map(c => `${c.assertion}${c.negate ? ' (negated)' : ''}`).join(', ');
+        evidence = `Found element "${element}" but ${failedCount} assertions failed: ${failedAssertions}`;
+      }
+
+      // Generate payload
+      const payload = {
+        ref,
+        element,
+        summary: {
+          total: results.length,
+          passed: passedCount,
+          failed: failedCount,
+          status: passedCount === results.length ? 'pass' : 'fail',
+          evidence,
+        },
+        checks: results,
+      };
+
+      console.log('Validate DOM Assertions:');
       console.log(payload);
       response.addResult(JSON.stringify(payload, null, 2));
     });
@@ -1457,7 +2177,7 @@ const validate_element_visible = defineTabTool({
   schema: {
     name: 'validate_element_visible',
     title: 'Validate Element',
-    description: 'Validate element visibility with ref-first search strategy. First tries to find element by ref, then falls back to role/accessibleName search if ref fails or is not provided.',
+    description: 'Validate element visibility',
     inputSchema: validateElementSchema,
     type: 'readOnly',
   },
@@ -1832,9 +2552,10 @@ export default [
   extract_svg_from_element,
   extract_image_urls,
   validate_computed_styles,
-  validate_text_visible,
-  validate_dom_properties,
-  validate_element_visible,
+  //validate_text_visible,
+  //validate_dom_properties,
+  validate_dom_assertions,
+  //validate_element_visible,
   validate_alert_in_snapshot,
   default_validation,
   validate_response,
