@@ -21,7 +21,7 @@ import { ManualPromise } from 'playwright-core/lib/utils';
 import { callOnPageNoTrace, waitForCompletion } from './tools/utils';
 import { logUnhandledError } from '../log';
 import { ModalState } from './tools/tool';
-
+import { parseArguments, parseMethodChain, parseMethodCall, applyLocatorMethod } from './tools/helperFunctions';
 import type { Context } from './context';
 
 type PageEx = playwright.Page & {
@@ -247,10 +247,35 @@ export class Tab extends EventEmitter<TabEventsInterface> {
   async waitForCompletion(callback: () => Promise<void>) {
     await this._raceAgainstModalStates(() => waitForCompletion(this, callback));
   }
-
-  async refLocator(params: { element: string, ref: string }): Promise<playwright.Locator> {
-    return (await this.refLocators([params]))[0];
+// @ZEALOUS UPDATE - adding functionality for obtaining locators using selectors,works for both refs and selectors
+  async refLocator(params: {
+    element: string,
+    ref: string,
+  }): Promise<playwright.Locator> {
+    // Check if ref contains code information
+    if (params.ref && params.ref.startsWith('###code')) {
+      const codeMatch = params.ref.match(/###code(.+)/);
+      if (codeMatch) {
+        const code = codeMatch[1].trim();
+        // Check if it's a Playwright command (starts with getBy or locator)
+        if (code.startsWith('getBy') || code.startsWith('locator')) {
+          try {
+              const getLocator = new Function('page', `return page.${code}`);
+              const locator = getLocator(this.page);   
+            //const locator = this.parsePlaywrightCommand(code);
+              return locator.describe(params.element);
+          } catch (error) {
+            throw new Error(`Failed to execute Playwright command "${code}": ${error instanceof Error ? error.message : String(error)}`);
+          }
+        } else {
+          throw new Error(`unknown Playwright command: ${code}`);
+        }
+      }
+    }
+    // If ref provided, get locator using ref
+    return  (await this.refLocators([{ element: params.element, ref: params.ref }]))[0];
   }
+
 
   async refLocators(params: { element: string, ref: string }[]): Promise<playwright.Locator[]> {
     const snapshot = await (this.page as PageEx)._snapshotForAI();

@@ -1,6 +1,68 @@
+/**
+ * Copyright (c) Microsoft Corporation.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 import { z } from 'zod';
 import { defineTabTool } from './tool.js';
+import { getAllComputedStylesDirect, pickActualValue, parseRGBColor, isColorInRange, getAllDomPropsDirect, performRegexCheck, searchTextInAllFrames, searchElementsByRoleInAllFrames, getElementTextWithFallbacks, runCommandClean, getValueByJsonPath, compareValues, checkElementVisibilityUnique } from './helperFunctions.js';
+import { generateLocator } from './utils.js';
+
+// Helper function to convert string to RegExp if it looks like a regex
+function stringToRegExp(str: string): string | RegExp {
+  // Check if string looks like a regex pattern (starts and ends with /)
+  if (str.startsWith('/') && str.endsWith('/') && str.length > 2) {
+    const pattern = str.slice(1, -1); // Remove leading and trailing /
+    try {
+      return new RegExp(pattern);
+    } catch (e) {
+      // If RegExp creation fails, return original string
+      return str;
+    }
+  }
+  return str;
+}
+
+// Helper function to convert string values to RegExp in objects
+function convertStringToRegExp(obj: any): any {
+  if (typeof obj === 'string') {
+    return stringToRegExp(obj);
+  }
+  
+  if (Array.isArray(obj)) {
+    return obj.map(convertStringToRegExp);
+  }
+  
+  if (obj && typeof obj === 'object') {
+    const converted: any = {};
+    for (const [key, value] of Object.entries(obj)) {
+      // Convert specific fields that can contain RegExp values
+      if (key === 'expected' || key === 'value' || key === 'values' || 
+          key === 'name' || key === 'description' || key === 'errorMessage' ||
+          key === 'id' || key === 'role') {
+        converted[key] = convertStringToRegExp(value);
+      } else {
+        converted[key] = value;
+      }
+    }
+    return converted;
+  }
+  
+  return obj;
+}
+import { expect } from '@zealous-tech/playwright/test';
 import type * as playwright from 'playwright';
+import { convertSelectOptionValues } from 'playwright-core/lib/client/elementHandle.js';
 
 const elementStyleSchema = z.object({
   element: z.string().describe('Human-readable element description used to obtain permission to interact with the element'),
@@ -39,7 +101,7 @@ const get_computed_styles = defineTabTool({
     const { ref, element } = elementStyleSchema.parse(params);
     const result = { ref, element };
 
-    let locator = await tab.refLocator(result);
+    const locator = await tab.refLocator(result);
 
     await tab.waitForCompletion(async () => {
       const getStylesFunction = (element: Element, props?: string[]) => {
@@ -53,9 +115,9 @@ const get_computed_styles = defineTabTool({
         return result;
       };
 
-      //response.addCode(`// Get computed styles for ${params.element}`);
+      // response.addCode(`// Get computed styles for ${params.element}`);
       const computedStyles = await locator.evaluate(getStylesFunction, params.propertyNames);
-      console.log("Requested Computed Styles : ", computedStyles);
+      console.log('Requested Computed Styles : ', computedStyles);
       response.addResult(JSON.stringify(computedStyles, null, 2) || 'Couldn\'t get requested styles');
     });
   },
@@ -76,8 +138,7 @@ const extract_svg_from_element = defineTabTool({
     const { ref, element, extractMethod, includeStyles, minifyOutput } = elementSvgSchema.parse(params);
     const result = { ref, element };
 
-    let locator: playwright.Locator | undefined;
-    locator = await tab.refLocator(result);
+    const locator = await tab.refLocator(result);
 
     await tab.waitForCompletion(async () => {
       try {
@@ -96,9 +157,9 @@ const extract_svg_from_element = defineTabTool({
             svgElement = element.querySelector('svg');
           }
 
-          if (!svgElement) {
+          if (!svgElement)
             throw new Error('No SVG element found in the specified element');
-          }
+
 
           let extractedContent = '';
 
@@ -121,7 +182,7 @@ const extract_svg_from_element = defineTabTool({
           if (options.includeStyles) {
             const computedStyle = window.getComputedStyle(svgElement);
             const styleString = Array.from(computedStyle).map(prop =>
-                `${prop}: ${computedStyle.getPropertyValue(prop)}`
+              `${prop}: ${computedStyle.getPropertyValue(prop)}`
             ).join('; ');
 
             // Add style attribute to the SVG
@@ -129,9 +190,9 @@ const extract_svg_from_element = defineTabTool({
           }
 
           // Minify if requested
-          if (options.minifyOutput) {
+          if (options.minifyOutput)
             extractedContent = extractedContent.replace(/\s+/g, ' ').trim();
-          }
+
 
           return {
             svgContent: extractedContent,
@@ -146,19 +207,18 @@ const extract_svg_from_element = defineTabTool({
           };
         };
 
-        //response.addCode(`// Extract SVG content from ${params.element}`);
+        // response.addCode(`// Extract SVG content from ${params.element}`);
         const svgContent = await locator.evaluate(extractSvgFunction, { extractMethod, includeStyles, minifyOutput });
         response.addResult(svgContent.svgContent);
 
       } catch (error) {
-        //response.addCode(`// Failed to extract SVG from ${params.element}`);
+        // response.addCode(`// Failed to extract SVG from ${params.element}`);
         const errorMessage = `Failed to extract SVG from ${element}. Error: ${error instanceof Error ? error.message : String(error)}`;
         response.addResult(errorMessage);
       }
     });
   },
 });
-
 
 
 const extract_image_urls = defineTabTool({
@@ -196,15 +256,19 @@ const extract_image_urls = defineTabTool({
 
           // Helper function to check if URL should be included
           const shouldIncludeUrl = (url: string): boolean => {
-            if (!url || url.trim() === '') return false;
-            if (!options.includeDataUrls && url.startsWith('data:')) return false;
+            if (!url || url.trim() === '')
+              return false;
+            if (!options.includeDataUrls && url.startsWith('data:'))
+              return false;
             return true;
           };
 
           // Helper function to get element selector
           const getElementSelector = (el: Element): string => {
-            if (el.id) return `#${el.id}`;
-            if (el.className) return `.${Array.from(el.classList).join('.')}`;
+            if (el.id)
+              return `#${el.id}`;
+            if (el.className)
+              return `.${Array.from(el.classList).join('.')}`;
             return el.tagName.toLowerCase();
           };
 
@@ -327,7 +391,7 @@ const extract_image_urls = defineTabTool({
 
           // Remove duplicates
           const uniqueImages = imageUrls.filter((img, index, self) =>
-              index === self.findIndex(i => i.url === img.url && i.type === img.type)
+            index === self.findIndex(i => i.url === img.url && i.type === img.type)
           );
 
           return {
@@ -339,13 +403,13 @@ const extract_image_urls = defineTabTool({
           };
         };
 
-        //response.addCode(`// Extract image URLs from ${params.element}`);
+        // response.addCode(`// Extract image URLs from ${params.element}`);
         const imageData = await locator.evaluate(extractImageFunction, { includeBackgroundImages, includeDataUrls, searchDepth });
-        console.log("Extracted Image URLs: ", imageData);
+        console.log('Extracted Image URLs: ', imageData);
 
         const summary = `Found ${imageData.totalFound} image(s) in ${element}:\n\n` +
             imageData.images.map((img, index) =>
-                `${index + 1}. [${img.type.toUpperCase()}] ${img.url}\n` +
+              `${index + 1}. [${img.type.toUpperCase()}] ${img.url}\n` +
                 `   Element: ${img.element}` +
                 (img.alt ? `\n   Alt: ${img.alt}` : '') +
                 (img.title ? `\n   Title: ${img.title}` : '')
@@ -354,7 +418,7 @@ const extract_image_urls = defineTabTool({
         response.addResult(JSON.stringify(imageData));
 
       } catch (error) {
-        //response.addCode(`// Failed to extract image URLs from ${params.element}`);
+        // response.addCode(`// Failed to extract image URLs from ${params.element}`);
         const errorMessage = `Failed to extract image URLs from ${element}. Error: ${error instanceof Error ? error.message : String(error)}`;
         response.addResult(errorMessage);
       }
@@ -362,8 +426,2324 @@ const extract_image_urls = defineTabTool({
   },
 });
 
+
+const styleCheckSchema = z.object({
+  name: z.string().describe(
+      "CSS property name to validate (supports kebab-case or camelCase, e.g. 'color' or 'backgroundColor')"
+  ),
+  operator: z
+      .enum(['isEqual', 'notEqual', 'inRange'])
+      .describe(
+          "Validation operator: 'isEqual' checks strict equality, 'notEqual' checks strict inequality, 'inRange' checks if value is in list or RGB color is within specified range"
+      ),
+  expected: z.union([
+    z.string(),
+    z.array(z.string()),
+    z.object({
+      minR: z.number().min(0).max(255).describe('Minimum red value (0-255)'),
+      maxR: z.number().min(0).max(255).describe('Maximum red value (0-255)'),
+      minG: z.number().min(0).max(255).describe('Minimum green value (0-255)'),
+      maxG: z.number().min(0).max(255).describe('Maximum green value (0-255)'),
+      minB: z.number().min(0).max(255).describe('Minimum blue value (0-255)'),
+      maxB: z.number().min(0).max(255).describe('Maximum blue value (0-255)'),
+    })
+  ]).describe(
+      "Expected value(s) for the CSS property. Can be a single string, array of strings for 'inRange' operator, or RGB range object for RGB color validation."
+  ),
+});
+
+export const validateStylesSchema = z.object({
+  element: z
+      .string()
+      .describe(
+          'Human-readable element description used to obtain permission to interact with the element'
+      ),
+  ref: z
+      .string()
+      .describe('Exact target element reference from the page snapshot'),
+  checks: z
+      .array(styleCheckSchema)
+      .min(1)
+      .describe(
+          'List of style validation checks to perform on the target element'
+      ),
+});
+
+
+const validate_computed_styles = defineTabTool({
+  capability: 'core',
+  schema: {
+    name: 'validate_computed_styles',
+    title: 'Validate computed styles of element',
+    description:
+      "Validate element's CSS computed styles against expected values using isEqual / notEqual / inRange operators. Supports RGB color range validation for color properties.",
+    inputSchema: validateStylesSchema,
+    type: 'readOnly',
+  },
+  handle: async (tab, rawParams, response) => {
+    const { ref, element, checks } = validateStylesSchema.parse(rawParams);
+
+    await tab.waitForCompletion(async () => {
+      // 1) Get all computed styles directly
+      const allStyles = await getAllComputedStylesDirect(tab, ref, element);
+      // console.log("All Computed Styles:", allStyles);
+      // 2) Validate rules
+      const results = checks.map(c => {
+        const actual = pickActualValue(allStyles, c.name);
+
+        let passed: boolean;
+        if (c.operator === 'isEqual') {
+          // isEqual operator: strict equality only
+          if (typeof c.expected === 'string' && (c.name.toLowerCase().includes('color') || c.name.toLowerCase().includes('background'))) {
+            // For color properties, check if expected is in RGB format
+            const expectedRGB = parseRGBColor(c.expected);
+            const actualRGB = parseRGBColor(actual || '');
+
+            if (expectedRGB && actualRGB) {
+              // Compare RGB values with some tolerance for minor variations
+              const tolerance = 5; // Allow small variations in RGB values
+              passed = Math.abs(expectedRGB.r - actualRGB.r) <= tolerance &&
+                      Math.abs(expectedRGB.g - actualRGB.g) <= tolerance &&
+                      Math.abs(expectedRGB.b - actualRGB.b) <= tolerance;
+            } else {
+              // Fallback to strict equality if RGB parsing fails
+              passed = actual === c.expected;
+            }
+          } else {
+            // For non-color properties: strict equality
+            passed = actual === c.expected;
+          }
+        } else if (c.operator === 'notEqual') {
+          // notEqual operator: strict inequality
+          passed = actual !== c.expected;
+        } else if (c.operator === 'inRange') {
+          // inRange operator: check if value is in list or RGB color is within range
+          if (Array.isArray(c.expected)) {
+            // For inRange with array: any matching value passes
+            passed = actual !== undefined && c.expected.includes(actual);
+          } else if (typeof c.expected === 'object' && 'minR' in c.expected) {
+            // For inRange with RGB range object: check if color is within range
+            passed = actual !== undefined && isColorInRange(actual, c.expected as { minR: number; maxR: number; minG: number; maxG: number; minB: number; maxB: number });
+          } else {
+            passed = false; // Invalid expected value - inRange only supports arrays and RGB range objects
+          }
+        } else {
+          passed = false; // Unknown operator
+        }
+
+        return {
+          style: c.name,
+          operator: c.operator,
+          expected: c.expected,
+          actual,
+          result: passed ? 'pass' : 'fail',
+        };
+      });
+
+      const passedCount = results.filter(r => r.result === 'pass').length;
+
+      // Generate evidence message
+      let evidence = '';
+      if (passedCount === results.length) {
+        evidence = `Found element "${element}" with all ${results.length} style properties matching expected values`;
+      } else {
+        const failedChecks = results.filter(r => r.result === 'fail');
+        const failedStyles = failedChecks.map(c => {
+          const expectedValue = typeof c.expected === 'object' ? JSON.stringify(c.expected) : c.expected;
+          return `${c.style}: expected "${expectedValue}", got "${c.actual}"`;
+        }).join(', ');
+        evidence = `Found element "${element}" but ${failedChecks.length} style properties failed validation: ${failedStyles}`;
+      }
+
+      // 3) Answer
+      const payload = {
+        ref,
+        element,
+        summary: {
+          total: results.length,
+          passed: passedCount,
+          failed: results.length - passedCount,
+          status: passedCount === results.length ? 'pass' : 'fail',
+          evidence,
+        },
+        checks: results,
+      };
+
+      console.log('Validate Computed Styles:', payload);
+      response.addResult(JSON.stringify(payload, null, 2));
+    });
+  },
+});
+
+
+const textValidationSchema = z.object({
+  element: z.string().describe(
+      'Human-readable element description used to obtain permission to interact with the element'
+  ),
+  ref: z.string().describe(
+      "Exact target element reference from the page snapshot. Required for text validation."
+  ),
+  expectedText: z.string().describe(
+      'Expected text value to validate in the element or whole page'
+  ),
+  matchType: z.enum(['exact', 'contains', 'not-contains']).default('exact').describe(
+      "Type of match: 'exact' checks exact match, 'contains' checks substring presence, 'not-contains' checks that text is NOT present. Works for both specific elements (when ref provided) and page snapshot (when ref is null)"
+  ),
+  caseSensitive: z.boolean().optional().describe(
+      'Enable case-sensitive comparison (default false)'
+  ),
+});
+
+const validate_text_visible = defineTabTool({
+  capability: 'core',
+  schema: {
+    name: 'validate_text_visible',
+    title: 'Verify text visible',
+    description:
+        "Verify that text is visible in a specific element with exact/contains/not-contains matching. Requires element reference (ref) from page snapshot. Uses Playwright's expect assertions with built-in timeout for reliable text validation.",
+    inputSchema: textValidationSchema,
+    type: 'readOnly',
+  },
+  handle: async (tab, rawParams, response) => {
+    const { ref, element, expectedText, matchType, caseSensitive } =
+      textValidationSchema.parse(rawParams);
+
+    await tab.waitForCompletion(async () => {
+      let passed = false;
+      let evidence = '';
+      let actualText = '';
+
+      try {
+        const locator = await tab.refLocator({ ref, element });
+        
+        // Use expect with appropriate matcher based on matchType
+        if (matchType === 'exact') {
+          await expect(locator).toHaveText(expectedText, {useInnerText:true});
+          passed = true;
+          evidence = `Found element "${element}" with exact text match: "${expectedText}"`;
+        } else if (matchType === 'contains') {
+          await expect(locator).toContainText(expectedText);
+          passed = true;
+          evidence = `Found element "${element}" containing expected text "${expectedText}"`;
+        } else if (matchType === 'not-contains') {
+          if (expectedText === '') {
+            // For empty string with not-contains, check if element is not empty
+            await expect(locator).toContainText(/.+/);
+            passed = true;
+            evidence = `Found element "${element}" with non-empty text`;
+          } else {
+            // For specific text with not-contains, use expect.not
+            await expect(locator).not.toContainText(expectedText);
+            passed = true;
+            evidence = `Found element "${element}" that correctly does not contain text "${expectedText}"`;
+          }
+        }
+        
+      } catch (error) {
+        passed = false;
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        
+        if (matchType === 'exact') {
+          evidence = `Element "${element}" does not have exact text match with expected "${expectedText}". Error: ${errorMessage}`;
+        } else if (matchType === 'contains') {
+          evidence = `Element "${element}" does not contain expected text "${expectedText}". Error: ${errorMessage}`;
+        } else if (matchType === 'not-contains') {
+          if (expectedText === '') {
+            evidence = `Element "${element}" is empty or contains only whitespace. Error: ${errorMessage}`;
+          } else {
+            evidence = `Element "${element}" unexpectedly contains text "${expectedText}". Error: ${errorMessage}`;
+          }
+        }
+        
+        console.log(`Failed to validate element with ref "${ref}" for ${element}. Error: ${errorMessage}`);
+      }
+
+      // Generate final payload
+      const payload = {
+        ref,
+        element,
+        summary: {
+          total: 1,
+          passed: passed ? 1 : 0,
+          failed: passed ? 0 : 1,
+          status: passed ? 'pass' : 'fail',
+          evidence,
+        },
+        checks: [{
+          property: 'text',
+          operator: matchType,
+          expected: expectedText,
+          actual: actualText || 'N/A',
+          result: passed ? 'pass' : 'fail',
+        }],
+        scope: 'element',
+        matchType,
+        caseSensitive: !!caseSensitive,
+      };
+
+      console.log('Validate element text:', payload);
+      response.addResult(JSON.stringify(payload, null, 2));
+    });
+  },
+});
+
+
+const domPropCheckSchema = z.object({
+  name: z.string().describe('DOM property name (e.g., "checked", "disabled", "className") or HTML attribute name (e.g., "id", "class", "data-testid", "aria-expanded")'),
+  operator: z.enum(['isEqual', 'notEqual']).default('isEqual'),
+  expected: z.any().describe('Expected value for the property or attribute'), // can be string, number, boolean
+});
+const domChecksSchema = z.array(domPropCheckSchema).min(1);
+
+const baseDomInputSchema = z.object({
+  ref: z.string().min(1),
+  element: z.string().min(1),
+});
+
+const validateDomPropsSchema = baseDomInputSchema.extend({
+  checks: domChecksSchema,
+});
+
+
+const validate_dom_properties = defineTabTool({
+  capability: 'core',
+  schema: {
+    name: 'validate_dom_properties',
+    title: 'Validate DOM properties of element',
+    description:
+      'Validate structural DOM properties and HTML attributes of elements (checked, disabled,isClickable, className, id, type, tabIndex, etc.). Use for validating element state, CSS classes, form properties, and structural attributes.  Supports exact equality comparison with isEqual/notEqual operators. HTML attributes are accessible directly by name (e.g., "id", "class", "data-testid", "aria-expanded").',
+    inputSchema: validateDomPropsSchema,
+    type: 'readOnly',
+  },
+  handle: async (tab, rawParams, response) => {
+    const { ref, element, checks } = validateDomPropsSchema.parse(rawParams);
+
+    await tab.waitForCompletion(async () => {
+      const allProps = await getAllDomPropsDirect(tab, ref, element);
+      console.log('All DOM Props:', allProps);
+
+      const results = checks.map(c => {
+        const actual = allProps[c.name];
+        let passed: boolean;
+        if (c.operator === 'isEqual')
+          passed = actual === c.expected;
+        else
+          passed = actual !== c.expected;
+
+        return {
+          property: c.name,
+          operator: c.operator,
+          expected: c.expected,
+          actual,
+          result: passed ? 'pass' : 'fail',
+        };
+      });
+
+      const passedCount = results.filter(r => r.result === 'pass').length;
+
+      // Generate evidence message
+      let evidence = '';
+      if (passedCount === results.length) {
+        evidence = `Found element "${element}" with all ${results.length} DOM properties matching expected values`;
+      } else {
+        const failedChecks = results.filter(r => r.result === 'fail');
+        const failedProps = failedChecks.map(c => `${c.property}: expected "${c.expected}", got "${c.actual}"`).join(', ');
+        evidence = `Found element "${element}" but ${failedChecks.length} DOM properties failed validation: ${failedProps}`;
+      }
+
+      // 3) answer
+      const payload = {
+        ref,
+        element,
+        summary: {
+          total: results.length,
+          passed: passedCount,
+          failed: results.length - passedCount,
+          status: passedCount === results.length ? 'pass' : 'fail',
+          evidence,
+        },
+        checks: results,
+        props: allProps, // all properties for debugging
+      };
+
+      console.log('Validate DOM Properties:');
+      console.log(payload);
+      response.addResult(JSON.stringify(payload, null, 2));
+    });
+  },
+});
+
+// Individual assertion argument schemas
+const toBeAttachedArgsSchema = z.object({
+  options: z.object({
+    attached: z.boolean().optional().describe('Whether the element should be attached to Document or ShadowRoot'),
+    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+  }).optional(),
+});
+
+const toBeCheckedArgsSchema = z.object({
+  options: z.object({
+    checked: z.boolean().optional().describe('Provides state to assert for. Asserts for input to be checked by default. This option can\'t be used when indeterminate is set to true.'),
+    indeterminate: z.boolean().optional().describe('Asserts that the element is in the indeterminate (mixed) state. Only supported for checkboxes and radio buttons. This option can\'t be true when checked is provided.'),
+    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+  }).optional(),
+});
+
+const toBeDisabledArgsSchema = z.object({
+  options: z.object({
+    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+  }).optional(),
+});
+
+const toBeEditableArgsSchema = z.object({
+  options: z.object({
+    editable: z.boolean().optional().describe('Whether the element should be editable'),
+    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+  }).optional(),
+});
+
+const toBeEmptyArgsSchema = z.object({
+  options: z.object({
+    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+  }).optional(),
+});
+
+const toBeEnabledArgsSchema = z.object({
+  options: z.object({
+    enabled: z.boolean().optional().describe('Whether the element should be enabled'),
+    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+  }).optional(),
+});
+
+const toBeFocusedArgsSchema = z.object({
+  options: z.object({
+    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+  }).optional(),
+});
+
+const toBeHiddenArgsSchema = z.object({
+  options: z.object({
+    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+  }).optional(),
+});
+
+const toBeInViewportArgsSchema = z.object({
+  options: z.object({
+    ratio: z.number().optional().describe('The minimal ratio of the element to intersect viewport. If equals to 0, then element should intersect viewport at any positive ratio. Defaults to 0'),
+    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+  }).optional(),
+});
+
+const toBeVisibleArgsSchema = z.object({
+  options: z.object({
+    visible: z.boolean().optional().describe('Whether the element should be visible'),
+    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+  }).optional(),
+});
+
+const toContainClassArgsSchema = z.object({
+  expected: z.union([z.string(), z.array(z.string())]).describe('A string containing expected class names, separated by spaces, or a list of such strings to assert multiple elements'),
+  options: z.object({
+    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+  }).optional(),
+});
+
+const toContainTextArgsSchema = z.object({
+  expected: z.union([z.string(), z.instanceof(RegExp), z.array(z.union([z.string(), z.instanceof(RegExp)]))]).describe('Expected substring or RegExp or a list of those'),
+  options: z.object({
+    ignoreCase: z.boolean().optional().describe('Whether to perform case-insensitive match. ignoreCase option takes precedence over the corresponding regular expression flag if specified'),
+    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+    useInnerText: z.boolean().optional().describe('Whether to use element.innerText instead of element.textContent when retrieving DOM node text'),
+  }).optional(),
+});
+
+const toHaveAccessibleDescriptionArgsSchema = z.object({
+  description: z.union([z.string(), z.instanceof(RegExp)]).describe('Expected accessible description'),
+  options: z.object({
+    ignoreCase: z.boolean().optional().describe('Whether to perform case-insensitive match. ignoreCase option takes precedence over the corresponding regular expression flag if specified'),
+    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+  }).optional(),
+});
+
+const toHaveAccessibleErrorMessageArgsSchema = z.object({
+  errorMessage: z.union([z.string(), z.instanceof(RegExp)]).describe('Expected accessible error message'),
+  options: z.object({
+    ignoreCase: z.boolean().optional().describe('Whether to perform case-insensitive match. ignoreCase option takes precedence over the corresponding regular expression flag if specified'),
+    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+  }).optional(),
+});
+
+const toHaveAccessibleNameArgsSchema = z.object({
+  name: z.union([z.string(), z.instanceof(RegExp)]).describe('Expected accessible name'),
+  options: z.object({
+    ignoreCase: z.boolean().optional().describe('Whether to perform case-insensitive match. ignoreCase option takes precedence over the corresponding regular expression flag if specified'),
+    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+  }).optional(),
+});
+
+const toHaveAttributeArgsSchema = z.object({
+  name: z.string().describe('Attribute name'),
+  options: z.object({
+    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+  }).optional(),
+});
+
+const toHaveAttributeValueArgsSchema = z.object({
+  name: z.string().describe('Attribute name'),
+  value: z.union([z.string(), z.instanceof(RegExp)]).describe('Expected attribute value'),
+  options: z.object({
+    ignoreCase: z.boolean().optional().describe('Whether to perform case-insensitive match. ignoreCase option takes precedence over the corresponding regular expression flag if specified'),
+    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+  }).optional(),
+});
+
+const toHaveClassArgsSchema = z.object({
+  expected: z.union([z.string(), z.instanceof(RegExp), z.array(z.union([z.string(), z.instanceof(RegExp)]))]).describe('Expected class or RegExp or a list of those'),
+  options: z.object({
+    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+  }).optional(),
+});
+
+const toHaveCountArgsSchema = z.object({
+  count: z.number().describe('Expected count'),
+  options: z.object({
+    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+  }).optional(),
+});
+
+const toHaveCSSArgsSchema = z.object({
+  name: z.string().describe('CSS property name'),
+  value: z.union([z.string(), z.instanceof(RegExp)]).describe('CSS property value'),
+  options: z.object({
+    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+  }).optional(),
+});
+
+const toHaveIdArgsSchema = z.object({
+  id: z.union([z.string(), z.instanceof(RegExp)]).describe('Element id'),
+  options: z.object({
+    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+  }).optional(),
+});
+
+const toHaveJSPropertyArgsSchema = z.object({
+  name: z.string().describe('Property name'),
+  value: z.any().describe('Property value'),
+  options: z.object({
+    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+  }).optional(),
+});
+
+const toHaveRoleArgsSchema = z.object({
+  role: z.enum(['alert', 'alertdialog', 'application', 'article', 'banner', 'blockquote', 'button', 'caption', 'cell', 'checkbox', 'code', 'columnheader', 'combobox', 'complementary', 'contentinfo', 'definition', 'deletion', 'dialog', 'directory', 'document', 'emphasis', 'feed', 'figure', 'form', 'generic', 'grid', 'gridcell', 'group', 'heading', 'img', 'insertion', 'link', 'list', 'listbox', 'listitem', 'log', 'main', 'marquee', 'math', 'meter', 'menu', 'menubar', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'navigation', 'none', 'note', 'option', 'paragraph', 'presentation', 'progressbar', 'radio', 'radiogroup', 'region', 'row', 'rowgroup', 'rowheader', 'scrollbar', 'search', 'searchbox', 'separator', 'slider', 'spinbutton', 'status', 'strong', 'subscript', 'superscript', 'switch', 'tab', 'table', 'tablist', 'tabpanel', 'term', 'textbox', 'time', 'timer', 'toolbar', 'tooltip', 'tree', 'treegrid', 'treeitem']).describe('Required aria role'),
+  options: z.object({
+    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+  }).optional(),
+});
+
+const toHaveScreenshotArgsSchema = z.object({
+  name: z.union([z.string(), z.array(z.string())]).describe('Snapshot name'),
+  options: z.object({
+    animations: z.enum(['disabled', 'allow']).optional().describe('When set to "disabled", stops CSS animations, CSS transitions and Web Animations'),
+    caret: z.enum(['hide', 'initial']).optional().describe('When set to "hide", screenshot will hide text caret'),
+    mask: z.array(z.any()).optional().describe('Specify locators that should be masked when the screenshot is taken'),
+    maskColor: z.string().optional().describe('Specify the color of the overlay box for masked elements, in CSS color format'),
+    maxDiffPixelRatio: z.number().min(0).max(1).optional().describe('An acceptable ratio of pixels that are different to the total amount of pixels, between 0 and 1'),
+    maxDiffPixels: z.number().optional().describe('An acceptable amount of pixels that could be different'),
+    omitBackground: z.boolean().optional().describe('Hides default white background and allows capturing screenshots with transparency'),
+    scale: z.enum(['css', 'device']).optional().describe('When set to "css", screenshot will have a single pixel per each css pixel on the page'),
+    stylePath: z.union([z.string(), z.array(z.string())]).optional().describe('File name containing the stylesheet to apply while making the screenshot'),
+    threshold: z.number().min(0).max(1).optional().describe('An acceptable perceived color difference in the YIQ color space between the same pixel in compared images, between zero (strict) and one (lax)'),
+    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+  }).optional(),
+});
+
+const toHaveScreenshotOptionsArgsSchema = z.object({
+  options: z.object({
+    animations: z.enum(['disabled', 'allow']).optional().describe('When set to "disabled", stops CSS animations, CSS transitions and Web Animations'),
+    caret: z.enum(['hide', 'initial']).optional().describe('When set to "hide", screenshot will hide text caret'),
+    mask: z.array(z.any()).optional().describe('Specify locators that should be masked when the screenshot is taken'),
+    maskColor: z.string().optional().describe('Specify the color of the overlay box for masked elements, in CSS color format'),
+    maxDiffPixelRatio: z.number().min(0).max(1).optional().describe('An acceptable ratio of pixels that are different to the total amount of pixels, between 0 and 1'),
+    maxDiffPixels: z.number().optional().describe('An acceptable amount of pixels that could be different'),
+    omitBackground: z.boolean().optional().describe('Hides default white background and allows capturing screenshots with transparency'),
+    scale: z.enum(['css', 'device']).optional().describe('When set to "css", screenshot will have a single pixel per each css pixel on the page'),
+    stylePath: z.union([z.string(), z.array(z.string())]).optional().describe('File name containing the stylesheet to apply while making the screenshot'),
+    threshold: z.number().min(0).max(1).optional().describe('An acceptable perceived color difference in the YIQ color space between the same pixel in compared images, between zero (strict) and one (lax)'),
+    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+  }).optional(),
+});
+
+
+const toHaveTextArgsSchema = z.object({
+  expected: z.union([z.string(), z.instanceof(RegExp), z.array(z.union([z.string(), z.instanceof(RegExp)]))]).describe('Expected string or RegExp or a list of those'),
+  options: z.object({
+    ignoreCase: z.boolean().optional().describe('Whether to perform case-insensitive match. ignoreCase option takes precedence over the corresponding regular expression flag if specified'),
+    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+    useInnerText: z.boolean().optional().describe('Whether to use element.innerText instead of element.textContent when retrieving DOM node text'),
+  }).optional(),
+});
+
+
+const toHaveValueArgsSchema = z.object({
+  value: z.union([z.string(), z.instanceof(RegExp)]).describe('Expected value'),
+  options: z.object({
+    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+  }).optional(),
+});
+
+const toHaveValuesArgsSchema = z.object({
+  values: z.array(z.union([z.string(), z.instanceof(RegExp)])).describe('Expected options currently selected'),
+  options: z.object({
+    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+  }).optional(),
+});
+
+const toMatchAriaSnapshotArgsSchema = z.object({
+  expected: z.string().describe('Expected accessibility snapshot'),
+  options: z.object({
+    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+  }).optional(),
+});
+
+const toMatchAriaSnapshotOptionsArgsSchema = z.object({
+  options: z.object({
+    name: z.string().optional().describe('Name of the snapshot to store in the snapshot folder corresponding to this test. Generates sequential names if not specified'),
+    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+  }).optional(),
+});
+
+
+
+
+// Union schema for all assertion arguments
+const assertionArgumentsSchema = z.discriminatedUnion('assertionType', [
+  z.object({ assertionType: z.literal('toBeAttached'), ...toBeAttachedArgsSchema.shape }),
+  z.object({ assertionType: z.literal('toBeChecked'), ...toBeCheckedArgsSchema.shape }),
+  z.object({ assertionType: z.literal('toBeDisabled'), ...toBeDisabledArgsSchema.shape }),
+  z.object({ assertionType: z.literal('toBeEditable'), ...toBeEditableArgsSchema.shape }),
+  z.object({ assertionType: z.literal('toBeEmpty'), ...toBeEmptyArgsSchema.shape }),
+  z.object({ assertionType: z.literal('toBeEnabled'), ...toBeEnabledArgsSchema.shape }),
+  z.object({ assertionType: z.literal('toBeFocused'), ...toBeFocusedArgsSchema.shape }),
+  z.object({ assertionType: z.literal('toBeHidden'), ...toBeHiddenArgsSchema.shape }),
+  z.object({ assertionType: z.literal('toBeInViewport'), ...toBeInViewportArgsSchema.shape }),
+  z.object({ assertionType: z.literal('toBeVisible'), ...toBeVisibleArgsSchema.shape }),
+  z.object({ assertionType: z.literal('toContainClass'), ...toContainClassArgsSchema.shape }),
+  z.object({ assertionType: z.literal('toContainText'), ...toContainTextArgsSchema.shape }),
+  z.object({ assertionType: z.literal('toHaveAccessibleDescription'), ...toHaveAccessibleDescriptionArgsSchema.shape }),
+  z.object({ assertionType: z.literal('toHaveAccessibleErrorMessage'), ...toHaveAccessibleErrorMessageArgsSchema.shape }),
+  z.object({ assertionType: z.literal('toHaveAccessibleName'), ...toHaveAccessibleNameArgsSchema.shape }),
+  z.object({ assertionType: z.literal('toHaveAttribute'), ...toHaveAttributeArgsSchema.shape }),
+  z.object({ assertionType: z.literal('toHaveAttributeValue'), ...toHaveAttributeValueArgsSchema.shape }),
+  z.object({ assertionType: z.literal('toHaveClass'), ...toHaveClassArgsSchema.shape }),
+  z.object({ assertionType: z.literal('toHaveCount'), ...toHaveCountArgsSchema.shape }),
+  z.object({ assertionType: z.literal('toHaveCSS'), ...toHaveCSSArgsSchema.shape }),
+  z.object({ assertionType: z.literal('toHaveId'), ...toHaveIdArgsSchema.shape }),
+  z.object({ assertionType: z.literal('toHaveJSProperty'), ...toHaveJSPropertyArgsSchema.shape }),
+  z.object({ assertionType: z.literal('toHaveRole'), ...toHaveRoleArgsSchema.shape }),
+  z.object({ assertionType: z.literal('toHaveScreenshot'), ...toHaveScreenshotArgsSchema.shape }),
+  z.object({ assertionType: z.literal('toHaveScreenshotOptions'), ...toHaveScreenshotOptionsArgsSchema.shape }),
+  z.object({ assertionType: z.literal('toHaveText'), ...toHaveTextArgsSchema.shape }),
+  z.object({ assertionType: z.literal('toHaveValue'), ...toHaveValueArgsSchema.shape }),
+  z.object({ assertionType: z.literal('toHaveValues'), ...toHaveValuesArgsSchema.shape }),
+  z.object({ assertionType: z.literal('toMatchAriaSnapshot'), ...toMatchAriaSnapshotArgsSchema.shape }),
+  z.object({ assertionType: z.literal('toMatchAriaSnapshotOptions'), ...toMatchAriaSnapshotOptionsArgsSchema.shape }),
+]);
+
+// Schema for DOM assertions using Playwright expect assertions
+const domAssertionCheckSchema = z.object({
+  negate: z.boolean().optional().default(false).describe('Whether to negate the assertion (use .not)'),
+  timeout: z.number().optional().describe('Timeout in milliseconds for the assertion'),
+  assertion: assertionArgumentsSchema.describe('Assertion type and its specific arguments'),
+});
+
+const domAssertionChecksSchema = z.array(domAssertionCheckSchema).min(1);
+
+const validateDomAssertionsSchema = baseDomInputSchema.extend({
+  checks: domAssertionChecksSchema,
+});
+
+const validate_dom_assertions = defineTabTool({
+  capability: 'core',
+  schema: {
+    name: 'validate_dom_assertions',
+    title: 'Validate DOM properties using Playwright assertions',
+    description: 'Validate DOM properties using Playwright expect assertions (toBeEnabled, toBeDisabled, toBeVisible, etc.).',
+    inputSchema: validateDomAssertionsSchema,
+    type: 'readOnly',
+  },
+  handle: async (tab, rawParams, response) => {
+    const { ref, element, checks } = validateDomAssertionsSchema.parse(rawParams);
+
+    await tab.waitForCompletion(async () => {
+      const locator = await tab.refLocator({ ref, element });
+      const results = [];
+
+      for (const check of checks) {
+        const { negate, timeout = 2000, assertion: args } = check;
+        if (!args || !args.assertionType) {
+          throw new Error('Each check must have assertion with assertionType');
+        }
+        // Convert string RegExp patterns to actual RegExp objects
+        const convertedArgs = convertStringToRegExp(args);
+        //console.log('convertedArgs', convertedArgs);
+        const { assertionType: name } = convertedArgs;
+        let result = {
+          assertion: name,
+          negate,
+          result: 'fail' as 'pass' | 'fail',
+          error: '',
+          actual: '',
+          arguments: args,
+        };
+
+        try {
+          // Create the assertion
+          const assertion = negate ? expect(locator).not : expect(locator);
+          
+          // Prepare final args - separate main arguments from options
+          const { options, ...mainArgs } = convertedArgs;
+          const finalOptions = { ...options, ...(timeout && { timeout }) };
+
+          // Execute the specific assertion by calling the method dynamically
+          let assertionResult;
+          switch (name) {
+            case 'toBeEnabled':
+              if (!convertedArgs || convertedArgs.assertionType !== 'toBeEnabled') {
+                throw new Error('toBeEnabled requires proper arguments structure');
+              }
+              assertionResult = await assertion.toBeEnabled(finalOptions);
+              result.actual = 'enabled';
+              break;
+
+            case 'toBeDisabled':
+              if (!args || args.assertionType !== 'toBeDisabled') {
+                throw new Error('toBeDisabled requires proper arguments structure');
+              }
+              assertionResult = await assertion.toBeDisabled(finalOptions);
+              result.actual = 'disabled';
+              break;
+
+            case 'toBeVisible':
+              if (!args || args.assertionType !== 'toBeVisible') {
+                throw new Error('toBeVisible requires proper arguments structure');
+              }
+              assertionResult = await assertion.toBeVisible(finalOptions);
+              result.actual = 'visible';
+              break;
+
+            case 'toBeHidden':
+              if (!args || args.assertionType !== 'toBeHidden') {
+                throw new Error('toBeHidden requires proper arguments structure');
+              }
+              assertionResult = await assertion.toBeHidden(finalOptions);
+              result.actual = 'hidden';
+              break;
+
+            case 'toBeInViewport':
+              if (!args || args.assertionType !== 'toBeInViewport') {
+                throw new Error('toBeInViewport requires proper arguments structure');
+              }
+              assertionResult = await assertion.toBeInViewport(finalOptions);
+              result.actual = 'in viewport';
+              break;
+
+            case 'toBeChecked':
+              if (!args || args.assertionType !== 'toBeChecked') {
+                throw new Error('toBeChecked requires proper arguments structure');
+              }
+              assertionResult = await assertion.toBeChecked(finalOptions);
+              result.actual = 'checked';
+              break;
+
+
+            case 'toBeFocused':
+              if (!args || args.assertionType !== 'toBeFocused') {
+                throw new Error('toBeFocused requires proper arguments structure');
+              }
+              assertionResult = await assertion.toBeFocused(finalOptions);
+              result.actual = 'focused';
+              break;
+
+            case 'toBeEditable':
+              if (!args || args.assertionType !== 'toBeEditable') {
+                throw new Error('toBeEditable requires proper arguments structure');
+              }
+              assertionResult = await assertion.toBeEditable(finalOptions);
+              result.actual = 'editable';
+              break;
+
+            case 'toBeEmpty':
+              if (!args || args.assertionType !== 'toBeEmpty') {
+                throw new Error('toBeEmpty requires proper arguments structure');
+              }
+              assertionResult = await assertion.toBeEmpty(finalOptions);
+              result.actual = 'empty';
+              break;
+
+            case 'toBeAttached':
+              if (!args || args.assertionType !== 'toBeAttached') {
+                throw new Error('toBeAttached requires proper arguments structure');
+              }
+              assertionResult = await assertion.toBeAttached(finalOptions);
+              result.actual = 'attached';
+              break;
+
+            case 'toHaveAttribute':
+              if (!args || args.assertionType !== 'toHaveAttribute') {
+                throw new Error('toHaveAttribute requires proper arguments structure');
+              }
+              const { name: attrName } = mainArgs;
+              if (!attrName) {
+                throw new Error('toHaveAttribute requires "name" argument (string)');
+              }
+              assertionResult = await assertion.toHaveAttribute(attrName, finalOptions);
+              result.actual = `attribute "${attrName}" exists`;
+              break;
+
+            case 'toHaveAttributeValue':
+              if (!args || args.assertionType !== 'toHaveAttributeValue') {
+                throw new Error('toHaveAttributeValue requires proper arguments structure');
+              }
+              const { name: attrValueName, value: attrValueValue } = mainArgs;
+              if (!attrValueName) {
+                throw new Error('toHaveAttributeValue requires "name" argument (string)');
+              }
+              if (!attrValueValue) {
+                throw new Error('toHaveAttributeValue requires "value" argument (string or RegExp)');
+              }
+              assertionResult = await assertion.toHaveAttribute(attrValueName, attrValueValue, finalOptions);
+              result.actual = `attribute "${attrValueName}"="${attrValueValue}"`;
+              break;
+
+            case 'toHaveText':
+              if (!args || args.assertionType !== 'toHaveText') {
+                throw new Error('toHaveText requires proper arguments structure');
+              }
+              const { expected: textExpected } = mainArgs;
+              if (!textExpected) {
+                throw new Error('toHaveText requires "expected" argument (string, RegExp, or Array<string | RegExp>)');
+              }
+              console.log('textExpected', textExpected);
+              console.log('finalOptions', finalOptions);
+              assertionResult = await assertion.toHaveText(textExpected, finalOptions);
+              result.actual = `text "${Array.isArray(textExpected) ? textExpected.join(', ') : textExpected}"`;
+              break;
+
+            case 'toContainText':
+              if (!args || args.assertionType !== 'toContainText') {
+                throw new Error('toContainText requires proper arguments structure');
+              }
+              const { expected: containExpected } = mainArgs;
+              if (!containExpected) {
+                throw new Error('toContainText requires "expected" argument (string, RegExp, or Array<string | RegExp>)');
+              }
+              assertionResult = await assertion.toContainText(containExpected, finalOptions);
+              result.actual = `contains text "${Array.isArray(containExpected) ? containExpected.join(', ') : containExpected}"`;
+              break;
+
+            case 'toHaveValue':
+              if (!args || args.assertionType !== 'toHaveValue') {
+                throw new Error('toHaveValue requires proper arguments structure');
+              }
+              const { value: valueExpected } = mainArgs;
+              if (valueExpected === undefined) {
+                throw new Error('toHaveValue requires "value" argument (string or RegExp)');
+              }
+              assertionResult = await assertion.toHaveValue(valueExpected, finalOptions);
+              result.actual = `value "${valueExpected}"`;
+              break;
+
+            case 'toHaveValues':
+              if (!args || args.assertionType !== 'toHaveValues') {
+                throw new Error('toHaveValues requires proper arguments structure');
+              }
+              const { values: valuesExpected } = mainArgs;
+              if (!valuesExpected || !Array.isArray(valuesExpected)) {
+                throw new Error('toHaveValues requires "values" argument (Array<string | RegExp>)');
+              }
+              assertionResult = await assertion.toHaveValues(valuesExpected, finalOptions);
+              result.actual = `values [${valuesExpected.join(', ')}]`;
+              break;
+
+            case 'toMatchAriaSnapshot':
+              if (!args || args.assertionType !== 'toMatchAriaSnapshot') {
+                throw new Error('toMatchAriaSnapshot requires proper arguments structure');
+              }
+              const { expected: ariaSnapshotExpected } = mainArgs;
+              if (!ariaSnapshotExpected) {
+                throw new Error('toMatchAriaSnapshot requires "expected" argument (string)');
+              }
+              assertionResult = await assertion.toMatchAriaSnapshot(ariaSnapshotExpected, finalOptions);
+              result.actual = `aria snapshot "${ariaSnapshotExpected}"`;
+              break;
+
+            case 'toMatchAriaSnapshotOptions':
+              if (!args || args.assertionType !== 'toMatchAriaSnapshotOptions') {
+                throw new Error('toMatchAriaSnapshotOptions requires proper arguments structure');
+              }
+              assertionResult = await assertion.toMatchAriaSnapshot(finalOptions);
+              result.actual = 'aria snapshot (with options)';
+              break;
+
+            case 'toContainClass':
+              if (!args || args.assertionType !== 'toContainClass') {
+                throw new Error('toContainClass requires proper arguments structure');
+              }
+              const { expected: containClassExpected } = mainArgs;
+              if (!containClassExpected) {
+                throw new Error('toContainClass requires "expected" argument (string or Array<string>)');
+              }
+              assertionResult = await assertion.toContainClass(containClassExpected, finalOptions);
+              result.actual = `contains class "${Array.isArray(containClassExpected) ? containClassExpected.join(' ') : containClassExpected}"`;
+              break;
+
+            case 'toHaveClass':
+              if (!args || args.assertionType !== 'toHaveClass') {
+                throw new Error('toHaveClass requires proper arguments structure');
+              }
+              const { expected: classExpected } = mainArgs;
+              if (!classExpected) {
+                throw new Error('toHaveClass requires "expected" argument (string, RegExp, or Array<string | RegExp>)');
+              }
+              assertionResult = await assertion.toHaveClass(classExpected, finalOptions);
+              result.actual = `class "${Array.isArray(classExpected) ? classExpected.join(' ') : classExpected}"`;
+              break;
+
+            case 'toHaveCount':
+              if (!args || args.assertionType !== 'toHaveCount') {
+                throw new Error('toHaveCount requires proper arguments structure');
+              }
+              const { count } = mainArgs;
+              if (count === undefined) {
+                throw new Error('toHaveCount requires "count" argument (number)');
+              }
+              assertionResult = await assertion.toHaveCount(count, finalOptions);
+              result.actual = `count ${count}`;
+              break;
+
+            case 'toHaveCSS':
+              if (!args || args.assertionType !== 'toHaveCSS') {
+                throw new Error('toHaveCSS requires proper arguments structure');
+              }
+              const { name: cssName, value: cssValue } = mainArgs;
+              if (!cssName || !cssValue) {
+                throw new Error('toHaveCSS requires "name" and "value" arguments');
+              }
+              assertionResult = await assertion.toHaveCSS(cssName, cssValue, finalOptions);
+              result.actual = `CSS ${cssName}="${cssValue}"`;
+              break;
+
+            case 'toHaveId':
+              if (!args || args.assertionType !== 'toHaveId') {
+                throw new Error('toHaveId requires proper arguments structure');
+              }
+              const { id } = mainArgs;
+              if (!id) {
+                throw new Error('toHaveId requires "id" argument (string or RegExp)');
+              }
+              assertionResult = await assertion.toHaveId(id, finalOptions);
+              result.actual = `id "${id}"`;
+              break;
+
+            case 'toHaveJSProperty':
+              if (!args || args.assertionType !== 'toHaveJSProperty') {
+                throw new Error('toHaveJSProperty requires proper arguments structure');
+              }
+              const { name: jsPropertyName, value: jsPropertyValue } = mainArgs;
+              if (!jsPropertyName || jsPropertyValue === undefined) {
+                throw new Error('toHaveJSProperty requires "name" and "value" arguments');
+              }
+              assertionResult = await assertion.toHaveJSProperty(jsPropertyName, jsPropertyValue, finalOptions);
+              result.actual = `JS property ${jsPropertyName}="${JSON.stringify(jsPropertyValue)}"`;
+              break;
+
+            case 'toHaveRole':
+              if (!args || args.assertionType !== 'toHaveRole') {
+                throw new Error('toHaveRole requires proper arguments structure');
+              }
+              const { role } = mainArgs;
+              if (!role) {
+                throw new Error('toHaveRole requires "role" argument (ARIA role)');
+              }
+              assertionResult = await assertion.toHaveRole(role, finalOptions);
+              result.actual = `role "${role}"`;
+              break;
+
+            case 'toHaveScreenshot':
+              if (!args || args.assertionType !== 'toHaveScreenshot') {
+                throw new Error('toHaveScreenshot requires proper arguments structure');
+              }
+              const { name: screenshotName } = mainArgs;
+              if (!screenshotName) {
+                throw new Error('toHaveScreenshot requires "name" argument (snapshot name)');
+              }
+              assertionResult = await assertion.toHaveScreenshot(screenshotName, finalOptions);
+              result.actual = `screenshot "${Array.isArray(screenshotName) ? screenshotName.join(', ') : screenshotName}"`;
+              break;
+
+            case 'toHaveScreenshotOptions':
+              if (!args || args.assertionType !== 'toHaveScreenshotOptions') {
+                throw new Error('toHaveScreenshotOptions requires proper arguments structure');
+              }
+              assertionResult = await assertion.toHaveScreenshot(finalOptions);
+              result.actual = 'screenshot (with options)';
+              break;
+
+
+            case 'toHaveAccessibleDescription':
+              if (!args || args.assertionType !== 'toHaveAccessibleDescription') {
+                throw new Error('toHaveAccessibleDescription requires proper arguments structure');
+              }
+              const { description } = mainArgs;
+              if (!description) {
+                throw new Error('toHaveAccessibleDescription requires "description" argument');
+              }
+              assertionResult = await assertion.toHaveAccessibleDescription(description, finalOptions);
+              result.actual = `accessible description "${description}"`;
+              break;
+
+            case 'toHaveAccessibleErrorMessage':
+              if (!args || args.assertionType !== 'toHaveAccessibleErrorMessage') {
+                throw new Error('toHaveAccessibleErrorMessage requires proper arguments structure');
+              }
+              const { errorMessage } = mainArgs;
+              if (!errorMessage) {
+                throw new Error('toHaveAccessibleErrorMessage requires "errorMessage" argument (string or RegExp)');
+              }
+              assertionResult = await assertion.toHaveAccessibleErrorMessage(errorMessage, finalOptions);
+              result.actual = `accessible error message "${errorMessage}"`;
+              break;
+
+            case 'toHaveAccessibleName':
+              if (!args || args.assertionType !== 'toHaveAccessibleName') {
+                throw new Error('toHaveAccessibleName requires proper arguments structure');
+              }
+              const { name: accessibleName } = mainArgs;
+              if (!accessibleName) {
+                throw new Error('toHaveAccessibleName requires "name" argument (string or RegExp)');
+              }
+              assertionResult = await assertion.toHaveAccessibleName(accessibleName, finalOptions);
+              result.actual = `accessible name "${accessibleName}"`;
+              break;
+
+            default:
+              throw new Error(`Unsupported assertion: ${name}`);
+          }
+
+          result.result = 'pass';
+          console.log(`validate_dom_assertions: ${name}${negate ? ' (negated)' : ''} passed for element "${element}"`);
+
+        } catch (error) {
+          result.result = 'fail';
+          result.error = error instanceof Error ? error.message : String(error);
+          console.log(`validate_dom_assertions: ${name}${negate ? ' (negated)' : ''} failed for element "${element}": ${result.error}`);
+        }
+
+        results.push(result);
+      }
+
+      // Calculate summary
+      const passedCount = results.filter(r => r.result === 'pass').length;
+      const failedCount = results.length - passedCount;
+
+      // Generate evidence message
+      let evidence = '';
+      if (passedCount === results.length) {
+        evidence = `All ${results.length} Playwright assertions passed for element "${element}"`;
+      } else {
+        const failedChecks = results.filter(r => r.result === 'fail');
+        const failedAssertions = failedChecks.map(c => `${c.assertion}${c.negate ? ' (negated)' : ''}`).join(', ');
+        evidence = `Found element "${element}" but ${failedCount} assertions failed: ${failedAssertions}`;
+      }
+
+      // Generate payload
+      const payload = {
+        ref,
+        element,
+        summary: {
+          total: results.length,
+          passed: passedCount,
+          failed: failedCount,
+          status: passedCount === results.length ? 'pass' : 'fail',
+          evidence,
+        },
+        checks: results,
+      };
+
+      console.log('Validate DOM Assertions:');
+      console.log(payload);
+      response.addResult(JSON.stringify(payload, null, 2));
+    });
+  },
+});
+
+
+const checkAlertInSnapshotSchema = z.object({
+  element: z.string().describe('Human-readable element description for logging purposes'),
+  matchType: z.enum(['contains', 'not-contains']).default('contains').describe(
+      "Type of match: 'contains' checks if alert dialog is present, 'not-contains' checks that alert dialog is NOT present"
+  ),
+  hasText: z.string().optional().describe(
+      'Optional text to check if it exists in the alert dialog message. If provided and alert exists, will verify if this text is present in the alert message'
+  ),
+});
+
+const validate_alert_in_snapshot = defineTabTool({
+  capability: 'core',
+  schema: {
+    name: 'validate_alert_in_snapshot',
+    title: 'Validate Alert in Snapshot',
+    description: 'Validate if an alert dialog is present in the current page snapshot',
+    inputSchema: checkAlertInSnapshotSchema,
+    type: 'readOnly',
+  },
+  // clearsModalState: 'dialog',
+  handle: async (tab, params, response) => {
+    const { element, matchType, hasText } = checkAlertInSnapshotSchema.parse(params);
+
+    try {
+      // Get the current snapshot
+      console.log('start capture snapshot');
+      const tabSnapshot = await tab.captureSnapshot();
+
+      // Check if alert dialog exists using modalStates
+      const dialogState = tabSnapshot.modalStates.find(state => state.type === 'dialog');
+      const alertExists = !!dialogState;
+      console.log('alertExists', alertExists);
+      console.log('matchType:', matchType);
+      console.log('hasText:', hasText);
+
+      // Get alert dialog text if it exists
+      const alertText = dialogState ? dialogState.description : null;
+      console.log('alertText:', alertText);
+
+      // Check text if hasText is provided and alert exists
+      let textCheckPassed = true;
+      let textCheckMessage = '';
+      if (hasText && alertExists && alertText) {
+        textCheckPassed = alertText.includes(hasText);
+        textCheckMessage = textCheckPassed
+          ? `Alert text contains expected text: "${hasText}"`
+          : `Alert text does not contain expected text: "${hasText}". Actual text: "${alertText}"`;
+        console.log('textCheckPassed:', textCheckPassed);
+        console.log('textCheckMessage:', textCheckMessage);
+      }
+
+      // Apply match type logic
+      let passed;
+      if (matchType === 'contains')
+        passed = alertExists && (hasText ? textCheckPassed : true);
+      else if (matchType === 'not-contains')
+        passed = !alertExists;
+
+      console.log('passed:', passed);
+
+      // Generate evidence message
+      let evidence = '';
+      if (matchType === 'contains') {
+        if (passed) {
+          if (hasText)
+            evidence = `Alert dialog found with text: "${alertText}" containing expected: "${hasText}"`;
+          else
+            evidence = `Alert dialog found with text: "${alertText}"`;
+
+        } else {
+          if (hasText)
+            evidence = `Alert dialog found but text "${hasText}" not found in: "${alertText}"`;
+          else
+            evidence = `Alert dialog not found in snapshot`;
+
+        }
+      } else { // not-contains
+        if (passed)
+          evidence = `Alert dialog correctly not found in snapshot`;
+        else
+          evidence = `Alert dialog unexpectedly found with text: "${alertText}"`;
+
+      }
+
+      const payload = {
+        element,
+        matchType,
+        hasText,
+        alertExists,
+        alertText,
+        textCheckPassed,
+        textCheckMessage,
+        summary: {
+          status: passed ? 'pass' : 'fail',
+          evidence,
+        },
+        snapshot: {
+          containsAlert: alertExists,
+          snapshotLength: tabSnapshot.ariaSnapshot.length
+        }
+      };
+
+      console.log('Check alert in snapshot:', payload);
+      const resultString = JSON.stringify(payload, null, 2);
+      // console.log('Result string:', resultString);
+      response.addResult(resultString);
+    } catch (error) {
+      const errorMessage = `Failed to check alert dialog in snapshot. Error: ${error instanceof Error ? error.message : String(error)}`;
+      const errorPayload = {
+        element,
+        matchType,
+        hasText,
+        alertExists: false,
+        alertText: null,
+        textCheckPassed: false,
+        textCheckMessage: '',
+        summary: {
+          status: 'error',
+          evidence: errorMessage
+        },
+        error: error instanceof Error ? error.message : String(error)
+      };
+
+      console.error('Check alert in snapshot error:', errorPayload);
+      const errorResultString = JSON.stringify(errorPayload, null, 2);
+      // console.log('Error result string:', errorResultString);
+      response.addResult(errorResultString);
+      console.log('Error result added to response');
+      console.log('Function completed with error');
+    }
+  },
+});
+
+const default_validation = defineTabTool({
+  capability: 'core',
+  schema: {
+    name: 'default_validation',
+    title: 'Default Validation Tool',
+    description: 'Default tool for when LLM cannot find a suitable tool. Accepts ref and JavaScript code to parse and execute.',
+    inputSchema: z.object({
+      refs: z.array(z.object({
+        ref: z.string().describe('Element reference from the page snapshot')
+      })).describe('Array of element reference objects from the page snapshot. Each object should have a "ref" key with string value.'),
+      jsCode: z.string().describe('JavaScript code to execute on each element. Function receives single element as parameter. Should return "pass" or "fail" as string. All elements must return "pass" for overall success. Do not use ref in the code - work directly with the element parameter.'),
+    }),
+    type: 'readOnly',
+  },
+  handle: async (tab, params, response) => {
+    const { refs, jsCode } = params;
+
+    await tab.waitForCompletion(async () => {
+      try {
+        // Get element locators for all refs
+        const locators = await Promise.all(
+            refs.map(refObj => tab.refLocator({ ref: refObj.ref, element: 'target element' }))
+        );
+        // for (const locator of locators)
+        //   console.log('generateLocator', await generateLocator(locator));
+
+        // Execute the JavaScript code on each element and collect results
+        const results = await Promise.all(
+            locators.map(async (locator, index) => {
+              return await locator.evaluate((element, code) => {
+                try {
+                // Safe evaluation function
+                  const safeEval = (code: string, element: Element) => {
+                    const func = new Function('element', 'document', `
+                    'use strict';
+                    ${code}
+                  `);
+
+                    // Create safe context with necessary objects
+                    const safeContext = {
+                      element,
+                      document, // Keep document for element searching
+                      // Disable potentially dangerous functions
+                      console: { log: () => {}, warn: () => {}, error: () => {} },
+                      setTimeout: undefined,
+                      setInterval: undefined,
+                      eval: undefined,
+                      Function: undefined,
+                      // Keep limited window functionality
+                      window: {
+                        innerWidth: window.innerWidth,
+                        innerHeight: window.innerHeight,
+                        localStorage: window.localStorage,
+                        sessionStorage: window.sessionStorage
+                      }
+                    };
+
+                    return func.call(safeContext, element, document);
+                  };
+
+                  return safeEval(code, element);
+                } catch (error) {
+                  return {
+                    error: error instanceof Error ? error.message : String(error),
+                    type: 'execution_error'
+                  };
+                }
+              }, jsCode);
+            })
+        );
+
+        // Check if all results are 'pass'
+        const allPassed = results.every(result => result === 'pass');
+        const result = allPassed ? 'pass' : 'fail';
+
+        // Determine pass/fail based on result
+        const isPass = result === 'pass' && !(result && typeof result === 'object' && 'error' in result);
+        const status = isPass ? 'pass' : 'fail';
+        const passed = isPass ? 1 : 0;
+        const failed = isPass ? 0 : 1;
+
+        // Generate evidence message
+        const refsList = refs.map(refObj => refObj.ref).join(', ');
+        const evidence = isPass
+          ? `Successfully executed JavaScript code on ${refs.length} element(s) with refs: [${refsList}]. Result: ${typeof result === 'object' ? JSON.stringify(result) : String(result)}`
+          : `JavaScript code execution failed on ${refs.length} element(s) with refs: [${refsList}]. Result: ${typeof result === 'object' ? JSON.stringify(result) : String(result)}`;
+
+        const payload = {
+          refs,
+          element: 'target elements',
+          summary: {
+            total: 1,
+            passed,
+            failed,
+            status,
+            evidence,
+          },
+          checks: [{
+            property: 'javascript_execution',
+            operator: 'execute',
+            expected: 'success',
+            actual: typeof result === 'object' ? JSON.stringify(result) : String(result),
+            result: isPass ? 'pass' : 'fail',
+          }],
+          result,
+          jsCode,
+        };
+
+        console.log('Default validation executed:', payload);
+        response.addResult(JSON.stringify(payload, null, 2));
+
+      } catch (error) {
+        const errorPayload = {
+          refs,
+          element: 'target elements',
+          summary: {
+            total: 1,
+            passed: 0,
+            failed: 1,
+            status: 'fail',
+            evidence: `Failed to execute JavaScript code on ${refs.length} element(s) with refs: [${refs.map(refObj => refObj.ref).join(', ')}]. Error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+          checks: [{
+            property: 'javascript_execution',
+            operator: 'execute',
+            expected: 'success',
+            actual: error instanceof Error ? error.message : String(error),
+            result: 'fail',
+          }],
+          error: error instanceof Error ? error.message : String(error),
+          jsCode,
+        };
+
+        console.error('Default validation error:', errorPayload);
+        response.addResult(JSON.stringify(errorPayload, null, 2));
+      }
+    });
+  },
+});
+
+
+// const validate_response = defineTabTool({
+//   capability: 'core',
+//   schema: {
+//     name: 'validate_response',
+//     title: 'Validate Response using Regex Patterns',
+//     description: 'Validate response data using regex patterns. Types: regex_extract (extract value with pattern), regex_match (check pattern presence).',
+//     inputSchema: z.object({
+//       responseData: z.string().describe('Response data as string (can be JSON with stdout/stderr or raw response)'),
+//       checks: z.array(z.object({
+//         type: z.enum(['regex_extract', 'regex_match']).describe('Type of validation check'),
+//         name: z.string().describe('Name/description of the check for logging purposes'),
+//         pattern: z.string().describe('Regex pattern to extract or match against'),
+//         expected: z.any().optional().describe('Expected value for comparison (not needed for regex_match)'),
+//         operator: z.enum(['equals', 'not_equals', 'contains', 'not_contains', 'greater_than', 'less_than']).optional().default('equals').describe('Comparison operator (not needed for regex_match)'),
+//         extractGroup: z.number().optional().default(1).describe('Regex capture group to extract (default: 1, only for regex_extract)'),
+//       })).min(1).describe('Array of validation checks to perform'),
+//     }),
+//     type: 'readOnly',
+//   },
+//   handle: async (tab, params, response) => {
+//     const { responseData, checks } = params;
+
+//     try {
+//       // Perform all checks
+//       const results = checks.map(check => {
+//         const result = performRegexCheck(responseData, check);
+//         return {
+//           type: check.type,
+//           name: check.name,
+//           pattern: check.pattern,
+//           expected: check.expected,
+//           operator: check.operator,
+//           extractGroup: check.extractGroup,
+//           actual: result.actual,
+//           result: result.passed ? 'pass' : 'fail',
+//         };
+//       });
+
+//       const passedCount = results.filter(r => r.result === 'pass').length;
+//       const status = passedCount === results.length ? 'pass' : 'fail';
+
+//       // Generate evidence message
+//       let evidence = '';
+//       if (status === 'pass') {
+//         evidence = `All ${results.length} regex validation checks passed successfully`;
+//       } else {
+//         const failedChecks = results.filter(r => r.result === 'fail');
+//         const failedDetails = failedChecks.map(c =>
+//           `${c.name} (pattern: ${c.pattern}, expected: ${c.expected}, got: ${c.actual})`
+//         ).join(', ');
+//         evidence = `${passedCount}/${results.length} checks passed. Failed: ${failedDetails}`;
+//       }
+
+//       const payload = {
+//         responseData: responseData.length > 500 ? responseData.slice(0, 500) + '...' : responseData,
+//         summary: {
+//           total: results.length,
+//           passed: passedCount,
+//           failed: results.length - passedCount,
+//           status,
+//           evidence,
+//         },
+//         checks: results,
+//       };
+
+//       console.log('Validate cURL response regex:', payload);
+//       response.addResult(JSON.stringify(payload, null, 2));
+
+//     } catch (error) {
+//       const errorPayload = {
+//         responseData: responseData.length > 500 ? responseData.slice(0, 500) + '...' : responseData,
+//         summary: {
+//           total: checks.length,
+//           passed: 0,
+//           failed: checks.length,
+//           status: 'fail',
+//           evidence: `Failed to validate cURL response with regex. Error: ${error instanceof Error ? error.message : String(error)}`,
+//         },
+//         checks: checks.map(check => ({
+//           type: check.type,
+//           name: check.name,
+//           pattern: check.pattern,
+//           expected: check.expected,
+//           operator: check.operator,
+//           extractGroup: check.extractGroup,
+//           actual: 'error',
+//           result: 'fail',
+//         })),
+//         error: error instanceof Error ? error.message : String(error),
+//       };
+
+//       console.error('Validate cURL response regex error:', errorPayload);
+//       response.addResult(JSON.stringify(errorPayload, null, 2));
+//     }
+//   },
+// });
+
+const validate_response = defineTabTool({
+  capability: 'core',
+  schema: {
+    name: 'validate_response',
+    title: 'Validate Response using JSON Path',
+    description: 'Validate response object using JSON path expressions to extract and compare values.',
+    inputSchema: z.object({
+      responseData: z.string().describe('Response data as JSON string'),
+      checks: z.array(z.object({
+        name: z.string().describe('Name/description of the check for logging purposes'),
+        jsonPath: z.string().describe('JSONPath syntax: Properties (data.token), Array indices (data.books[0].title), Filters (data.books[?(@.price>30)].title), Operators (==, !=, >, <, >=, <=), Boolean values (data.users[?(@.active==true)])'),
+        expected: z.any().optional().describe('Expected value for comparison'),
+        operator: z.enum(['equals', 'not_equals', 'greater_than', 'less_than', 'hasValue']).optional().default('equals').describe('Comparison operator. hasValue checks if value exists at jsonPath (expected should be true/false)')
+      })).min(1).describe('Array of validation checks to perform'),
+    }),
+    type: 'readOnly',
+  },
+  handle: async (tab, params, response) => {
+    const { responseData, checks } = params;
+
+    try {
+      // Parse JSON string to object
+      const parsedResponseData = JSON.parse(responseData);
+
+      // Perform all checks
+      const results = checks.map(check => {
+        // Extract value using JSON path
+        const actualValue = getValueByJsonPath(parsedResponseData, check.jsonPath);
+
+        // Compare values if expected is provided
+        let passed = true;
+        if (check.expected !== undefined) {
+          const comparisonResult = compareValues(actualValue, check.expected, check.operator);
+          passed = comparisonResult.passed;
+        }
+
+        return {
+          name: check.name,
+          jsonPath: check.jsonPath,
+          expected: check.expected,
+          operator: check.operator,
+          actual: actualValue,
+          result: passed ? 'pass' : 'fail',
+        };
+      });
+
+      const passedCount = results.filter(r => r.result === 'pass').length;
+      const status = passedCount === results.length ? 'pass' : 'fail';
+
+      // Generate evidence message
+      let evidence = '';
+      if (status === 'pass') {
+        evidence = `All ${results.length} JSON path validation checks passed successfully`;
+      } else {
+        const failedChecks = results.filter(r => r.result === 'fail');
+        const failedDetails = failedChecks.map(c =>
+          `${c.name} (path: ${c.jsonPath}, expected: ${c.expected}, got: ${c.actual})`
+        ).join(', ');
+        evidence = `${passedCount}/${results.length} checks passed. Failed: ${failedDetails}`;
+      }
+
+      const payload = {
+        responseData: {
+          ...parsedResponseData,
+          data: typeof parsedResponseData.data === 'object' ?
+            (JSON.stringify(parsedResponseData.data).length > 500 ?
+              JSON.stringify(parsedResponseData.data).slice(0, 500) + '...' :
+              parsedResponseData.data) :
+            (parsedResponseData.data.length > 500 ? parsedResponseData.data.slice(0, 500) + '...' : parsedResponseData.data)
+        },
+        summary: {
+          total: results.length,
+          passed: passedCount,
+          failed: results.length - passedCount,
+          status,
+          evidence,
+        },
+        checks: results,
+      };
+
+      console.log('Validate response JSON path:', payload);
+      response.addResult(JSON.stringify(payload, null, 2));
+
+    } catch (error) {
+      // Try to parse responseData for error display, fallback to original string if parsing fails
+      let displayResponseData;
+      try {
+        const parsedForDisplay = JSON.parse(responseData);
+        displayResponseData = {
+          ...parsedForDisplay,
+          data: typeof parsedForDisplay.data === 'object' ?
+            (JSON.stringify(parsedForDisplay.data).length > 500 ?
+              JSON.stringify(parsedForDisplay.data).slice(0, 500) + '...' :
+              parsedForDisplay.data) :
+            (parsedForDisplay.data.length > 500 ? parsedForDisplay.data.slice(0, 500) + '...' : parsedForDisplay.data)
+        };
+      } catch {
+        displayResponseData = responseData.length > 500 ? responseData.slice(0, 500) + '...' : responseData;
+      }
+
+      const errorPayload = {
+        responseData: displayResponseData,
+        summary: {
+          total: checks.length,
+          passed: 0,
+          failed: checks.length,
+          status: 'fail',
+          evidence: `Failed to validate response with JSON path. Error: ${error instanceof Error ? error.message : String(error)}`,
+        },
+        checks: checks.map(check => ({
+          name: check.name,
+          jsonPath: check.jsonPath,
+          expected: check.expected,
+          operator: check.operator,
+          actual: 'error',
+          result: 'fail',
+        })),
+        error: error instanceof Error ? error.message : String(error),
+      };
+
+      console.error('Validate response JSON path error:', errorPayload);
+      response.addResult(JSON.stringify(errorPayload, null, 2));
+    }
+  },
+});
+
+const generate_locator = defineTabTool({
+  capability: 'core',
+  schema: {
+    name: 'generate_locator',
+    title: 'Generate Playwright Locator from Ref',
+    description: 'Generate a stable Playwright locator string from element ref using Playwright\'s built-in generateLocator function. Returns a single optimized locator string.',
+    inputSchema: z.object({
+      ref: z.string().describe('Element reference from page snapshot'),
+      element: z.string().describe('Human-readable element description for logging'),
+    }),
+    type: 'readOnly',
+  },
+  handle: async (tab, params, response) => {
+    const { ref, element } = params;
+
+    try {
+      await tab.waitForCompletion(async () => {
+        // Get locator from ref
+        const locator = await tab.refLocator({ ref, element });
+
+        // Generate stable locator using Playwright's generateLocator function
+        const generatedLocator = await generateLocator(locator);
+
+        const payload = {
+          ref,
+          element,
+          generatedLocator,
+          summary: {
+            status: 'success',
+            message: `Successfully generated Playwright locator for element "${element}" with ref "${ref}"`,
+            locatorType: 'playwright-generated',
+            isStable: true,
+            canBeReused: true,
+          },
+        };
+
+        response.addResult(JSON.stringify(payload, null, 2));
+      });
+    } catch (error) {
+      const errorPayload = {
+        ref,
+        element,
+        summary: {
+          status: 'error',
+          message: `Failed to generate locator for element "${element}" with ref "${ref}". Error: ${error instanceof Error ? error.message : String(error)}.Snapshot:${JSON.stringify(await tab.captureSnapshot())}`,
+        },
+        error: error instanceof Error ? error.message : String(error),
+      };
+
+      console.error('Generate locator error:', errorPayload);
+      response.addResult(JSON.stringify(errorPayload, null, 2));
+    }
+  },
+});
+
+const validate_tab_exist = defineTabTool({
+  capability: 'core',
+  schema: {
+    name: 'validate_tab_exist',
+    title: 'Validate Tab Exists',
+    description: 'Check if a browser tab with the specified URL exists or does not exist. Use matchType "exist" to verify tab exists, or "not-exist" to verify tab does not exist. exactMatch is ignored when matchType is "not-exist". Optionally validate if the found tab is the current active tab with isCurrent parameter.',
+    inputSchema: z.object({
+      url: z.string().describe('URL to check for in existing browser tabs'),
+      matchType: z.enum(['exist', 'not-exist']).describe('Whether to check if tab exists or does not exist'),
+      exactMatch: z.boolean().optional().default(true).describe('Whether to require exact URL match (true) or partial match (false). Ignored when matchType is "not-exist"'),
+      isCurrent: z.boolean().optional().describe('If true, also validates that the found tab is the current active tab'),
+    }),
+    type: 'readOnly',
+  },
+  handle: async (tab, params, response) => {
+    const { url, matchType, exactMatch, isCurrent } = params;
+
+    try {
+      // Get all tabs information from context
+      const context = tab.context;
+      const allTabs = context.tabs();
+
+      // Extract tab info using the correct page methods
+      const tabsWithInfo = await Promise.all(allTabs.map(async (tabItem: any, index: number) => {
+        try {
+          // Get URL and title from page object
+          const tabUrl = await tabItem.page.url() || 'unknown';
+          const tabTitle = await tabItem.page.title() || 'Unknown';
+          tab.page.getByText;
+          return {
+            index,
+            header: tabTitle,
+            url: tabUrl
+          };
+        } catch (error) {
+          // Fallback if we can't get tab info
+          return {
+            index,
+            header: 'Unknown',
+            url: 'unknown'
+          };
+        }
+      }));
+
+      console.log('All tabs info:', tabsWithInfo);
+
+      // Find current tab URL
+      let currentTabUrl = '';
+      try {
+        currentTabUrl = await tab.page.url();
+      } catch (error) {
+        console.log('Could not determine current tab URL:', error);
+      }
+
+      let foundTab: any = null;
+      let searchType = '';
+
+      // Search for tab with matching URL
+      if (exactMatch) {
+        // Exact URL match
+        foundTab = tabsWithInfo.find((tab: any) => tab.url === url);
+        searchType = 'exact';
+      } else {
+        // Partial URL match
+        foundTab = tabsWithInfo.find((tab: any) => tab.url.includes(url) || url.includes(tab.url));
+        searchType = 'partial';
+      }
+
+      const isFound = !!foundTab;
+
+      // Check if found tab is current tab (if isCurrent is specified)
+      let isCurrentTab = false;
+      if (isFound && isCurrent !== undefined)
+        isCurrentTab = (foundTab as any).url === currentTabUrl;
+
+
+      // Determine final result based on matchType and isCurrent
+      let status: string;
+      if (matchType === 'exist') {
+        const urlMatch = isFound;
+        const currentMatch = isCurrent === undefined ? true : (isCurrent ? isCurrentTab : !isCurrentTab);
+        status = (urlMatch && currentMatch) ? 'pass' : 'fail';
+      } else { // matchType === 'not-exist'
+        const urlMatch = !isFound;
+        const currentMatch = isCurrent === undefined ? true : (isCurrent ? isCurrentTab : !isCurrentTab);
+        status = (urlMatch && currentMatch) ? 'pass' : 'fail';
+      }
+
+      // Generate evidence message
+      let evidence = '';
+      let currentInfo = '';
+      if (isCurrent !== undefined) {
+        if (isFound)
+          currentInfo = ` Found tab is ${isCurrentTab ? '' : 'not '}current tab. Expected: ${isCurrent ? 'current' : 'not current'}.`;
+        else
+          currentInfo = ` Current tab check: ${isCurrent ? 'expected current tab not found' : 'expected non-current tab not found'}.`;
+
+      }
+
+      if (matchType === 'exist') {
+        if (isFound && foundTab) {
+          evidence = `Found tab with ${searchType} URL match: "${(foundTab as any).url}" (index: ${(foundTab as any).index}, header: "${(foundTab as any).header}")${currentInfo}`;
+        } else {
+          const availableUrls = tabsWithInfo.map((t: any) => (t as any).url).join(', ');
+          evidence = `Tab with URL "${url}" not found. Available tabs: ${availableUrls}${currentInfo}`;
+        }
+      } else { // matchType === 'not-exist'
+        if (!isFound)
+          evidence = `Tab with URL "${url}" does not exist (as expected). Available tabs: ${tabsWithInfo.map((t: any) => (t as any).url).join(', ')}${currentInfo}`;
+        else
+          evidence = `Tab with URL "${url}" exists (unexpected). Found: "${(foundTab as any).url}" (index: ${(foundTab as any).index}, header: "${(foundTab as any).header}")${currentInfo}`;
+
+      }
+
+      const payload = {
+        url,
+        matchType,
+        exactMatch,
+        isCurrent,
+        currentTabUrl,
+        isCurrentTab,
+        foundTab: foundTab ? {
+          index: (foundTab as any).index,
+          header: (foundTab as any).header,
+          url: (foundTab as any).url
+        } : null,
+        summary: {
+          total: 1,
+          passed: status === 'pass' ? 1 : 0,
+          failed: status === 'pass' ? 0 : 1,
+          status,
+          evidence,
+        },
+        allTabs: tabsWithInfo.map((t: any) => ({
+          index: (t as any).index,
+          header: (t as any).header,
+          url: (t as any).url
+        })),
+      };
+      console.log('Validate tab exist:', payload);
+      response.addResult(JSON.stringify(payload, null, 2));
+
+    } catch (error) {
+      const errorPayload = {
+        url,
+        exactMatch,
+        summary: {
+          total: 1,
+          passed: 0,
+          failed: 1,
+          status: 'fail',
+          evidence: `Failed to validate tab existence. Error: ${error instanceof Error ? error.message : String(error)}`,
+        },
+        error: error instanceof Error ? error.message : String(error),
+      };
+      console.error('Validate tab exist error:', errorPayload);
+      response.addResult(JSON.stringify(errorPayload, null, 2));
+    }
+  },
+});
+
+const validateElementSchema = z.object({
+  ref: z.string().optional().describe('Exact target element reference from the page snapshot. If provided, will search by ref first, then fallback to role/accessibleName if ref fails'),
+  role: z.string().describe('ROLE of the element. Can be found in the snapshot like this: \`- {ROLE} "Accessible Name":\`'),
+  accessibleName: z.string().describe('ACCESSIBLE_NAME of the element. Can be found in the snapshot like this: \`- role "{ACCESSIBLE_NAME}"\`'),
+  matchType: z.enum(['contains', 'not-contains']).default('contains').describe(
+      "Type of match: 'contains' checks if element is present and visible, 'not-contains' checks that element is NOT present or NOT visible"
+  ),
+});
+
+const validate_element_visible = defineTabTool({
+  capability: 'core',
+  schema: {
+    name: 'validate_element_visible',
+    title: 'Validate Element',
+    description: 'Validate element visibility',
+    inputSchema: validateElementSchema,
+    type: 'readOnly',
+  },
+
+  handle: async (tab, params, response) => {
+    try {
+      const { ref, role, accessibleName, matchType } = params;
+
+      console.log(`validate_element: Starting validation with ref="${ref}", role="${role}", accessibleName="${accessibleName}"`);
+
+      let isVisible = false;
+      let existsInDOM = false;
+      let searchMethod = '';
+      let evidence = '';
+
+      // Step 1: Try to find element by ref if provided
+      if (ref) {
+        try {
+          console.log(`validate_element: Attempting to find element by ref="${ref}"`);
+          const locator = await tab.refLocator({ ref, element: 'target element' });
+          
+          // For 'contains' matchType, use expect.toBeVisible() directly
+          if (matchType === 'contains') {
+            await expect(locator).toBeVisible();
+            existsInDOM = true;
+            isVisible = true;
+            searchMethod = 'ref';
+            console.log(`validate_element: Element found by ref and is visible`);
+          } else {
+            // For 'not-contains' matchType, check visibility without expect
+            isVisible = await locator.isVisible();
+            existsInDOM = true;
+            searchMethod = 'ref';
+            console.log(`validate_element: Element found by ref, isVisible=${isVisible}`);
+          }
+          
+          // Determine the result based on matchType
+          const passed = matchType === 'contains' ? isVisible : !isVisible;
+          evidence = matchType === 'contains' 
+            ? `Element found by ref is visible as expected`
+            : `Element found by ref is not visible as expected`;
+        
+          const payload = {
+            ref,
+            role,
+            accessibleName,
+            matchType,
+            isVisible,
+            existsInDOM: true,
+            searchMethod: 'ref',
+            summary: {
+              total: 1,
+              passed: passed ? 1 : 0,
+              failed: passed ? 0 : 1,
+              status: passed ? 'pass' : 'fail',
+              evidence,
+            },
+            checks: [{
+              property: 'visibility',
+              operator: matchType,
+              expected: matchType === 'contains' ? 'visible' : 'not-visible',
+              actual: isVisible ? 'visible' : 'not-visible',
+              result: passed ? 'pass' : 'fail',
+            }],
+          };
+
+          console.log('Validate element (ref search):', payload);
+          response.addResult(JSON.stringify(payload, null, 2));
+          return; // Exit early since ref search was successful
+          
+        } catch (error) {
+          console.log(`validate_element: Element not found by ref or not visible, falling back to role/accessibleName search. Error: ${error instanceof Error ? error.message : String(error)}`);
+          // Continue to fallback search
+        }
+      }
+
+      // Step 2: Fallback to role/accessibleName search if ref search failed or ref not provided
+      if (!ref || !existsInDOM) {
+        console.log(`validate_element: Starting parallel recursive role/accessibleName search for role="${role}" with accessibleName="${accessibleName}"`);
+
+        try {
+          // Use parallel recursive search with uniqueness validation
+          const result = await checkElementVisibilityUnique(tab.page, role, accessibleName);
+          
+          if (result.found && result.unique) {
+            existsInDOM = true;
+            isVisible = true;
+            searchMethod = 'role/accessibleName-parallel-recursive';
+            console.log(`validate_element: Found exactly 1 visible element by role/accessibleName in frame "${result.frame}" (level ${result.level})`);
+          }
+        } catch (error) {
+          console.log(`validate_element: Parallel recursive search failed:`, error);
+          
+          // Check if error is due to multiple elements found
+          if (error instanceof Error && error.message.includes('Multiple elements found')) {
+            existsInDOM = true; // Elements exist but multiple found
+            isVisible = true;   // At least one is visible (since expect.toBeVisible() succeeded)
+            searchMethod = 'role/accessibleName-parallel-recursive';
+            // This will be handled in the final result determination
+          } else {
+            existsInDOM = false;
+            isVisible = false;
+            searchMethod = 'role/accessibleName-parallel-recursive';
+          }
+        }
+      }
+
+      // Step 3: Determine test result
+      if (!existsInDOM) {
+        // Element not found in DOM
+        const passed = matchType === 'not-contains';
+        evidence = `Element with role "${role}" and accessible name "${accessibleName}" not found in DOM. ${matchType === 'not-contains' ? 'Expected not present - passed.' : 'Expected present - failed.'}`;
+
+        const payload = {
+          ref,
+          role,
+          accessibleName,
+          matchType,
+          isVisible: false,
+          existsInDOM: false,
+          searchMethod: searchMethod || 'none',
+          summary: {
+            total: 1,
+            passed: passed ? 1 : 0,
+            failed: passed ? 0 : 1,
+            status: passed ? 'pass' : 'fail',
+            evidence,
+          },
+          checks: [{
+            property: 'visibility',
+            operator: matchType,
+            expected: matchType === 'contains' ? 'present' : 'not-present',
+            actual: 'not-found',
+            result: passed ? 'pass' : 'fail',
+          }],
+        };
+
+        console.log('Validate element:', payload);
+        response.addResult(JSON.stringify(payload, null, 2));
+        return;
+      }
+
+      // Step 4: Element found, determine if test passes based on matchType
+      let passed: boolean = false;
+      let multipleElementsFound = false;
+      
+      // Check if we have multiple elements (this is always a failure)
+      if (searchMethod === 'role/accessibleName-parallel-recursive' && existsInDOM && isVisible) {
+        // Check if the error was due to multiple elements
+        try {
+          await checkElementVisibilityUnique(tab.page, role, accessibleName);
+          // If we get here, there's exactly 1 element
+        } catch (error) {
+          if (error instanceof Error && error.message.includes('Multiple elements found')) {
+            multipleElementsFound = true;
+            passed = false; // Multiple elements is always a failure
+            evidence = error.message;
+          }
+        }
+      }
+      
+      if (!multipleElementsFound) {
+        if (matchType === 'contains') {
+          passed = isVisible; // Element must be present AND visible
+        } else { // matchType === "not-contains"
+          passed = !isVisible; // Element should NOT be visible (can exist in DOM but hidden)
+        }
+
+        // Generate evidence message
+        if (matchType === 'contains') {
+          if (passed)
+            evidence = `Element with role "${role}" and accessible name "${accessibleName}" is visible to user as expected (found via ${searchMethod})`;
+          else
+            evidence = `Element with role "${role}" and accessible name "${accessibleName}" exists in DOM but is not visible to user (found via ${searchMethod})`;
+
+        } else { // matchType === "not-contains"
+          if (passed)
+            evidence = `Element with role "${role}" and accessible name "${accessibleName}" is not visible to user as expected (found via ${searchMethod})`;
+          else
+            evidence = `Element with role "${role}" and accessible name "${accessibleName}" is unexpectedly visible to user (found via ${searchMethod})`;
+        }
+      }
+
+      const payload = {
+        ref,
+        role,
+        accessibleName,
+        matchType,
+        isVisible,
+        existsInDOM: true,
+        searchMethod,
+        summary: {
+          total: 1,
+          passed: passed ? 1 : 0,
+          failed: passed ? 0 : 1,
+          status: passed ? 'pass' : 'fail',
+          evidence,
+        },
+        checks: [{
+          property: 'visibility',
+          operator: matchType,
+          expected: matchType === 'contains' ? 'visible' : 'not-visible',
+          actual: isVisible ? 'visible' : 'not-visible',
+          result: passed ? 'pass' : 'fail',
+        }],
+      };
+
+      console.log('Validate element:', payload);
+      response.addResult(JSON.stringify(payload, null, 2));
+
+    } catch (error) {
+      const errorMessage = `Failed to validate element. Error: ${error instanceof Error ? error.message : String(error)}`;
+      const errorPayload = {
+        ref: params.ref,
+        role: params.role,
+        accessibleName: params.accessibleName,
+        matchType: params.matchType,
+        isVisible: false,
+        existsInDOM: false,
+        searchMethod: 'error',
+        summary: {
+          total: 1,
+          passed: 0,
+          failed: 1,
+          status: 'fail',
+          evidence: errorMessage,
+        },
+        checks: [{
+          property: 'visibility',
+          operator: 'visible',
+          expected: 'visible',
+          actual: 'error',
+          result: 'fail',
+        }],
+        error: error instanceof Error ? error.message : String(error),
+      };
+
+      console.error('Validate element error:', errorPayload);
+      response.addResult(JSON.stringify(errorPayload, null, 2));
+    }
+  },
+});
+
+
+const makeRequestSchema = z.object({
+  command: z.string().describe('Actual finalized command'),
+  evidence: z.string().describe('Command description'),
+});
+
+const make_request = defineTabTool({
+  capability: 'core',
+  schema: {
+    name: 'make_request',
+    title: 'Make HTTP request using curl command',
+    description: 'Execute a curl command to make HTTP requests and return the response',
+    inputSchema: makeRequestSchema,
+    type: 'readOnly',
+  },
+  handle: async (tab, params, response) => {
+    const { command, evidence } = makeRequestSchema.parse(params);
+
+
+    let toolResult: any = {
+      success: false,
+      apiResponse: {
+        data: '',
+        statusCode: undefined,
+        responseTime: undefined,
+        contentLength: undefined,
+        contentType: undefined,
+        server: undefined,
+        error: undefined,
+        rawStderr: undefined
+      }
+    };
+
+    try {
+      const result = await runCommandClean(command);
+      toolResult = {
+        success: true,
+        apiResponse: result
+      };
+    } catch (error) {
+      toolResult = {
+        success: false,
+        apiResponse: {
+          data: '',
+          statusCode: undefined,
+          responseTime: undefined,
+          contentLength: undefined,
+          contentType: undefined,
+          server: undefined,
+          error: error instanceof Error ? error.message : String(error),
+          rawStderr: undefined
+        }
+      };
+    }
+
+    response.addResult(JSON.stringify(toolResult, null, 2));
+  },
+});
+
+const validateExpandedSchema = z.object({
+  element: z.string().describe('Human-readable element description used to obtain permission to interact with the element'),
+  ref: z.string().describe('Exact target element reference from the page snapshot'),
+  expected: z.union([z.literal('true'), z.literal('false')]).describe('Expected value for aria-expanded attribute: "true" or "false"'),
+});
+
+const dataExtractionSchema = z.object({
+  name: z.string().describe('Variable name (will be prefixed with $$)'),
+  data: z.string().describe('Data to extract from. If jsonPath is provided, should be JSON string. If jsonPath is not provided, can be any string data'),
+  jsonPath: z.string().optional().describe('JSONPath syntax: Properties (data.token), Array indices (data.books[0].title), Filters (data.books[?(@.price>30)].title), Operators (==, !=, >, <, >=, <=), Boolean values (data.users[?(@.active==true)]).'),
+});
+
+const validate_expanded = defineTabTool({
+  capability: 'core',
+  schema: {
+    name: 'validate_expanded',
+    title: 'Validate aria-expanded attribute',
+    description: 'Validate that element has the correct aria-expanded attribute value (true or false). If not found on target element, searches in siblings, parent, and children elements.',
+    inputSchema: validateExpandedSchema,
+    type: 'readOnly',
+  },
+  handle: async (tab, params, response) => {
+    const { ref, element, expected } = validateExpandedSchema.parse(params);
+
+    await tab.waitForCompletion(async () => {
+      let passed = false;
+      let evidence = '';
+      let actualValue = '';
+      let searchLocation = 'target-element';
+
+      try {
+        const locator = await tab.refLocator({ ref, element });
+        
+        // First, try to validate aria-expanded on the target element
+        await expect(locator).toHaveAttribute('aria-expanded', expected);
+        passed = true;
+        actualValue = expected;
+        evidence = `Element "${element}" has aria-expanded="${expected}" as expected`;
+        searchLocation = 'target-element';
+        
+      } catch (error) {
+        // If target element doesn't have the attribute, search in related elements
+        try {
+          const locator = await tab.refLocator({ ref, element });
+          
+          // Search function to find aria-expanded in related elements (excluding target)
+          const searchResult = await locator.evaluate((el: Element, expectedValue: string) => {
+            const results: { location: string; value: string; element: string }[] = [];
+            
+            // Helper function to get element description
+            const getElementDesc = (element: Element): string => {
+              if (element.id) return `#${element.id}`;
+              if (element.className) return `.${element.className.split(' ').join('.')}`;
+              return element.tagName.toLowerCase();
+            };
+            
+            // Check siblings (same level elements)
+            if (el.parentElement) {
+              const siblings = Array.from(el.parentElement.children);
+              siblings.forEach((sibling, index) => {
+                if (sibling !== el) {
+                  const siblingValue = sibling.getAttribute('aria-expanded');
+                  if (siblingValue !== null) {
+                    results.push({
+                      location: `sibling-${index}`,
+                      value: siblingValue,
+                      element: getElementDesc(sibling)
+                    });
+                  }
+                }
+              });
+            }
+            
+            // Check parent element
+            if (el.parentElement) {
+              const parentValue = el.parentElement.getAttribute('aria-expanded');
+              if (parentValue !== null) {
+                results.push({
+                  location: 'parent',
+                  value: parentValue,
+                  element: getElementDesc(el.parentElement)
+                });
+              }
+            }
+            
+            // Check children elements
+            const children = Array.from(el.children);
+            children.forEach((child, index) => {
+              const childValue = child.getAttribute('aria-expanded');
+              if (childValue !== null) {
+                results.push({
+                  location: `child-${index}`,
+                  value: childValue,
+                  element: getElementDesc(child)
+                });
+              }
+            });
+            
+            return results;
+          }, expected);
+          
+          console.log('Search results for aria-expanded in related elements:', searchResult);
+          
+          // If we found any aria-expanded attributes in related elements, validation should fail
+          // but we need to report where they were found
+          if (searchResult.length > 0) {
+            passed = false;
+            actualValue = 'not-on-target-element';
+            searchLocation = 'related-elements';
+            
+            const foundValues = searchResult.map(r => `${r.location}(${r.element}): "${r.value}"`).join(', ');
+            evidence = `Element "${element}" does not have aria-expanded="${expected}" on itself, but found aria-expanded attributes in related elements: ${foundValues}`;
+          } else {
+            passed = false;
+            actualValue = 'not-found';
+            searchLocation = 'none';
+            evidence = `Element "${element}" does not have aria-expanded="${expected}" and no aria-expanded attributes found in related elements (siblings, parent, children)`;
+          }
+          
+        } catch (searchError) {
+          passed = false;
+          const errorMessage = searchError instanceof Error ? searchError.message : String(searchError);
+          actualValue = 'search-failed';
+          searchLocation = 'error';
+          evidence = `Failed to search for aria-expanded attribute in related elements. Error: ${errorMessage}`;
+          
+          console.log(`Failed to search aria-expanded for element with ref "${ref}". Error: ${errorMessage}`);
+        }
+      }
+
+      // Generate final payload
+      const payload = {
+        ref,
+        element,
+        summary: {
+          total: 1,
+          passed: passed ? 1 : 0,
+          failed: passed ? 0 : 1,
+          status: passed ? 'pass' : 'fail',
+          evidence,
+        },
+        checks: [{
+          property: 'aria-expanded',
+          operator: 'equals',
+          expected: expected,
+          actual: actualValue,
+          result: passed ? 'pass' : 'fail',
+        }],
+        scope: 'element-with-relations',
+        attribute: 'aria-expanded',
+        searchLocation: searchLocation,
+      };
+
+      console.log('Validate expanded:', payload);
+      response.addResult(JSON.stringify(payload, null, 2));
+    });
+  },
+});
+
+const data_extraction = defineTabTool({
+  capability: 'core',
+  schema: {
+    name: 'data_extraction',
+    title: 'Data Extraction',
+    description: 'Extract and store  value from data object using JSON path with $$ prefix for variable naming. If jsonPath is not provided, stores the data as is without JSON parsing',
+    inputSchema: dataExtractionSchema,
+    type: 'readOnly',
+  },
+  handle: async (tab, params, response) => {
+    const { name, data, jsonPath } = dataExtractionSchema.parse(params);
+
+    try {
+      let extractedValue;
+      let parsedResponseData;
+
+      if (jsonPath) {
+        // If jsonPath is provided, parse as JSON and extract using path
+        parsedResponseData = JSON.parse(data);
+        extractedValue = getValueByJsonPath(parsedResponseData, jsonPath);
+      } else {
+        // If jsonPath is not provided, return data as is
+        extractedValue = data;
+        parsedResponseData = data;
+      }
+
+      // Create object with $$ prefix
+      const result = {
+        [`$$${name}`]: extractedValue
+      };
+
+      const toolResult = {
+        success: true,
+        result: result,
+        extractedData: {
+          value: extractedValue,
+          variableName: `$$${name}`,
+        },
+        data: parsedResponseData,
+      };
+
+      console.log('Data extraction:', toolResult);
+      response.addResult(JSON.stringify(toolResult, null, 2));
+
+    } catch (error) {
+      const errorResult = {
+        success: false,
+        result: null,
+        error: error instanceof Error ? error.message : String(error),
+        extractedData: {
+          value: null,
+          variableName: `$$${name}`
+        }
+      };
+
+      console.error('Data extraction error:', errorResult);
+      response.addResult(JSON.stringify(errorResult, null, 2));
+    }
+  },
+});
+
+
 export default [
-  get_computed_styles,
   extract_svg_from_element,
-  extract_image_urls
+  extract_image_urls,
+  validate_computed_styles,
+  //validate_text_visible,
+  //validate_dom_properties,
+  validate_dom_assertions,
+  //validate_element_visible,
+  validate_alert_in_snapshot,
+  validate_expanded,
+  default_validation,
+  validate_response,
+  validate_tab_exist,
+  generate_locator,
+  make_request,
+  data_extraction,
 ];
