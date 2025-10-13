@@ -55,6 +55,7 @@ export type TabTool<Input extends z.Schema = z.Schema> = {
   handle: (tab: Tab, params: z.output<Input>, response: Response) => Promise<void>;
 };
 
+// @ZEALOUS UPDATE - commented a portion of the code that blocks the use of another tool that does not handle modal states
 export function defineTabTool<Input extends z.Schema>(tool: TabTool<Input>): Tool<Input> {
   return {
     ...tool,
