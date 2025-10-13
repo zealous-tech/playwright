@@ -2509,10 +2509,163 @@ const make_request = defineTabTool({
   },
 });
 
+const validateExpandedSchema = z.object({
+  element: z.string().describe('Human-readable element description used to obtain permission to interact with the element'),
+  ref: z.string().describe('Exact target element reference from the page snapshot'),
+  expected: z.union([z.literal('true'), z.literal('false')]).describe('Expected value for aria-expanded attribute: "true" or "false"'),
+});
+
 const dataExtractionSchema = z.object({
   name: z.string().describe('Variable name (will be prefixed with $$)'),
   data: z.string().describe('Data to extract from. If jsonPath is provided, should be JSON string. If jsonPath is not provided, can be any string data'),
   jsonPath: z.string().optional().describe('JSONPath syntax: Properties (data.token), Array indices (data.books[0].title), Filters (data.books[?(@.price>30)].title), Operators (==, !=, >, <, >=, <=), Boolean values (data.users[?(@.active==true)]).'),
+});
+
+const validate_expanded = defineTabTool({
+  capability: 'core',
+  schema: {
+    name: 'validate_expanded',
+    title: 'Validate aria-expanded attribute',
+    description: 'Validate that element has the correct aria-expanded attribute value (true or false). If not found on target element, searches in siblings, parent, and children elements.',
+    inputSchema: validateExpandedSchema,
+    type: 'readOnly',
+  },
+  handle: async (tab, params, response) => {
+    const { ref, element, expected } = validateExpandedSchema.parse(params);
+
+    await tab.waitForCompletion(async () => {
+      let passed = false;
+      let evidence = '';
+      let actualValue = '';
+      let searchLocation = 'target-element';
+
+      try {
+        const locator = await tab.refLocator({ ref, element });
+        
+        // First, try to validate aria-expanded on the target element
+        await expect(locator).toHaveAttribute('aria-expanded', expected);
+        passed = true;
+        actualValue = expected;
+        evidence = `Element "${element}" has aria-expanded="${expected}" as expected`;
+        searchLocation = 'target-element';
+        
+      } catch (error) {
+        // If target element doesn't have the attribute, search in related elements
+        try {
+          const locator = await tab.refLocator({ ref, element });
+          
+          // Search function to find aria-expanded in related elements (excluding target)
+          const searchResult = await locator.evaluate((el: Element, expectedValue: string) => {
+            const results: { location: string; value: string; element: string }[] = [];
+            
+            // Helper function to get element description
+            const getElementDesc = (element: Element): string => {
+              if (element.id) return `#${element.id}`;
+              if (element.className) return `.${element.className.split(' ').join('.')}`;
+              return element.tagName.toLowerCase();
+            };
+            
+            // Check siblings (same level elements)
+            if (el.parentElement) {
+              const siblings = Array.from(el.parentElement.children);
+              siblings.forEach((sibling, index) => {
+                if (sibling !== el) {
+                  const siblingValue = sibling.getAttribute('aria-expanded');
+                  if (siblingValue !== null) {
+                    results.push({
+                      location: `sibling-${index}`,
+                      value: siblingValue,
+                      element: getElementDesc(sibling)
+                    });
+                  }
+                }
+              });
+            }
+            
+            // Check parent element
+            if (el.parentElement) {
+              const parentValue = el.parentElement.getAttribute('aria-expanded');
+              if (parentValue !== null) {
+                results.push({
+                  location: 'parent',
+                  value: parentValue,
+                  element: getElementDesc(el.parentElement)
+                });
+              }
+            }
+            
+            // Check children elements
+            const children = Array.from(el.children);
+            children.forEach((child, index) => {
+              const childValue = child.getAttribute('aria-expanded');
+              if (childValue !== null) {
+                results.push({
+                  location: `child-${index}`,
+                  value: childValue,
+                  element: getElementDesc(child)
+                });
+              }
+            });
+            
+            return results;
+          }, expected);
+          
+          console.log('Search results for aria-expanded in related elements:', searchResult);
+          
+          // If we found any aria-expanded attributes in related elements, validation should fail
+          // but we need to report where they were found
+          if (searchResult.length > 0) {
+            passed = false;
+            actualValue = 'not-on-target-element';
+            searchLocation = 'related-elements';
+            
+            const foundValues = searchResult.map(r => `${r.location}(${r.element}): "${r.value}"`).join(', ');
+            evidence = `Element "${element}" does not have aria-expanded="${expected}" on itself, but found aria-expanded attributes in related elements: ${foundValues}`;
+          } else {
+            passed = false;
+            actualValue = 'not-found';
+            searchLocation = 'none';
+            evidence = `Element "${element}" does not have aria-expanded="${expected}" and no aria-expanded attributes found in related elements (siblings, parent, children)`;
+          }
+          
+        } catch (searchError) {
+          passed = false;
+          const errorMessage = searchError instanceof Error ? searchError.message : String(searchError);
+          actualValue = 'search-failed';
+          searchLocation = 'error';
+          evidence = `Failed to search for aria-expanded attribute in related elements. Error: ${errorMessage}`;
+          
+          console.log(`Failed to search aria-expanded for element with ref "${ref}". Error: ${errorMessage}`);
+        }
+      }
+
+      // Generate final payload
+      const payload = {
+        ref,
+        element,
+        summary: {
+          total: 1,
+          passed: passed ? 1 : 0,
+          failed: passed ? 0 : 1,
+          status: passed ? 'pass' : 'fail',
+          evidence,
+        },
+        checks: [{
+          property: 'aria-expanded',
+          operator: 'equals',
+          expected: expected,
+          actual: actualValue,
+          result: passed ? 'pass' : 'fail',
+        }],
+        scope: 'element-with-relations',
+        attribute: 'aria-expanded',
+        searchLocation: searchLocation,
+      };
+
+      console.log('Validate expanded:', payload);
+      response.addResult(JSON.stringify(payload, null, 2));
+    });
+  },
 });
 
 const data_extraction = defineTabTool({
@@ -2586,6 +2739,7 @@ export default [
   validate_dom_assertions,
   //validate_element_visible,
   validate_alert_in_snapshot,
+  validate_expanded,
   default_validation,
   validate_response,
   validate_tab_exist,
