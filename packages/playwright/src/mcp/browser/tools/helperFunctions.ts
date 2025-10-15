@@ -748,57 +748,6 @@ async function searchElementsByRoleInAllFrames(
   return results;
 }
 
-async function getFullXPath(tab: any, params: { element: string, ref: string }): Promise<Array<{selector: string; priority: number; type: string}>> {
-  const locator = await tab.refLocator(params);
-
-  // Generate full absolute XPath path like /html/body/div[2]/div/div/div/div[2]/div[2]/div[3]/button
-  const fullXPath = await locator.evaluate((el: Element) => {
-    const getXPath = (element: Element): string => {
-      if (element.nodeType === Node.DOCUMENT_NODE)
-        return '';
-
-
-      if (element.nodeType === Node.ELEMENT_NODE) {
-        const tagName = element.tagName.toLowerCase();
-
-        // Count siblings with the same tag name
-        let index = 1;
-        let sibling = element.previousElementSibling;
-        while (sibling) {
-          if (sibling.tagName === element.tagName)
-            index++;
-
-          sibling = sibling.previousElementSibling;
-        }
-
-        // Build the path with index if there are multiple siblings with same tag
-        const hasMultipleSiblings = element.nextElementSibling &&
-          Array.from(element.parentElement?.children || [])
-              .filter(child => child.tagName === element.tagName).length > 1;
-
-        const indexPart = hasMultipleSiblings ? `[${index}]` : '';
-        const currentPath = `/${tagName}${indexPart}`;
-
-        // Recursively get parent path
-        const parentPath = element.parentElement ? getXPath(element.parentElement) : '';
-
-        return parentPath + currentPath;
-      }
-
-      return '';
-    };
-
-    return getXPath(el);
-  });
-
-  // Return in the same structure as getStableSelectors but with single element
-  return [{
-    selector: fullXPath,
-    priority: 1,
-    type: 'full-xpath'
-  }];
-}
-
 
 function parseArguments(argsString: string): any[] {
   const args: any[] = [];
@@ -1409,8 +1358,7 @@ function applyArrayFilter(arr: any[], filter: string): any {
  * Ensures exactly 1 element is found with the specified role and accessibleName
  */
 async function checkElementVisibilityUnique(page: any, role: string, accessibleName: string) {
-  const { expect } = await import('@zealous-tech/playwright/test');
-  
+
   const searchPromises = [];
   
   // Add search in main frame
@@ -1435,24 +1383,53 @@ async function checkElementVisibilityUnique(page: any, role: string, accessibleN
   // Wait for all search results in parallel
   const results = await Promise.all(searchPromises);
   
-  // Count found elements
-  const foundResults = results.filter(result => result.found);
+  return results;
+}
+
+/**
+ * Check text visibility with parallel recursive search across all frames
+ * Returns all search results without counting logic
+ */
+async function checkTextVisibilityInAllFrames(page: any, text: string, matchType: 'exact' | 'contains' | 'not-contains' = 'contains') {
+  const searchPromises = [];
   
-  if (foundResults.length === 0) {
-    throw new Error(`Element with role "${role}" and name "${accessibleName}" not found in any frame`);
-  } else if (foundResults.length === 1) {
-    return { 
-      found: true, 
-      unique: true, 
-      count: 1, 
-      frame: foundResults[0].frame,
-      level: foundResults[0].level
-    };
+  // Add search in main frame
+  let mainLocator;
+  if (matchType === 'exact') {
+    mainLocator = page.getByText(text, { exact: true });
   } else {
-    // Multiple elements found - this is an error
-    const frames = foundResults.map(r => r.frame).join(', ');
-    throw new Error(`Multiple elements found with role "${role}" and name "${accessibleName}" in frames: ${frames}. Expected exactly 1 element.`);
+    mainLocator = page.getByText(text);
   }
+  
+  searchPromises.push(
+    expect(mainLocator).toBeVisible()
+      .then(() => ({ found: true, frame: 'main', level: 0 }))
+      .catch(() => ({ found: false, frame: 'main', level: 0 }))
+  );
+  
+  // Recursively collect all iframes at all levels
+  const allFrames = await collectAllFrames(page, 0);
+  
+  // Create promises for all frames
+  for (const frameInfo of allFrames) {
+    let frameLocator;
+    if (matchType === 'exact') {
+      frameLocator = frameInfo.frame.getByText(text, { exact: true });
+    } else {
+      frameLocator = frameInfo.frame.getByText(text);
+    }
+    
+    searchPromises.push(
+      expect(frameLocator).toBeVisible({timeout:2000})
+        .then(() => ({ found: true, frame: frameInfo.name, level: frameInfo.level }))
+        .catch(() => ({ found: false, frame: frameInfo.name, level: frameInfo.level }))
+    );
+  }
+  
+  // Wait for all search results in parallel
+  const results = await Promise.all(searchPromises);
+  
+  return results;
 }
 
 /**
@@ -1482,4 +1459,4 @@ async function collectAllFrames(page: any, level: number): Promise<Array<{frame:
   return frames;
 }
 
-export { pickActualValue, parseRGBColor, isColorInRange, getAllComputedStylesDirect, getAllDomPropsDirect, hasAlertDialog, getAlertDialogText, performRegexCheck, performRegexExtract, performRegexMatch, compareValues, searchTextInAllFrames, searchElementsByRoleInAllFrames, getElementTextWithFallbacks, getFullXPath, parseArguments, parseSingleArgument, convertToValidJson, parseMethodChain, parseMethodCall, applyLocatorMethod, getValueByJsonPath, checkElementVisibilityUnique };
+export { pickActualValue, parseRGBColor, isColorInRange, getAllComputedStylesDirect, getAllDomPropsDirect, hasAlertDialog, getAlertDialogText, performRegexCheck, performRegexExtract, performRegexMatch, compareValues, searchTextInAllFrames, searchElementsByRoleInAllFrames, getElementTextWithFallbacks,parseArguments, parseSingleArgument, convertToValidJson, parseMethodChain, parseMethodCall, applyLocatorMethod, getValueByJsonPath, checkElementVisibilityUnique, checkTextVisibilityInAllFrames };
