@@ -60,23 +60,55 @@ const click = defineTabTool({
     response.setIncludeSnapshot();
 
     const locator = await tab.refLocator(params);
-    const options = {
-      button: params.button,
-      modifiers: params.modifiers,
-    };
-    const formatted = javascript.formatObject(options, ' ', 'oneline');
-    const optionsAttr = formatted !== '{}' ? formatted : '';
-
-    if (params.doubleClick)
-      response.addCode(`await page.${await generateLocator(locator)}.dblclick(${optionsAttr});`);
-    else
-      response.addCode(`await page.${await generateLocator(locator)}.click(${optionsAttr});`);
+    const button = params.button;
+    const buttonAttr = button ? `{ button: '${button}' }` : '';
+    if (params.doubleClick) {
+      //response.addCode(`// Double click ${params.element}`);
+      //response.addCode(`await page.${await generateLocator(locator)}.dblclick(${buttonAttr});`);
+    } else {
+      //response.addCode(`// Click ${params.element}`);
+      //response.addCode(`await page.${await generateLocator(locator)}.click(${buttonAttr});`);
+    }
 
     await tab.waitForCompletion(async () => {
-      if (params.doubleClick)
-        await locator.dblclick(options);
-      else
-        await locator.click(options);
+      try {
+        if (params.doubleClick)
+          await locator.dblclick({ button });
+        else
+          await locator.click({ button });
+      } catch (e: any) {
+        const msg = String(e?.message || e);
+        const isIntercept = msg.includes('intercepts pointer events');
+
+        if (isIntercept) {
+          // Detect checkbox input
+          const isCheckbox = await locator.evaluate((el: Element) => {
+            const tag = (el as any).tagName?.toLowerCase?.();
+            const type = (el as any).getAttribute?.('type');
+            return tag === 'input' && type === 'checkbox';
+          });
+
+          if (isCheckbox) {
+            // Prefer clicking the associated label
+            const id = await locator.getAttribute('id');
+            if (id) {
+              const label = tab.page.locator(`label[for="${id}"]`);
+              await label.click({ button });
+              return;
+            }
+            // Fallback: force-check the checkbox
+            await locator.check({ force: true });
+            return;
+          }
+
+          // Non-checkbox: force the click as a last resort
+          await locator.click({ button, force: true });
+          return;
+        }
+
+        // Unknown error, rethrow
+        throw e;
+      }
     });
   },
 });
