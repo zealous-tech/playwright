@@ -193,7 +193,7 @@ const extract_svg_from_element = defineTabTool({
           if (options.minifyOutput)
             extractedContent = extractedContent.replace(/\s+/g, ' ').trim();
 
-
+          //console.dir(extractedContent, { depth: null });
           return {
             svgContent: extractedContent,
             elementInfo: {
@@ -2834,12 +2834,18 @@ const validate_expanded = defineTabTool({
             searchLocation = 'related-elements';
             
             const foundValues = searchResult.map(r => `${r.location}(${r.element}): "${r.value}"`).join(', ');
-            evidence = `Element "${element}" does not have aria-expanded="${expected}" on itself, but found aria-expanded attributes in related elements: ${foundValues}`;
+            evidence = `Element "${element}" does not have aria-expanded="${expected}" on itself, but found aria-expanded attributes in related elements: ${foundValues}. ` +
+              `Alternative validation suggestions: You can validate the element's state using className (e.g., check for 'expanded', 'collapsed', 'open', 'closed' classes), ` +
+              `CSS properties (e.g., display, visibility, height), or other ARIA attributes (e.g., aria-hidden, aria-selected). ` +
+              `You can also use validate_computed_styles tool to check CSS properties that indicate expanded/collapsed state.`;
           } else {
             passed = false;
             actualValue = 'not-found';
             searchLocation = 'none';
-            evidence = `Element "${element}" does not have aria-expanded="${expected}" and no aria-expanded attributes found in related elements (siblings, parent, children)`;
+            evidence = `Element "${element}" does not have aria-expanded="${expected}" and no aria-expanded attributes found in related elements (siblings, parent, children). ` +
+              `Alternative validation suggestions: You can validate the element's state using className (e.g., check for 'expanded', 'collapsed', 'open', 'closed' classes), ` +
+              `CSS properties (e.g., display, visibility, height), or other ARIA attributes (e.g., aria-hidden, aria-selected). ` +
+              `You can also use validate_computed_styles tool to check CSS properties that indicate expanded/collapsed state.`;
           }
           
         } catch (searchError) {
@@ -2847,7 +2853,10 @@ const validate_expanded = defineTabTool({
           const errorMessage = searchError instanceof Error ? searchError.message : String(searchError);
           actualValue = 'search-failed';
           searchLocation = 'error';
-          evidence = `Failed to search for aria-expanded attribute in related elements. Error: ${errorMessage}`;
+          evidence = `Failed to search for aria-expanded attribute in related elements. Error: ${errorMessage}. ` +
+            `Alternative validation suggestions: You can validate the element's state using className (e.g., check for 'expanded', 'collapsed', 'open', 'closed' classes), ` +
+            `CSS properties (e.g., display, visibility, height), or other ARIA attributes (e.g., aria-hidden, aria-selected). ` +
+            `You can also use validate_computed_styles tool to check CSS properties that indicate expanded/collapsed state.`;
           
           console.log(`Failed to search aria-expanded for element with ref "${ref}". Error: ${errorMessage}`);
         }
