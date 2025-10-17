@@ -21,7 +21,6 @@ import { ManualPromise } from 'playwright-core/lib/utils';
 import { callOnPageNoTrace, waitForCompletion } from './tools/utils';
 import { logUnhandledError } from '../log';
 import { ModalState } from './tools/tool';
-import { parseArguments, parseMethodChain, parseMethodCall, applyLocatorMethod } from './tools/helperFunctions';
 import type { Context } from './context';
 
 type PageEx = playwright.Page & {

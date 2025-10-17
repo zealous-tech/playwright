@@ -15,8 +15,10 @@
  */
 import { z } from 'zod';
 import { defineTabTool } from './tool.js';
-import { getAllComputedStylesDirect, pickActualValue, parseRGBColor, isColorInRange, getAllDomPropsDirect, performRegexCheck, searchTextInAllFrames, searchElementsByRoleInAllFrames, getElementTextWithFallbacks, runCommandClean, getValueByJsonPath, compareValues, checkElementVisibilityUnique } from './helperFunctions.js';
+import { getAllComputedStylesDirect, pickActualValue, parseRGBColor, isColorInRange,runCommandClean, getValueByJsonPath, compareValues, checkElementVisibilityUnique, checkTextVisibilityInAllFrames } from './helperFunctions.js';
 import { generateLocator } from './utils.js';
+import { expect } from '@zealous-tech/playwright/test';
+import type * as playwright from '@zealous-tech/playwright';
 
 // Helper function to convert string to RegExp if it looks like a regex
 function stringToRegExp(str: string): string | RegExp {
@@ -60,9 +62,6 @@ function convertStringToRegExp(obj: any): any {
   
   return obj;
 }
-import { expect } from '@zealous-tech/playwright/test';
-import type * as playwright from 'playwright';
-import { convertSelectOptionValues } from 'playwright-core/lib/client/elementHandle.js';
 
 const elementStyleSchema = z.object({
   element: z.string().describe('Human-readable element description used to obtain permission to interact with the element'),
@@ -193,7 +192,7 @@ const extract_svg_from_element = defineTabTool({
           if (options.minifyOutput)
             extractedContent = extractedContent.replace(/\s+/g, ' ').trim();
 
-
+          //console.dir(extractedContent, { depth: null });
           return {
             svgContent: extractedContent,
             elementInfo: {
@@ -486,7 +485,7 @@ const validate_computed_styles = defineTabTool({
     await tab.waitForCompletion(async () => {
       // 1) Get all computed styles directly
       const allStyles = await getAllComputedStylesDirect(tab, ref, element);
-      // console.log("All Computed Styles:", allStyles);
+      //console.log("All Computed Styles:", allStyles);
       // 2) Validate rules
       const results = checks.map(c => {
         const actual = pickActualValue(allStyles, c.name);
@@ -576,201 +575,9 @@ const validate_computed_styles = defineTabTool({
 });
 
 
-const textValidationSchema = z.object({
-  element: z.string().describe(
-      'Human-readable element description used to obtain permission to interact with the element'
-  ),
-  ref: z.string().describe(
-      "Exact target element reference from the page snapshot. Required for text validation."
-  ),
-  expectedText: z.string().describe(
-      'Expected text value to validate in the element or whole page'
-  ),
-  matchType: z.enum(['exact', 'contains', 'not-contains']).default('exact').describe(
-      "Type of match: 'exact' checks exact match, 'contains' checks substring presence, 'not-contains' checks that text is NOT present. Works for both specific elements (when ref provided) and page snapshot (when ref is null)"
-  ),
-  caseSensitive: z.boolean().optional().describe(
-      'Enable case-sensitive comparison (default false)'
-  ),
-});
-
-const validate_text_visible = defineTabTool({
-  capability: 'core',
-  schema: {
-    name: 'validate_text_visible',
-    title: 'Verify text visible',
-    description:
-        "Verify that text is visible in a specific element with exact/contains/not-contains matching. Requires element reference (ref) from page snapshot. Uses Playwright's expect assertions with built-in timeout for reliable text validation.",
-    inputSchema: textValidationSchema,
-    type: 'readOnly',
-  },
-  handle: async (tab, rawParams, response) => {
-    const { ref, element, expectedText, matchType, caseSensitive } =
-      textValidationSchema.parse(rawParams);
-
-    await tab.waitForCompletion(async () => {
-      let passed = false;
-      let evidence = '';
-      let actualText = '';
-
-      try {
-        const locator = await tab.refLocator({ ref, element });
-        
-        // Use expect with appropriate matcher based on matchType
-        if (matchType === 'exact') {
-          await expect(locator).toHaveText(expectedText, {useInnerText:true});
-          passed = true;
-          evidence = `Found element "${element}" with exact text match: "${expectedText}"`;
-        } else if (matchType === 'contains') {
-          await expect(locator).toContainText(expectedText);
-          passed = true;
-          evidence = `Found element "${element}" containing expected text "${expectedText}"`;
-        } else if (matchType === 'not-contains') {
-          if (expectedText === '') {
-            // For empty string with not-contains, check if element is not empty
-            await expect(locator).toContainText(/.+/);
-            passed = true;
-            evidence = `Found element "${element}" with non-empty text`;
-          } else {
-            // For specific text with not-contains, use expect.not
-            await expect(locator).not.toContainText(expectedText);
-            passed = true;
-            evidence = `Found element "${element}" that correctly does not contain text "${expectedText}"`;
-          }
-        }
-        
-      } catch (error) {
-        passed = false;
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        
-        if (matchType === 'exact') {
-          evidence = `Element "${element}" does not have exact text match with expected "${expectedText}". Error: ${errorMessage}`;
-        } else if (matchType === 'contains') {
-          evidence = `Element "${element}" does not contain expected text "${expectedText}". Error: ${errorMessage}`;
-        } else if (matchType === 'not-contains') {
-          if (expectedText === '') {
-            evidence = `Element "${element}" is empty or contains only whitespace. Error: ${errorMessage}`;
-          } else {
-            evidence = `Element "${element}" unexpectedly contains text "${expectedText}". Error: ${errorMessage}`;
-          }
-        }
-        
-        console.log(`Failed to validate element with ref "${ref}" for ${element}. Error: ${errorMessage}`);
-      }
-
-      // Generate final payload
-      const payload = {
-        ref,
-        element,
-        summary: {
-          total: 1,
-          passed: passed ? 1 : 0,
-          failed: passed ? 0 : 1,
-          status: passed ? 'pass' : 'fail',
-          evidence,
-        },
-        checks: [{
-          property: 'text',
-          operator: matchType,
-          expected: expectedText,
-          actual: actualText || 'N/A',
-          result: passed ? 'pass' : 'fail',
-        }],
-        scope: 'element',
-        matchType,
-        caseSensitive: !!caseSensitive,
-      };
-
-      console.log('Validate element text:', payload);
-      response.addResult(JSON.stringify(payload, null, 2));
-    });
-  },
-});
-
-
-const domPropCheckSchema = z.object({
-  name: z.string().describe('DOM property name (e.g., "checked", "disabled", "className") or HTML attribute name (e.g., "id", "class", "data-testid", "aria-expanded")'),
-  operator: z.enum(['isEqual', 'notEqual']).default('isEqual'),
-  expected: z.any().describe('Expected value for the property or attribute'), // can be string, number, boolean
-});
-const domChecksSchema = z.array(domPropCheckSchema).min(1);
-
 const baseDomInputSchema = z.object({
   ref: z.string().min(1),
-  element: z.string().min(1),
-});
-
-const validateDomPropsSchema = baseDomInputSchema.extend({
-  checks: domChecksSchema,
-});
-
-
-const validate_dom_properties = defineTabTool({
-  capability: 'core',
-  schema: {
-    name: 'validate_dom_properties',
-    title: 'Validate DOM properties of element',
-    description:
-      'Validate structural DOM properties and HTML attributes of elements (checked, disabled,isClickable, className, id, type, tabIndex, etc.). Use for validating element state, CSS classes, form properties, and structural attributes.  Supports exact equality comparison with isEqual/notEqual operators. HTML attributes are accessible directly by name (e.g., "id", "class", "data-testid", "aria-expanded").',
-    inputSchema: validateDomPropsSchema,
-    type: 'readOnly',
-  },
-  handle: async (tab, rawParams, response) => {
-    const { ref, element, checks } = validateDomPropsSchema.parse(rawParams);
-
-    await tab.waitForCompletion(async () => {
-      const allProps = await getAllDomPropsDirect(tab, ref, element);
-      console.log('All DOM Props:', allProps);
-
-      const results = checks.map(c => {
-        const actual = allProps[c.name];
-        let passed: boolean;
-        if (c.operator === 'isEqual')
-          passed = actual === c.expected;
-        else
-          passed = actual !== c.expected;
-
-        return {
-          property: c.name,
-          operator: c.operator,
-          expected: c.expected,
-          actual,
-          result: passed ? 'pass' : 'fail',
-        };
-      });
-
-      const passedCount = results.filter(r => r.result === 'pass').length;
-
-      // Generate evidence message
-      let evidence = '';
-      if (passedCount === results.length) {
-        evidence = `Found element "${element}" with all ${results.length} DOM properties matching expected values`;
-      } else {
-        const failedChecks = results.filter(r => r.result === 'fail');
-        const failedProps = failedChecks.map(c => `${c.property}: expected "${c.expected}", got "${c.actual}"`).join(', ');
-        evidence = `Found element "${element}" but ${failedChecks.length} DOM properties failed validation: ${failedProps}`;
-      }
-
-      // 3) answer
-      const payload = {
-        ref,
-        element,
-        summary: {
-          total: results.length,
-          passed: passedCount,
-          failed: results.length - passedCount,
-          status: passedCount === results.length ? 'pass' : 'fail',
-          evidence,
-        },
-        checks: results,
-        props: allProps, // all properties for debugging
-      };
-
-      console.log('Validate DOM Properties:');
-      console.log(payload);
-      response.addResult(JSON.stringify(payload, null, 2));
-    });
-  },
+  element: z.string().min(1).describe('Description of the specific element with the given ref'),
 });
 
 // Individual assertion argument schemas
@@ -2201,254 +2008,7 @@ const validateElementSchema = z.object({
   ),
 });
 
-const validate_element_visible = defineTabTool({
-  capability: 'core',
-  schema: {
-    name: 'validate_element_visible',
-    title: 'Validate Element',
-    description: 'Validate element visibility',
-    inputSchema: validateElementSchema,
-    type: 'readOnly',
-  },
 
-  handle: async (tab, params, response) => {
-    try {
-      const { ref, role, accessibleName, matchType } = params;
-
-      console.log(`validate_element: Starting validation with ref="${ref}", role="${role}", accessibleName="${accessibleName}"`);
-
-      let isVisible = false;
-      let existsInDOM = false;
-      let searchMethod = '';
-      let evidence = '';
-
-      // Step 1: Try to find element by ref if provided
-      if (ref) {
-        try {
-          console.log(`validate_element: Attempting to find element by ref="${ref}"`);
-          const locator = await tab.refLocator({ ref, element: 'target element' });
-          
-          // For 'contains' matchType, use expect.toBeVisible() directly
-          if (matchType === 'contains') {
-            await expect(locator).toBeVisible();
-            existsInDOM = true;
-            isVisible = true;
-            searchMethod = 'ref';
-            console.log(`validate_element: Element found by ref and is visible`);
-          } else {
-            // For 'not-contains' matchType, check visibility without expect
-            isVisible = await locator.isVisible();
-            existsInDOM = true;
-            searchMethod = 'ref';
-            console.log(`validate_element: Element found by ref, isVisible=${isVisible}`);
-          }
-          
-          // Determine the result based on matchType
-          const passed = matchType === 'contains' ? isVisible : !isVisible;
-          evidence = matchType === 'contains' 
-            ? `Element found by ref is visible as expected`
-            : `Element found by ref is not visible as expected`;
-        
-          const payload = {
-            ref,
-            role,
-            accessibleName,
-            matchType,
-            isVisible,
-            existsInDOM: true,
-            searchMethod: 'ref',
-            summary: {
-              total: 1,
-              passed: passed ? 1 : 0,
-              failed: passed ? 0 : 1,
-              status: passed ? 'pass' : 'fail',
-              evidence,
-            },
-            checks: [{
-              property: 'visibility',
-              operator: matchType,
-              expected: matchType === 'contains' ? 'visible' : 'not-visible',
-              actual: isVisible ? 'visible' : 'not-visible',
-              result: passed ? 'pass' : 'fail',
-            }],
-          };
-
-          console.log('Validate element (ref search):', payload);
-          response.addResult(JSON.stringify(payload, null, 2));
-          return; // Exit early since ref search was successful
-          
-        } catch (error) {
-          console.log(`validate_element: Element not found by ref or not visible, falling back to role/accessibleName search. Error: ${error instanceof Error ? error.message : String(error)}`);
-          // Continue to fallback search
-        }
-      }
-
-      // Step 2: Fallback to role/accessibleName search if ref search failed or ref not provided
-      if (!ref || !existsInDOM) {
-        console.log(`validate_element: Starting parallel recursive role/accessibleName search for role="${role}" with accessibleName="${accessibleName}"`);
-
-        try {
-          // Use parallel recursive search with uniqueness validation
-          const result = await checkElementVisibilityUnique(tab.page, role, accessibleName);
-          
-          if (result.found && result.unique) {
-            existsInDOM = true;
-            isVisible = true;
-            searchMethod = 'role/accessibleName-parallel-recursive';
-            console.log(`validate_element: Found exactly 1 visible element by role/accessibleName in frame "${result.frame}" (level ${result.level})`);
-          }
-        } catch (error) {
-          console.log(`validate_element: Parallel recursive search failed:`, error);
-          
-          // Check if error is due to multiple elements found
-          if (error instanceof Error && error.message.includes('Multiple elements found')) {
-            existsInDOM = true; // Elements exist but multiple found
-            isVisible = true;   // At least one is visible (since expect.toBeVisible() succeeded)
-            searchMethod = 'role/accessibleName-parallel-recursive';
-            // This will be handled in the final result determination
-          } else {
-            existsInDOM = false;
-            isVisible = false;
-            searchMethod = 'role/accessibleName-parallel-recursive';
-          }
-        }
-      }
-
-      // Step 3: Determine test result
-      if (!existsInDOM) {
-        // Element not found in DOM
-        const passed = matchType === 'not-contains';
-        evidence = `Element with role "${role}" and accessible name "${accessibleName}" not found in DOM. ${matchType === 'not-contains' ? 'Expected not present - passed.' : 'Expected present - failed.'}`;
-
-        const payload = {
-          ref,
-          role,
-          accessibleName,
-          matchType,
-          isVisible: false,
-          existsInDOM: false,
-          searchMethod: searchMethod || 'none',
-          summary: {
-            total: 1,
-            passed: passed ? 1 : 0,
-            failed: passed ? 0 : 1,
-            status: passed ? 'pass' : 'fail',
-            evidence,
-          },
-          checks: [{
-            property: 'visibility',
-            operator: matchType,
-            expected: matchType === 'contains' ? 'present' : 'not-present',
-            actual: 'not-found',
-            result: passed ? 'pass' : 'fail',
-          }],
-        };
-
-        console.log('Validate element:', payload);
-        response.addResult(JSON.stringify(payload, null, 2));
-        return;
-      }
-
-      // Step 4: Element found, determine if test passes based on matchType
-      let passed: boolean = false;
-      let multipleElementsFound = false;
-      
-      // Check if we have multiple elements (this is always a failure)
-      if (searchMethod === 'role/accessibleName-parallel-recursive' && existsInDOM && isVisible) {
-        // Check if the error was due to multiple elements
-        try {
-          await checkElementVisibilityUnique(tab.page, role, accessibleName);
-          // If we get here, there's exactly 1 element
-        } catch (error) {
-          if (error instanceof Error && error.message.includes('Multiple elements found')) {
-            multipleElementsFound = true;
-            passed = false; // Multiple elements is always a failure
-            evidence = error.message;
-          }
-        }
-      }
-      
-      if (!multipleElementsFound) {
-        if (matchType === 'contains') {
-          passed = isVisible; // Element must be present AND visible
-        } else { // matchType === "not-contains"
-          passed = !isVisible; // Element should NOT be visible (can exist in DOM but hidden)
-        }
-
-        // Generate evidence message
-        if (matchType === 'contains') {
-          if (passed)
-            evidence = `Element with role "${role}" and accessible name "${accessibleName}" is visible to user as expected (found via ${searchMethod})`;
-          else
-            evidence = `Element with role "${role}" and accessible name "${accessibleName}" exists in DOM but is not visible to user (found via ${searchMethod})`;
-
-        } else { // matchType === "not-contains"
-          if (passed)
-            evidence = `Element with role "${role}" and accessible name "${accessibleName}" is not visible to user as expected (found via ${searchMethod})`;
-          else
-            evidence = `Element with role "${role}" and accessible name "${accessibleName}" is unexpectedly visible to user (found via ${searchMethod})`;
-        }
-      }
-
-      const payload = {
-        ref,
-        role,
-        accessibleName,
-        matchType,
-        isVisible,
-        existsInDOM: true,
-        searchMethod,
-        summary: {
-          total: 1,
-          passed: passed ? 1 : 0,
-          failed: passed ? 0 : 1,
-          status: passed ? 'pass' : 'fail',
-          evidence,
-        },
-        checks: [{
-          property: 'visibility',
-          operator: matchType,
-          expected: matchType === 'contains' ? 'visible' : 'not-visible',
-          actual: isVisible ? 'visible' : 'not-visible',
-          result: passed ? 'pass' : 'fail',
-        }],
-      };
-
-      console.log('Validate element:', payload);
-      response.addResult(JSON.stringify(payload, null, 2));
-
-    } catch (error) {
-      const errorMessage = `Failed to validate element. Error: ${error instanceof Error ? error.message : String(error)}`;
-      const errorPayload = {
-        ref: params.ref,
-        role: params.role,
-        accessibleName: params.accessibleName,
-        matchType: params.matchType,
-        isVisible: false,
-        existsInDOM: false,
-        searchMethod: 'error',
-        summary: {
-          total: 1,
-          passed: 0,
-          failed: 1,
-          status: 'fail',
-          evidence: errorMessage,
-        },
-        checks: [{
-          property: 'visibility',
-          operator: 'visible',
-          expected: 'visible',
-          actual: 'error',
-          result: 'fail',
-        }],
-        error: error instanceof Error ? error.message : String(error),
-      };
-
-      console.error('Validate element error:', errorPayload);
-      response.addResult(JSON.stringify(errorPayload, null, 2));
-    }
-  },
-});
 
 
 const makeRequestSchema = z.object({
@@ -2515,10 +2075,218 @@ const validateExpandedSchema = z.object({
   expected: z.union([z.literal('true'), z.literal('false')]).describe('Expected value for aria-expanded attribute: "true" or "false"'),
 });
 
+const validateTextInWholePageSchema = z.object({
+  element: z.string().describe(
+      'Human-readable element description used to obtain permission to interact with the element'
+  ),
+  expectedText: z.string().describe(
+      'Expected text value to validate in the element or whole page'
+  ),
+  matchType: z.enum(['exact', 'contains', 'not-contains']).default('exact').describe(
+      "Type of match: 'exact' checks exact match, 'contains' checks substring presence, 'not-contains' checks that text is NOT present."
+  ),
+});
+
+const validateElementInWholePageSchema = z.object({
+  element: z.string().describe(
+      'Human-readable element description used to obtain permission to interact with the element'
+  ),
+  role: z.string().describe(
+      'ARIA role of the element to search for'
+  ),
+  accessibleName: z.string().describe(
+      'Accessible name of the element to search for'
+  ),
+  matchType: z.enum(['exist', 'not-exist']).default('exist').describe(
+      "Type of match: 'exist' checks that element exists exactly once, 'not-exist' checks that element does not exist anywhere"
+  ),
+});
+
 const dataExtractionSchema = z.object({
   name: z.string().describe('Variable name (will be prefixed with $$)'),
   data: z.string().describe('Data to extract from. If jsonPath is provided, should be JSON string. If jsonPath is not provided, can be any string data'),
   jsonPath: z.string().optional().describe('JSONPath syntax: Properties (data.token), Array indices (data.books[0].title), Filters (data.books[?(@.price>30)].title), Operators (==, !=, >, <, >=, <=), Boolean values (data.users[?(@.active==true)]).'),
+});
+
+const validate_text_in_whole_page = defineTabTool({
+  capability: 'core',
+  schema: {
+    name: 'validate_text_in_whole_page',
+    title: 'Validate text in whole page',
+    description: 'Validate that text exists or does not exist anywhere on the page',
+    inputSchema: validateTextInWholePageSchema,
+    type: 'readOnly',
+  },
+  handle: async (tab, params, response) => {
+    const { element, expectedText, matchType } = validateTextInWholePageSchema.parse(params);
+
+    await tab.waitForCompletion(async () => {
+      let passed = false;
+      let evidence = '';
+      let actualCount = 0;
+      let foundFrames: string[] = [];
+
+      try {
+        // Use checkTextVisibilityInAllFrames to search across all frames
+        const results = await checkTextVisibilityInAllFrames(tab.page, expectedText, matchType);
+        
+        // Count found results
+        const foundResults = results.filter(result => result.found);
+        actualCount = foundResults.length;
+        foundFrames = foundResults.map(result => result.frame);
+
+        // Determine if test passes based on matchType
+        if (matchType === 'exact' || matchType === 'contains') {
+          // For exact and contains: should find exactly 1 result
+          if (actualCount === 1) {
+            passed = true;
+            evidence = `Found text "${expectedText}" exactly once on the page using ${matchType} match in frame: ${foundFrames[0]}`;
+          } else if (actualCount > 1) {
+            passed = false;
+            evidence = `Found text "${expectedText}" ${actualCount} times on the page using ${matchType} match in frames: ${foundFrames.join(', ')}. Expected exactly 1 occurrence.`;
+          } else {
+            passed = false;
+            evidence = `Text "${expectedText}" not found on the page using ${matchType} match`;
+          }
+        } else { // not-contains
+          // For not-contains: should find 0 results
+          if (actualCount === 0) {
+            passed = true;
+            evidence = `Text "${expectedText}" correctly not found on the page using ${matchType} match`;
+          } else {
+            passed = false;
+            evidence = `Text "${expectedText}" unexpectedly found ${actualCount} time(s) on the page using ${matchType} match in frames: ${foundFrames.join(', ')}`;
+          }
+        }
+
+      } catch (error) {
+        passed = false;
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        evidence = `Failed to validate text "${expectedText}" on the page. Error: ${errorMessage}`;
+        
+        console.log(`Failed to validate text in whole page for "${element}". Error: ${errorMessage}`);
+      }
+
+      // Generate final payload
+      const payload = {
+        element,
+        expectedText,
+        matchType,
+        summary: {
+          total: 1,
+          passed: passed ? 1 : 0,
+          failed: passed ? 0 : 1,
+          status: passed ? 'pass' : 'fail',
+          evidence,
+        },
+        checks: [{
+          property: 'text-presence',
+          operator: matchType,
+          expected: matchType === 'not-contains' ? 'not-present' : 'present-once',
+          actual: actualCount > 0 ? `present-${actualCount}-times` : 'not-present',
+          actualCount: actualCount,
+          foundFrames: foundFrames,
+          result: passed ? 'pass' : 'fail',
+        }],
+        scope: 'whole-page-all-frames',
+        searchMethod: 'checkTextVisibilityInAllFrames',
+      };
+
+      console.log('Validate text in whole page:', payload);
+      response.addResult(JSON.stringify(payload, null, 2));
+    });
+  },
+});
+
+const validate_element_in_whole_page = defineTabTool({
+  capability: 'core',
+  schema: {
+    name: 'validate_element_in_whole_page',
+    title: 'Validate element in whole page',
+    description: 'Validate that element with specific role and accessible name exists or does not exist anywhere on the page. Use matchType "exist" to verify element exists exactly once, or "not-exist" to verify element does not exist.',
+    inputSchema: validateElementInWholePageSchema,
+    type: 'readOnly',
+  },
+  handle: async (tab, params, response) => {
+    const { element, role, accessibleName, matchType } = validateElementInWholePageSchema.parse(params);
+
+    await tab.waitForCompletion(async () => {
+      let passed = false;
+      let evidence = '';
+      let actualCount = 0;
+      let foundFrames: string[] = [];
+
+      try {
+        // Use checkElementVisibilityUnique to search across all frames
+        const results = await checkElementVisibilityUnique(tab.page, role, accessibleName);
+        
+        // Count found results
+        const foundResults = results.filter(result => result.found);
+        actualCount = foundResults.length;
+        foundFrames = foundResults.map(result => result.frame);
+
+        // Determine if test passes based on matchType
+        if (matchType === 'exist') {
+          // For exist: should find exactly 1 result
+          if (actualCount === 1) {
+            passed = true;
+            evidence = `Found element with role "${role}" and accessible name "${accessibleName}" exactly once on the page in frame: ${foundFrames[0]}`;
+          } else if (actualCount > 1) {
+            passed = false;
+            evidence = `Found element with role "${role}" and accessible name "${accessibleName}" ${actualCount} times on the page in frames: ${foundFrames.join(', ')}. Expected exactly 1 occurrence.`;
+          } else {
+            passed = false;
+            evidence = `Element with role "${role}" and accessible name "${accessibleName}" not found on the page`;
+          }
+        } else { // not-exist
+          // For not-exist: should find 0 results
+          if (actualCount === 0) {
+            passed = true;
+            evidence = `Element with role "${role}" and accessible name "${accessibleName}" correctly not found on the page`;
+          } else {
+            passed = false;
+            evidence = `Element with role "${role}" and accessible name "${accessibleName}" unexpectedly found ${actualCount} time(s) on the page in frames: ${foundFrames.join(', ')}`;
+          }
+        }
+
+      } catch (error) {
+        passed = false;
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        evidence = `Failed to validate element with role "${role}" and accessible name "${accessibleName}" on the page. Error: ${errorMessage}`;
+        
+        console.log(`Failed to validate element in whole page for "${element}". Error: ${errorMessage}`);
+      }
+
+      // Generate final payload
+      const payload = {
+        element,
+        role,
+        accessibleName,
+        matchType,
+        summary: {
+          total: 1,
+          passed: passed ? 1 : 0,
+          failed: passed ? 0 : 1,
+          status: passed ? 'pass' : 'fail',
+          evidence,
+        },
+        checks: [{
+          property: 'element-presence',
+          operator: matchType,
+          expected: matchType === 'not-exist' ? 'not-present' : 'present-once',
+          actual: actualCount > 0 ? `present-${actualCount}-times` : 'not-present',
+          actualCount: actualCount,
+          foundFrames: foundFrames,
+          result: passed ? 'pass' : 'fail',
+        }],
+        scope: 'whole-page-all-frames',
+        searchMethod: 'checkElementVisibilityUnique',
+      };
+
+      console.log('Validate element in whole page:', payload);
+      response.addResult(JSON.stringify(payload, null, 2));
+    });
+  },
 });
 
 const validate_expanded = defineTabTool({
@@ -2620,12 +2388,18 @@ const validate_expanded = defineTabTool({
             searchLocation = 'related-elements';
             
             const foundValues = searchResult.map(r => `${r.location}(${r.element}): "${r.value}"`).join(', ');
-            evidence = `Element "${element}" does not have aria-expanded="${expected}" on itself, but found aria-expanded attributes in related elements: ${foundValues}`;
+            evidence = `Element "${element}" does not have aria-expanded="${expected}" on itself, but found aria-expanded attributes in related elements: ${foundValues}. ` +
+              `Alternative validation suggestions: You can validate the element's state using className (e.g., check for 'expanded', 'collapsed', 'open', 'closed' classes), ` +
+              `CSS properties (e.g., display, visibility, height), or other ARIA attributes (e.g., aria-hidden, aria-selected). ` +
+              `You can also use validate_computed_styles tool to check CSS properties that indicate expanded/collapsed state.`;
           } else {
             passed = false;
             actualValue = 'not-found';
             searchLocation = 'none';
-            evidence = `Element "${element}" does not have aria-expanded="${expected}" and no aria-expanded attributes found in related elements (siblings, parent, children)`;
+            evidence = `Element "${element}" does not have aria-expanded="${expected}" and no aria-expanded attributes found in related elements (siblings, parent, children). ` +
+              `Alternative validation suggestions: You can validate the element's state using className (e.g., check for 'expanded', 'collapsed', 'open', 'closed' classes), ` +
+              `CSS properties (e.g., display, visibility, height), or other ARIA attributes (e.g., aria-hidden, aria-selected). ` +
+              `You can also use validate_computed_styles tool to check CSS properties that indicate expanded/collapsed state.`;
           }
           
         } catch (searchError) {
@@ -2633,7 +2407,10 @@ const validate_expanded = defineTabTool({
           const errorMessage = searchError instanceof Error ? searchError.message : String(searchError);
           actualValue = 'search-failed';
           searchLocation = 'error';
-          evidence = `Failed to search for aria-expanded attribute in related elements. Error: ${errorMessage}`;
+          evidence = `Failed to search for aria-expanded attribute in related elements. Error: ${errorMessage}. ` +
+            `Alternative validation suggestions: You can validate the element's state using className (e.g., check for 'expanded', 'collapsed', 'open', 'closed' classes), ` +
+            `CSS properties (e.g., display, visibility, height), or other ARIA attributes (e.g., aria-hidden, aria-selected). ` +
+            `You can also use validate_computed_styles tool to check CSS properties that indicate expanded/collapsed state.`;
           
           console.log(`Failed to search aria-expanded for element with ref "${ref}". Error: ${errorMessage}`);
         }
@@ -2734,10 +2511,9 @@ export default [
   extract_svg_from_element,
   extract_image_urls,
   validate_computed_styles,
-  //validate_text_visible,
-  //validate_dom_properties,
+  validate_text_in_whole_page,
+  validate_element_in_whole_page,
   validate_dom_assertions,
-  //validate_element_visible,
   validate_alert_in_snapshot,
   validate_expanded,
   default_validation,
