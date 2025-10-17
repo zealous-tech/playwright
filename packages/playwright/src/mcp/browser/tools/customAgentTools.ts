@@ -17,6 +17,8 @@ import { z } from 'zod';
 import { defineTabTool } from './tool.js';
 import { getAllComputedStylesDirect, pickActualValue, parseRGBColor, isColorInRange,runCommandClean, getValueByJsonPath, compareValues, checkElementVisibilityUnique, checkTextVisibilityInAllFrames } from './helperFunctions.js';
 import { generateLocator } from './utils.js';
+import { expect } from '@zealous-tech/playwright/test';
+import type * as playwright from '@zealous-tech/playwright';
 
 // Helper function to convert string to RegExp if it looks like a regex
 function stringToRegExp(str: string): string | RegExp {
@@ -60,9 +62,6 @@ function convertStringToRegExp(obj: any): any {
   
   return obj;
 }
-import { expect } from '@zealous-tech/playwright/test';
-import type * as playwright from 'playwright';
-import { convertSelectOptionValues } from 'playwright-core/lib/client/elementHandle.js';
 
 const elementStyleSchema = z.object({
   element: z.string().describe('Human-readable element description used to obtain permission to interact with the element'),
@@ -576,45 +575,10 @@ const validate_computed_styles = defineTabTool({
 });
 
 
-const textValidationSchema = z.object({
-  element: z.string().describe(
-      'Human-readable element description used to obtain permission to interact with the element'
-  ),
-  ref: z.string().describe(
-      "Exact target element reference from the page snapshot. Required for text validation."
-  ),
-  expectedText: z.string().describe(
-      'Expected text value to validate in the element or whole page'
-  ),
-  matchType: z.enum(['exact', 'contains', 'not-contains']).default('exact').describe(
-      "Type of match: 'exact' checks exact match, 'contains' checks substring presence, 'not-contains' checks that text is NOT present. Works for both specific elements (when ref provided) and page snapshot (when ref is null)"
-  ),
-  caseSensitive: z.boolean().optional().describe(
-      'Enable case-sensitive comparison (default false)'
-  ),
-});
-
-
-
-
-const domPropCheckSchema = z.object({
-  name: z.string().describe('DOM property name (e.g., "checked", "disabled", "className") or HTML attribute name (e.g., "id", "class", "data-testid", "aria-expanded")'),
-  operator: z.enum(['isEqual', 'notEqual']).default('isEqual'),
-  expected: z.any().describe('Expected value for the property or attribute'), // can be string, number, boolean
-});
-const domChecksSchema = z.array(domPropCheckSchema).min(1);
-
 const baseDomInputSchema = z.object({
   ref: z.string().min(1),
   element: z.string().min(1).describe('Description of the specific element with the given ref'),
 });
-
-const validateDomPropsSchema = baseDomInputSchema.extend({
-  checks: domChecksSchema,
-});
-
-
-
 
 // Individual assertion argument schemas
 const toBeAttachedArgsSchema = z.object({
