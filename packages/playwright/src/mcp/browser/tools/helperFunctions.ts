@@ -269,64 +269,6 @@ function compareValues(actual: any, expected: any, operator: string) {
 
 
 
-function parseSingleArgument(arg: string): any {
-  arg = arg.trim();
-  //console.log(`Parsing single argument: "${arg}"`);
-
-  // Handle string arguments first (both single and double quotes)
-  if ((arg.startsWith("'") && arg.endsWith("'")) || (arg.startsWith('"') && arg.endsWith('"'))) {
-    // String argument: 'Hello' or "Hello"
-    const result = arg.slice(1, -1);
-    //console.log(`Parsed as string: "${result}"`);
-    return result;
-  }
-
-  // Handle boolean values
-  if (arg === 'true')
-    return true;
-  else if (arg === 'false')
-    return false;
-  else if (arg === 'null')
-    return null;
-
-
-  // Handle numbers
-  if (!isNaN(Number(arg)))
-    return Number(arg);
-
-
-  // Handle objects and arrays
-  if (arg.startsWith('{') && arg.endsWith('}')) {
-    // Object argument: { name: 'Submit' } - use eval for simple cases
-    try {
-      const result = eval(`(${arg})`);
-      //console.log(`Parsed object with eval:`, result);
-      return result;
-    } catch (evalError) {
-      // Fallback to JSON parsing
-      const jsonString = convertToValidJson(arg);
-      console.log(`Converted to JSON: "${jsonString}"`);
-      return JSON.parse(jsonString);
-    }
-  } else if (arg.startsWith('[') && arg.endsWith(']')) {
-    // Array argument: ['button', 'submit'] - use eval for simple cases
-    try {
-      const result = eval(`(${arg})`);
-      //console.log(`Parsed array with eval:`, result);
-      return result;
-    } catch (evalError) {
-      // Fallback to JSON parsing
-      const jsonString = convertToValidJson(arg);
-      console.log(`Converted to JSON: "${jsonString}"`);
-      return JSON.parse(jsonString);
-    }
-  } else {
-    // If all else fails, return as string
-    console.log(`Parsed as fallback string: "${arg}"`);
-    return arg;
-  }
-}
-
 function convertToValidJson(str: string): string {
   // Simple approach: replace single quotes with double quotes
   // This works for most cases but may not handle all edge cases
@@ -844,4 +786,4 @@ async function collectAllFrames(page: any, level: number): Promise<Array<{frame:
   return frames;
 }
 
-export { pickActualValue, parseRGBColor, isColorInRange, getAllComputedStylesDirect, hasAlertDialog, getAlertDialogText, performRegexCheck, performRegexExtract, performRegexMatch, compareValues,parseArguments, parseSingleArgument, convertToValidJson, parseMethodChain, parseMethodCall, applyLocatorMethod, getValueByJsonPath, checkElementVisibilityUnique, checkTextVisibilityInAllFrames };
+export { pickActualValue, parseRGBColor, isColorInRange, getAllComputedStylesDirect, hasAlertDialog, getAlertDialogText, performRegexCheck, performRegexExtract, performRegexMatch, compareValues,convertToValidJson, getValueByJsonPath, checkElementVisibilityUnique, checkTextVisibilityInAllFrames };
