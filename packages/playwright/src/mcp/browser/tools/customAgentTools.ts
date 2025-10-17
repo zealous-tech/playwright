@@ -15,7 +15,7 @@
  */
 import { z } from 'zod';
 import { defineTabTool } from './tool.js';
-import { getAllComputedStylesDirect, pickActualValue, parseRGBColor, isColorInRange, getAllDomPropsDirect, performRegexCheck, searchTextInAllFrames, searchElementsByRoleInAllFrames, getElementTextWithFallbacks, runCommandClean, getValueByJsonPath, compareValues, checkElementVisibilityUnique, checkTextVisibilityInAllFrames } from './helperFunctions.js';
+import { getAllComputedStylesDirect, pickActualValue, parseRGBColor, isColorInRange,runCommandClean, getValueByJsonPath, compareValues, checkElementVisibilityUnique, checkTextVisibilityInAllFrames } from './helperFunctions.js';
 import { generateLocator } from './utils.js';
 
 // Helper function to convert string to RegExp if it looks like a regex
@@ -705,73 +705,7 @@ const validateDomPropsSchema = baseDomInputSchema.extend({
 });
 
 
-const validate_dom_properties = defineTabTool({
-  capability: 'core',
-  schema: {
-    name: 'validate_dom_properties',
-    title: 'Validate DOM properties of element',
-    description:
-      'Validate structural DOM properties and HTML attributes of elements (checked, disabled,isClickable, className, id, type, tabIndex, etc.). Use for validating element state, CSS classes, form properties, and structural attributes.  Supports exact equality comparison with isEqual/notEqual operators. HTML attributes are accessible directly by name (e.g., "id", "class", "data-testid", "aria-expanded").',
-    inputSchema: validateDomPropsSchema,
-    type: 'readOnly',
-  },
-  handle: async (tab, rawParams, response) => {
-    const { ref, element, checks } = validateDomPropsSchema.parse(rawParams);
 
-    await tab.waitForCompletion(async () => {
-      const allProps = await getAllDomPropsDirect(tab, ref, element);
-      console.log('All DOM Props:', allProps);
-
-      const results = checks.map(c => {
-        const actual = allProps[c.name];
-        let passed: boolean;
-        if (c.operator === 'isEqual')
-          passed = actual === c.expected;
-        else
-          passed = actual !== c.expected;
-
-        return {
-          property: c.name,
-          operator: c.operator,
-          expected: c.expected,
-          actual,
-          result: passed ? 'pass' : 'fail',
-        };
-      });
-
-      const passedCount = results.filter(r => r.result === 'pass').length;
-
-      // Generate evidence message
-      let evidence = '';
-      if (passedCount === results.length) {
-        evidence = `Found element "${element}" with all ${results.length} DOM properties matching expected values`;
-      } else {
-        const failedChecks = results.filter(r => r.result === 'fail');
-        const failedProps = failedChecks.map(c => `${c.property}: expected "${c.expected}", got "${c.actual}"`).join(', ');
-        evidence = `Found element "${element}" but ${failedChecks.length} DOM properties failed validation: ${failedProps}`;
-      }
-
-      // 3) answer
-      const payload = {
-        ref,
-        element,
-        summary: {
-          total: results.length,
-          passed: passedCount,
-          failed: results.length - passedCount,
-          status: passedCount === results.length ? 'pass' : 'fail',
-          evidence,
-        },
-        checks: results,
-        props: allProps, // all properties for debugging
-      };
-
-      console.log('Validate DOM Properties:');
-      console.log(payload);
-      response.addResult(JSON.stringify(payload, null, 2));
-    });
-  },
-});
 
 // Individual assertion argument schemas
 const toBeAttachedArgsSchema = z.object({
