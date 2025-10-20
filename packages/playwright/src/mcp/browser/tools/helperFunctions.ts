@@ -289,6 +289,10 @@ interface CurlResponse {
   contentLength?: number;
   contentType?: string;
   server?: string;
+  connection?: string;
+  date?: string;
+  etag?: string;
+  xPoweredBy?: string;
   error?: string;
 }
 
@@ -299,6 +303,10 @@ interface ParsedCurlResponse {
   contentLength?: number;
   contentType?: string;
   server?: string;
+  connection?: string;
+  date?: string;
+  etag?: string;
+  xPoweredBy?: string;
   error?: string;
   rawStderr?: string;
 }
@@ -325,6 +333,21 @@ function parseCurlStderr(stderr: string): Partial<CurlResponse> {
   if (serverMatch)
     result.server = serverMatch[1].trim();
 
+  const connectionMatch = stderr.match(/< Connection: ([^\r\n]+)/);
+  if (connectionMatch)
+    result.connection = connectionMatch[1].trim();
+
+  const dateMatch = stderr.match(/< Date: ([^\r\n]+)/);
+  if (dateMatch)
+    result.date = dateMatch[1].trim();
+
+  const etagMatch = stderr.match(/< ETag: ([^\r\n]+)/);
+  if (etagMatch)
+    result.etag = etagMatch[1].trim();
+
+  const xPoweredByMatch = stderr.match(/< X-Powered-By: ([^\r\n]+)/);
+  if (xPoweredByMatch)
+    result.xPoweredBy = xPoweredByMatch[1].trim();
 
   const timeMatch = stderr.match(/(\d+\.\d+) secs/);
   if (timeMatch)
@@ -531,6 +554,10 @@ export async function runCommandClean(command: string): Promise<ParsedCurlRespon
     contentLength: parsed.contentLength,
     contentType: parsed.contentType,
     server: parsed.server,
+    connection: parsed.connection,
+    date: parsed.date,
+    etag: parsed.etag,
+    xPoweredBy: parsed.xPoweredBy,
     error: parsed.error,
     // rawStderr: stderr
   };
