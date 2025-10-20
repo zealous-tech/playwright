@@ -149,248 +149,7 @@ async function getAllComputedStylesDirect(
 }
 
 
-async function getAllDomPropsDirect(tab: any, ref: string, element: string) {
-  const locator = await tab.refLocator({ ref, element });
-  const props = await locator.evaluate((el: Element) => {
-    if (!el)
-      return {};
 
-    const out: Record<string, any> = {};
-
-    // 1. Own element properties (primitives) - EXCLUDING textContent, value
-    for (const key of Object.keys(el)) {
-      try {
-        const val = (el as any)[key];
-        // Exclude properties that are collected by other tools
-        if (['string', 'number', 'boolean'].includes(typeof val) || val === null) {
-          // Exclude intersections with validate_element_text
-          if (!['textContent', 'value'].includes(key))
-            out[key] = val;
-
-        }
-      } catch (_) {
-        // skip getters with errors
-      }
-    }
-
-    // 2. HTML attributes - EXCLUDING text attributes
-    if (el.getAttributeNames) {
-      el.getAttributeNames().forEach((attr: string) => {
-        // Exclude attributes that are collected by validate_element_text
-        const textAttributes = ['placeholder', 'defaultValue', 'aria-label', 'title', 'alt'];
-        if (!textAttributes.includes(attr)) {
-          // Add attributes directly without attr: prefix
-          out[attr] = el.getAttribute(attr);
-        }
-      });
-    }
-
-    // 3. Special cases
-    if (el.hasAttribute('disabled'))
-      out['disabled'] = true;
-    else if ((el as any).disabled !== undefined)
-      out['disabled'] = (el as any).disabled;
-
-    if (el.hasAttribute('checked'))
-      out['checked'] = true;
-    else if ((el as any).checked !== undefined)
-      out['checked'] = (el as any).checked;
-
-
-    // 4. Size and positioning
-    const rect = el.getBoundingClientRect();
-    out['boundingRect'] = {
-      top: rect.top,
-      right: rect.right,
-      bottom: rect.bottom,
-      left: rect.left,
-      width: rect.width,
-      height: rect.height,
-      x: rect.x,
-      y: rect.y
-    };
-
-    out['offsetTop'] = (el as any).offsetTop;
-    out['offsetLeft'] = (el as any).offsetLeft;
-    out['offsetWidth'] = (el as any).offsetWidth;
-    out['offsetHeight'] = (el as any).offsetHeight;
-    out['clientTop'] = (el as any).clientTop;
-    out['clientLeft'] = (el as any).clientLeft;
-    out['clientWidth'] = (el as any).clientWidth;
-    out['clientHeight'] = (el as any).clientHeight;
-    out['scrollTop'] = (el as any).scrollTop;
-    out['scrollLeft'] = (el as any).scrollLeft;
-    out['scrollWidth'] = (el as any).scrollWidth;
-    out['scrollHeight'] = (el as any).scrollHeight;
-
-    // 5. Visibility state (EXCLUDING CSS styles - this is validate_computed_styles)
-    out['isVisible'] = (el as any).offsetWidth > 0 && (el as any).offsetHeight > 0;
-
-    // 6. Form and element state (EXCLUDING value)
-    if (['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName)) {
-      out['form'] = (el as any).form?.id || (el as any).form?.name || null;
-      out['name'] = (el as any).name;
-      out['type'] = (el as any).type;
-      out['required'] = (el as any).required;
-      out['readOnly'] = (el as any).readOnly;
-      out['validity'] = {
-        valid: (el as any).validity?.valid,
-        valueMissing: (el as any).validity?.valueMissing,
-        typeMismatch: (el as any).validity?.typeMismatch,
-        patternMismatch: (el as any).validity?.patternMismatch,
-        tooLong: (el as any).validity?.tooLong,
-        tooShort: (el as any).validity?.tooShort,
-        rangeUnderflow: (el as any).validity?.rangeUnderflow,
-        rangeOverflow: (el as any).validity?.rangeOverflow,
-        stepMismatch: (el as any).validity?.stepMismatch,
-        badInput: (el as any).validity?.badInput,
-        customError: (el as any).validity?.customError
-      };
-    }
-
-    // 7. Accessibility properties (EXCLUDING aria-label, title - this is validate_element_text)
-    out['ariaDescribedBy'] = el.getAttribute('aria-describedby');
-    out['ariaLabelledBy'] = el.getAttribute('aria-labelledby');
-    out['ariaExpanded'] = el.getAttribute('aria-expanded');
-    out['ariaHidden'] = el.getAttribute('aria-hidden');
-    out['ariaSelected'] = el.getAttribute('aria-selected');
-    out['ariaChecked'] = el.getAttribute('aria-checked');
-    out['ariaDisabled'] = el.getAttribute('aria-disabled');
-    out['ariaRequired'] = el.getAttribute('aria-required');
-    out['ariaInvalid'] = el.getAttribute('aria-invalid');
-    out['role'] = el.getAttribute('role');
-    out['tabIndex'] = (el as any).tabIndex;
-
-    // 8. Events and interaction
-    out['contentEditable'] = (el as any).contentEditable;
-    out['draggable'] = (el as any).draggable;
-    out['spellcheck'] = (el as any).spellcheck;
-    out['isContentEditable'] = (el as any).isContentEditable;
-    out['accessKey'] = (el as any).accessKey;
-
-    // 8.1. Clickability check
-    out['isClickable'] = (() => {
-      // Check if element is disabled
-      if (el.hasAttribute('disabled') || (el as any).disabled === true) {
-        return false;
-      }
-
-      // Check if element is hidden via CSS
-      const style = window.getComputedStyle(el);
-      if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
-        return false;
-      }
-
-      // Check if element has zero dimensions
-      if ((el as any).offsetWidth === 0 || (el as any).offsetHeight === 0) {
-        return false;
-      }
-
-      // Check if element is covered by another element
-      const rect = el.getBoundingClientRect();
-      const centerX = rect.left + rect.width / 2;
-      const centerY = rect.top + rect.height / 2;
-      const elementAtPoint = document.elementFromPoint(centerX, centerY);
-      
-      // If the element at the center point is not this element or its child, it's covered
-      if (elementAtPoint && !el.contains(elementAtPoint) && elementAtPoint !== el) {
-        return false;
-      }
-
-      // Check if element has pointer-events: none
-      if (style.pointerEvents === 'none') {
-        return false;
-      }
-
-      // Check if element is in a form that's disabled
-      if ((el as any).form && (el as any).form.disabled) {
-        return false;
-      }
-
-      // Check if element is a button, link, or has click handlers
-      const isInteractiveElement = ['BUTTON', 'A', 'INPUT', 'SELECT', 'TEXTAREA'].includes(el.tagName) ||
-                                  el.getAttribute('role') === 'button' ||
-                                  !!el.getAttribute('onclick') ||
-                                  !!el.getAttribute('data-testid') ||
-                                  !!el.getAttribute('data-cy') ||
-                                  !!el.getAttribute('data-test') ||
-                                  el.classList.contains('clickable') ||
-                                  el.classList.contains('btn') ||
-                                  el.classList.contains('button');
-
-      // Check if element has event listeners (this is a best-effort check)
-      const hasClickListeners = (el as any).onclick !== null ||
-                               (el as any).addEventListener !== undefined;
-
-      return isInteractiveElement || hasClickListeners || el.tagName === 'DIV' || el.tagName === 'SPAN';
-    })();
-
-    // 9. Element metadata
-    out['tagName'] = el.tagName;
-    out['nodeName'] = el.nodeName;
-    out['nodeType'] = el.nodeType;
-    out['namespaceURI'] = el.namespaceURI;
-    out['localName'] = el.localName;
-    out['prefix'] = el.prefix;
-    out['baseURI'] = el.baseURI;
-    out['ownerDocument'] = el.ownerDocument?.URL || null;
-
-    // 10. Parent-child relationships
-    out['parentElement'] = el.parentElement?.tagName || null;
-    out['parentElementId'] = el.parentElement?.id || null;
-    out['parentElementClass'] = el.parentElement?.className || null;
-    out['childElementCount'] = el.childElementCount;
-    out['firstElementChild'] = el.firstElementChild?.tagName || null;
-    out['lastElementChild'] = el.lastElementChild?.tagName || null;
-    out['nextElementSibling'] = el.nextElementSibling?.tagName || null;
-    out['previousElementSibling'] = el.previousElementSibling?.tagName || null;
-
-    // 11. Special properties for different element types
-    if (el.tagName === 'IMG') {
-      out['naturalWidth'] = (el as any).naturalWidth;
-      out['naturalHeight'] = (el as any).naturalHeight;
-      out['complete'] = (el as any).complete;
-      // Exclude alt - this is validate_element_text
-    }
-
-    if (el.tagName === 'A') {
-      out['href'] = (el as any).href;
-      out['target'] = (el as any).target;
-      out['rel'] = (el as any).rel;
-      out['download'] = (el as any).download;
-    }
-
-    if (el.tagName === 'VIDEO' || el.tagName === 'AUDIO') {
-      out['duration'] = (el as any).duration;
-      out['currentTime'] = (el as any).currentTime;
-      out['paused'] = (el as any).paused;
-      out['ended'] = (el as any).ended;
-      out['muted'] = (el as any).muted;
-      out['volume'] = (el as any).volume;
-      out['playbackRate'] = (el as any).playbackRate;
-    }
-
-    // 12. CSS classes (EXCLUDING computed styles - this is validate_computed_styles)
-    out['className'] = el.className;
-    out['classList'] = Array.from(el.classList);
-    // Exclude style - this is validate_computed_styles
-
-    // 13. Data attributes
-    const dataAttrs: Record<string, string> = {};
-    el.getAttributeNames().forEach(attr => {
-      if (attr.startsWith('data-'))
-        dataAttrs[attr] = el.getAttribute(attr) || '';
-
-    });
-    if (Object.keys(dataAttrs).length > 0)
-      out['dataAttributes'] = dataAttrs;
-
-
-    return out;
-  });
-
-  return props ?? {};
-}
 
 
 // Function to check if alert dialog is present in snapshot
@@ -508,399 +267,7 @@ function compareValues(actual: any, expected: any, operator: string) {
   }
 }
 
-// Recursive function to search for text in all frames (including nested iframes)
-async function searchTextInAllFrames(
-  page: any,
-  text: string,
-  matchType: 'exact' | 'contains' | 'not-contains' = 'contains',
-  framePath: string = 'main'
-): Promise<Array<{element: any, context: string}>> {
-  const results: Array<{element: any, context: string}> = [];
 
-  try {
-    // Search in current frame with appropriate options based on matchType
-    let locator;
-    if (matchType === 'exact') {
-      locator = page.getByText(text, { exact: true }).filter({ visible: true });
-    } else {
-      // For "contains" and "not-contains", use default substring matching
-      locator = page.getByText(text).filter({ visible: true });
-    }
-
-    const count = await locator.count();
-    console.log(`searchInAllFrames: Found ${count} visible elements with text "${text}" in ${framePath} (matchType: ${matchType})`);
-
-    if (count > 0) {
-      const elements = await locator.all();
-      results.push(...elements.map((el: any) => ({ element: el, context: framePath })));
-    }
-
-    // Find all iframes in current frame
-    const iframes = page.locator('iframe');
-    const iframeCount = await iframes.count();
-
-    // Search in each iframe recursively
-    for (let i = 0; i < iframeCount; i++) {
-      try {
-        const iframePage = page.frameLocator(`iframe >> nth=${i}`);
-        const nestedResults = await searchTextInAllFrames(iframePage, text, matchType, `${framePath} > iframe-${i + 1}`);
-        results.push(...nestedResults);
-      } catch (error) {
-        console.log(`searchInAllFrames: Error searching in ${framePath} > iframe-${i + 1}:`, error);
-      }
-    }
-  } catch (error) {
-    console.log(`searchInAllFrames: Error searching in ${framePath}:`, error);
-  }
-
-  return results;
-}
-
-// Function to get text from element with comprehensive fallbacks
-async function getElementTextWithFallbacks(
-  locator: any,
-  tab: any,
-  elementDescription: string
-): Promise<string> {
-  let actualText = '';
-
-  // First try: get text content
-  actualText = (await locator.textContent() ?? '').trim();
-
-  // If no text found, try fallback properties
-  if (!actualText) {
-    console.log(`Text content is empty for element ${elementDescription}, trying fallback properties...`);
-
-    // Try input value first (works for input, textarea, select)
-    try {
-      actualText = await locator.inputValue();
-    } catch (error) {
-      // Not an input-like element, try other attributes
-    }
-
-    if (!actualText) {
-      // Try placeholder
-      const placeholder = await locator.getAttribute('placeholder');
-      if (placeholder)
-        actualText = placeholder;
-
-    }
-
-    if (!actualText) {
-      // Try defaultValue
-      const defaultValue = await locator.getAttribute('defaultValue');
-      if (defaultValue)
-        actualText = defaultValue;
-
-    }
-
-    if (!actualText) {
-      // Try aria-label
-      const ariaLabel = await locator.getAttribute('aria-label');
-      if (ariaLabel)
-        actualText = ariaLabel;
-
-    }
-
-    if (!actualText) {
-      // Check for contenteditable
-      const isContentEditable = await locator.getAttribute('contenteditable');
-      if (isContentEditable === 'true')
-        actualText = await locator.innerHTML();
-
-    }
-
-    if (!actualText) {
-      // Try title attribute
-      const title = await locator.getAttribute('title');
-      if (title)
-        actualText = title;
-
-    }
-
-    if (!actualText) {
-      // Try alt attribute (for images)
-      const alt = await locator.getAttribute('alt');
-      if (alt)
-        actualText = alt;
-
-    }
-
-    if (!actualText) {
-      // Try value attribute (for elements with value)
-      const value = await locator.getAttribute('value');
-      if (value)
-        actualText = value;
-
-    }
-
-    if (!actualText) {
-      // Try data attributes (common patterns)
-      const dataValue = await locator.getAttribute('data-value');
-      if (dataValue)
-        actualText = dataValue;
-
-    }
-
-    if (!actualText) {
-      // Try aria-labelledby (references another element)
-      const ariaLabelledBy = await locator.getAttribute('aria-labelledby');
-      if (ariaLabelledBy) {
-        try {
-          // Try to find the referenced element
-          const referencedElement = tab.page.locator(`#${ariaLabelledBy}`);
-          if (await referencedElement.count() > 0)
-            actualText = await referencedElement.textContent() ?? '';
-
-        } catch (error) {
-          // Ignore errors when trying to find referenced element
-        }
-      }
-    }
-
-    if (!actualText) {
-      // Try aria-describedby (references another element)
-      const ariaDescribedBy = await locator.getAttribute('aria-describedby');
-      if (ariaDescribedBy) {
-        try {
-          // Try to find the referenced element
-          const referencedElement = tab.page.locator(`#${ariaDescribedBy}`);
-          if (await referencedElement.count() > 0)
-            actualText = await referencedElement.textContent() ?? '';
-
-        } catch (error) {
-          // Ignore errors when trying to find referenced element
-        }
-      }
-    }
-
-    if (!actualText) {
-      // Try option text for select elements
-      try {
-        const tagName = await locator.evaluate((el: Element) => el.tagName.toLowerCase());
-        if (tagName === 'select') {
-          const selectedOption = await locator.evaluate((el: HTMLSelectElement) => {
-            const selectedIndex = el.selectedIndex;
-            return selectedIndex >= 0 ? el.options[selectedIndex]?.textContent || '' : '';
-          });
-          if (selectedOption)
-            actualText = selectedOption;
-
-        }
-      } catch (error) {
-        // Not a select element or error occurred
-      }
-    }
-
-    if (!actualText) {
-      // Try innerText as fallback (includes visible text only)
-      try {
-        actualText = await locator.innerText();
-      } catch (error) {
-        // Element might not support innerText
-      }
-    }
-
-    console.log(`Fallback result for ${elementDescription}: "${actualText}"`);
-  }
-
-  return actualText;
-}
-
-// Recursive function to search for elements by role in all frames (including nested iframes)
-async function searchElementsByRoleInAllFrames(
-  page: any,
-  role: string,
-  accessibleName: string,
-  framePath: string = 'main'
-): Promise<Array<{element: any, context: string}>> {
-  const results: Array<{element: any, context: string}> = [];
-
-  try {
-    // Search in current frame
-    const locator = page.getByRole(role as any, { name: accessibleName, exact: true });
-    const count = await locator.count();
-    console.log(`searchElementsByRoleInAllFrames: Found ${count} elements with role="${role}" and name="${accessibleName}" in ${framePath}`);
-
-    if (count > 0) {
-      const elements = await locator.all();
-      results.push(...elements.map((el: any) => ({ element: el, context: framePath })));
-    }
-
-    // Find all iframes in current frame
-    const iframes = page.locator('iframe');
-    const iframeCount = await iframes.count();
-
-    // Search in each iframe recursively
-    for (let i = 0; i < iframeCount; i++) {
-      try {
-        const iframePage = page.frameLocator(`iframe >> nth=${i}`);
-        const nestedResults = await searchElementsByRoleInAllFrames(iframePage, role, accessibleName, `${framePath} > iframe-${i + 1}`);
-        results.push(...nestedResults);
-      } catch (error) {
-        console.log(`searchElementsByRoleInAllFrames: Error searching in ${framePath} > iframe-${i + 1}:`, error);
-      }
-    }
-  } catch (error) {
-    console.log(`searchElementsByRoleInAllFrames: Error searching in ${framePath}:`, error);
-  }
-
-  return results;
-}
-
-async function getFullXPath(tab: any, params: { element: string, ref: string }): Promise<Array<{selector: string; priority: number; type: string}>> {
-  const locator = await tab.refLocator(params);
-
-  // Generate full absolute XPath path like /html/body/div[2]/div/div/div/div[2]/div[2]/div[3]/button
-  const fullXPath = await locator.evaluate((el: Element) => {
-    const getXPath = (element: Element): string => {
-      if (element.nodeType === Node.DOCUMENT_NODE)
-        return '';
-
-
-      if (element.nodeType === Node.ELEMENT_NODE) {
-        const tagName = element.tagName.toLowerCase();
-
-        // Count siblings with the same tag name
-        let index = 1;
-        let sibling = element.previousElementSibling;
-        while (sibling) {
-          if (sibling.tagName === element.tagName)
-            index++;
-
-          sibling = sibling.previousElementSibling;
-        }
-
-        // Build the path with index if there are multiple siblings with same tag
-        const hasMultipleSiblings = element.nextElementSibling &&
-          Array.from(element.parentElement?.children || [])
-              .filter(child => child.tagName === element.tagName).length > 1;
-
-        const indexPart = hasMultipleSiblings ? `[${index}]` : '';
-        const currentPath = `/${tagName}${indexPart}`;
-
-        // Recursively get parent path
-        const parentPath = element.parentElement ? getXPath(element.parentElement) : '';
-
-        return parentPath + currentPath;
-      }
-
-      return '';
-    };
-
-    return getXPath(el);
-  });
-
-  // Return in the same structure as getStableSelectors but with single element
-  return [{
-    selector: fullXPath,
-    priority: 1,
-    type: 'full-xpath'
-  }];
-}
-
-
-function parseArguments(argsString: string): any[] {
-  const args: any[] = [];
-  let current = '';
-  let depth = 0;
-  let inString = false;
-  let stringChar = '';
-
-  for (let i = 0; i < argsString.length; i++) {
-    const char = argsString[i];
-    const prevChar = i > 0 ? argsString[i - 1] : '';
-
-    if (!inString) {
-      if (char === '"' || char === "'") {
-        inString = true;
-        stringChar = char;
-        current += char;
-      } else if (char === '{' || char === '[') {
-        depth++;
-        current += char;
-      } else if (char === '}' || char === ']') {
-        depth--;
-        current += char;
-      } else if (char === ',' && depth === 0) {
-        args.push(parseSingleArgument(current.trim()));
-        current = '';
-      } else {
-        current += char;
-      }
-    } else {
-      current += char;
-      if (char === stringChar && prevChar !== '\\') {
-        inString = false;
-        stringChar = '';
-      }
-    }
-  }
-
-  if (current.trim())
-    args.push(parseSingleArgument(current.trim()));
-
-
-  return args;
-}
-
-function parseSingleArgument(arg: string): any {
-  arg = arg.trim();
-  //console.log(`Parsing single argument: "${arg}"`);
-
-  // Handle string arguments first (both single and double quotes)
-  if ((arg.startsWith("'") && arg.endsWith("'")) || (arg.startsWith('"') && arg.endsWith('"'))) {
-    // String argument: 'Hello' or "Hello"
-    const result = arg.slice(1, -1);
-    //console.log(`Parsed as string: "${result}"`);
-    return result;
-  }
-
-  // Handle boolean values
-  if (arg === 'true')
-    return true;
-  else if (arg === 'false')
-    return false;
-  else if (arg === 'null')
-    return null;
-
-
-  // Handle numbers
-  if (!isNaN(Number(arg)))
-    return Number(arg);
-
-
-  // Handle objects and arrays
-  if (arg.startsWith('{') && arg.endsWith('}')) {
-    // Object argument: { name: 'Submit' } - use eval for simple cases
-    try {
-      const result = eval(`(${arg})`);
-      //console.log(`Parsed object with eval:`, result);
-      return result;
-    } catch (evalError) {
-      // Fallback to JSON parsing
-      const jsonString = convertToValidJson(arg);
-      console.log(`Converted to JSON: "${jsonString}"`);
-      return JSON.parse(jsonString);
-    }
-  } else if (arg.startsWith('[') && arg.endsWith(']')) {
-    // Array argument: ['button', 'submit'] - use eval for simple cases
-    try {
-      const result = eval(`(${arg})`);
-      //console.log(`Parsed array with eval:`, result);
-      return result;
-    } catch (evalError) {
-      // Fallback to JSON parsing
-      const jsonString = convertToValidJson(arg);
-      console.log(`Converted to JSON: "${jsonString}"`);
-      return JSON.parse(jsonString);
-    }
-  } else {
-    // If all else fails, return as string
-    console.log(`Parsed as fallback string: "${arg}"`);
-    return arg;
-  }
-}
 
 function convertToValidJson(str: string): string {
   // Simple approach: replace single quotes with double quotes
@@ -914,97 +281,6 @@ function convertToValidJson(str: string): string {
   return result;
 }
 
-function parseMethodChain(methodChain: string): Array<{ method: string, args: any[] }> {
-  const methods: Array<{ method: string, args: any[] }> = [];
-
-  // Split by dots, but be careful about dots inside parentheses
-  let current = '';
-  let depth = 0;
-  let inString = false;
-  let stringChar = '';
-
-  for (let i = 0; i < methodChain.length; i++) {
-    const char = methodChain[i];
-    const prevChar = i > 0 ? methodChain[i - 1] : '';
-
-    if (!inString) {
-      if (char === '"' || char === "'") {
-        inString = true;
-        stringChar = char;
-        current += char;
-      } else if (char === '(') {
-        depth++;
-        current += char;
-      } else if (char === ')') {
-        depth--;
-        current += char;
-      } else if (char === '.' && depth === 0) {
-        if (current.trim())
-          methods.push(parseMethodCall(current.trim()));
-
-        current = '';
-      } else if (char === ')' && depth === 0 && current.trim().endsWith('(')) {
-        // Handle methods without arguments like first()
-        current += char;
-        if (current.trim())
-          methods.push(parseMethodCall(current.trim()));
-
-        current = '';
-      } else {
-        current += char;
-      }
-    } else {
-      current += char;
-      if (char === stringChar && prevChar !== '\\') {
-        inString = false;
-        stringChar = '';
-      }
-    }
-  }
-
-  if (current.trim())
-    methods.push(parseMethodCall(current.trim()));
-
-
-  return methods;
-}
-
-function parseMethodCall(methodCall: string): { method: string, args: any[] } {
-  // Match method name and arguments: methodName(args)
-  const match = methodCall.match(/^(\w+)\((.+)\)$/);
-  if (!match) {
-    // Method without arguments - check if it ends with ()
-    const noArgsMatch = methodCall.match(/^(\w+)\(\)$/);
-    if (noArgsMatch) {
-      const [, methodName] = noArgsMatch;
-      return { method: methodName, args: [] };
-    }
-    // Method without parentheses (like 'first' instead of 'first()')
-    return { method: methodCall, args: [] };
-  }
-
-  const [, methodName, argsString] = match;
-  const args = parseArguments(argsString);
-
-  return { method: methodName, args };
-}
-
-function applyLocatorMethod(locator: playwright.Locator, methodInfo: { method: string, args: any[] }): playwright.Locator {
-  const { method, args } = methodInfo;
-
-  // Check if method exists on locator
-  if (typeof (locator as any)[method] !== 'function')
-    throw new Error(`Unknown locator method: ${method}`);
-
-
-  try {
-    const methodFunc = (locator as any)[method] as Function;
-    return methodFunc.apply(locator, args);
-  } catch (error) {
-    throw new Error(`Failed to apply locator method ${method}: ${error instanceof Error ? error.message : String(error)}`);
-  }
-}
-
 interface CurlResponse {
   stdout: string;
   stderr: string;
@@ -1013,6 +289,10 @@ interface CurlResponse {
   contentLength?: number;
   contentType?: string;
   server?: string;
+  connection?: string;
+  date?: string;
+  etag?: string;
+  xPoweredBy?: string;
   error?: string;
 }
 
@@ -1023,6 +303,10 @@ interface ParsedCurlResponse {
   contentLength?: number;
   contentType?: string;
   server?: string;
+  connection?: string;
+  date?: string;
+  etag?: string;
+  xPoweredBy?: string;
   error?: string;
   rawStderr?: string;
 }
@@ -1049,6 +333,21 @@ function parseCurlStderr(stderr: string): Partial<CurlResponse> {
   if (serverMatch)
     result.server = serverMatch[1].trim();
 
+  const connectionMatch = stderr.match(/< Connection: ([^\r\n]+)/);
+  if (connectionMatch)
+    result.connection = connectionMatch[1].trim();
+
+  const dateMatch = stderr.match(/< Date: ([^\r\n]+)/);
+  if (dateMatch)
+    result.date = dateMatch[1].trim();
+
+  const etagMatch = stderr.match(/< ETag: ([^\r\n]+)/);
+  if (etagMatch)
+    result.etag = etagMatch[1].trim();
+
+  const xPoweredByMatch = stderr.match(/< X-Powered-By: ([^\r\n]+)/);
+  if (xPoweredByMatch)
+    result.xPoweredBy = xPoweredByMatch[1].trim();
 
   const timeMatch = stderr.match(/(\d+\.\d+) secs/);
   if (timeMatch)
@@ -1255,6 +554,10 @@ export async function runCommandClean(command: string): Promise<ParsedCurlRespon
     contentLength: parsed.contentLength,
     contentType: parsed.contentType,
     server: parsed.server,
+    connection: parsed.connection,
+    date: parsed.date,
+    etag: parsed.etag,
+    xPoweredBy: parsed.xPoweredBy,
     error: parsed.error,
     // rawStderr: stderr
   };
@@ -1409,8 +712,7 @@ function applyArrayFilter(arr: any[], filter: string): any {
  * Ensures exactly 1 element is found with the specified role and accessibleName
  */
 async function checkElementVisibilityUnique(page: any, role: string, accessibleName: string) {
-  const { expect } = await import('@zealous-tech/playwright/test');
-  
+
   const searchPromises = [];
   
   // Add search in main frame
@@ -1435,24 +737,53 @@ async function checkElementVisibilityUnique(page: any, role: string, accessibleN
   // Wait for all search results in parallel
   const results = await Promise.all(searchPromises);
   
-  // Count found elements
-  const foundResults = results.filter(result => result.found);
+  return results;
+}
+
+/**
+ * Check text visibility with parallel recursive search across all frames
+ * Returns all search results without counting logic
+ */
+async function checkTextVisibilityInAllFrames(page: any, text: string, matchType: 'exact' | 'contains' | 'not-contains' = 'contains') {
+  const searchPromises = [];
   
-  if (foundResults.length === 0) {
-    throw new Error(`Element with role "${role}" and name "${accessibleName}" not found in any frame`);
-  } else if (foundResults.length === 1) {
-    return { 
-      found: true, 
-      unique: true, 
-      count: 1, 
-      frame: foundResults[0].frame,
-      level: foundResults[0].level
-    };
+  // Add search in main frame
+  let mainLocator;
+  if (matchType === 'exact') {
+    mainLocator = page.getByText(text, { exact: true });
   } else {
-    // Multiple elements found - this is an error
-    const frames = foundResults.map(r => r.frame).join(', ');
-    throw new Error(`Multiple elements found with role "${role}" and name "${accessibleName}" in frames: ${frames}. Expected exactly 1 element.`);
+    mainLocator = page.getByText(text);
   }
+  
+  searchPromises.push(
+    expect(mainLocator).toBeVisible()
+      .then(() => ({ found: true, frame: 'main', level: 0 }))
+      .catch(() => ({ found: false, frame: 'main', level: 0 }))
+  );
+  
+  // Recursively collect all iframes at all levels
+  const allFrames = await collectAllFrames(page, 0);
+  
+  // Create promises for all frames
+  for (const frameInfo of allFrames) {
+    let frameLocator;
+    if (matchType === 'exact') {
+      frameLocator = frameInfo.frame.getByText(text, { exact: true });
+    } else {
+      frameLocator = frameInfo.frame.getByText(text);
+    }
+    
+    searchPromises.push(
+      expect(frameLocator).toBeVisible({timeout:2000})
+        .then(() => ({ found: true, frame: frameInfo.name, level: frameInfo.level }))
+        .catch(() => ({ found: false, frame: frameInfo.name, level: frameInfo.level }))
+    );
+  }
+  
+  // Wait for all search results in parallel
+  const results = await Promise.all(searchPromises);
+  
+  return results;
 }
 
 /**
@@ -1482,4 +813,4 @@ async function collectAllFrames(page: any, level: number): Promise<Array<{frame:
   return frames;
 }
 
-export { pickActualValue, parseRGBColor, isColorInRange, getAllComputedStylesDirect, getAllDomPropsDirect, hasAlertDialog, getAlertDialogText, performRegexCheck, performRegexExtract, performRegexMatch, compareValues, searchTextInAllFrames, searchElementsByRoleInAllFrames, getElementTextWithFallbacks, getFullXPath, parseArguments, parseSingleArgument, convertToValidJson, parseMethodChain, parseMethodCall, applyLocatorMethod, getValueByJsonPath, checkElementVisibilityUnique };
+export { pickActualValue, parseRGBColor, isColorInRange, getAllComputedStylesDirect, hasAlertDialog, getAlertDialogText, performRegexCheck, performRegexExtract, performRegexMatch, compareValues,convertToValidJson, getValueByJsonPath, checkElementVisibilityUnique, checkTextVisibilityInAllFrames };
