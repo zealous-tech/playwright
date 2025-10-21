@@ -19,6 +19,13 @@ import {defineTabTool} from './tool.js';
 
 import type * as playwright from 'playwright';
 
+class RequestsNotFound extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RequestsNotFound';
+  }
+}
+
 interface LogType {
   request: {
     headers: boolean;
@@ -31,12 +38,14 @@ interface LogType {
 }
 
 type Input = {
-  method?: string;   // e.g. "GET" (case-insensitive, exact match on token)
-  url?: string;      // full or partial URL substring, case-insensitive
-  endpoint?: string; // pathname substring, e.g. "/api/users", case-insensitive
+  method?: string;   // e.g. "GET" (case-sensitive, exact match on token)
+  url?: string;      // full or partial URL substring, case-sensitive
+  endpoint?: string; // pathname substring, e.g. "/api/users", case-sensitive
   keywords?: string[];
   logType?: LogType;
 };
+
+
 
 const requests = defineTabTool({
   capability: 'core',
@@ -45,24 +54,24 @@ const requests = defineTabTool({
     name: 'browser_network_requests',
     title: 'Find specific network request',
     description:
-      'Search network request logs and return exactly ONE entry that satisfies structured filters (method/url/endpoint) AND contains ALL specified keywords. Keywords are searched across method, URL, headers, and bodies (case-insensitive). Use logType to control which fields are included in the output.',
+      'Search network request logs and return exactly ONE entry that satisfies structured filters (method/url/endpoint) AND contains ALL specified keywords. Keywords are searched across method, URL, headers, and bodies (case-sensitive). Use logType to control which fields are included in the output.',
     inputSchema: z.object({
       method: z
         .string()
         .optional()
-        .describe('HTTP method to match (e.g., "GET"). Case-insensitive exact token match.'),
+        .describe('HTTP method to match (e.g., "GET"). Case-sensitive exact token match.'),
       url: z
         .string()
         .optional()
-        .describe('Full or partial URL to match (substring, case-insensitive).'),
+        .describe('Full or partial URL to match (substring, case-sensitive).'),
       endpoint: z
         .string()
         .optional()
-        .describe('Pathname to match (substring of URL pathname, e.g., "/api/users", case-insensitive).'),
+        .describe('Pathname to match (substring of URL pathname, e.g., "/api/users", case-sensitive).'),
       keywords: z
         .array(z.string())
         .default([])
-        .describe('Array of keywords that must ALL be present somewhere in the request/response data (case-insensitive).'),
+        .describe('Array of keywords that must ALL be present somewhere in the request/response data (case-sensitive).'),
       logType: z
         .object({
           request: z
@@ -100,16 +109,16 @@ const requests = defineTabTool({
         response: { headers: false, body: false },
       };
 
-    const methodNorm = methodFilter?.trim().toLowerCase();
-    const urlNorm = urlFilter?.trim().toLowerCase();
-    const endpointNorm = endpointFilter?.trim().toLowerCase();
-    const keywordsLower = keywords.map((k) => k.toLowerCase());
+    const methodNorm = methodFilter?.trim();
+    const urlNorm = urlFilter?.trim();
+    const endpointNorm = endpointFilter?.trim();
+    const keywordsNorm = keywords.map((k) => k);
 
     for (const [req, res] of allRequests.entries()) {
       if (!matchesStructuredFilters(req, methodNorm, urlNorm, endpointNorm)) {
         continue;
       }
-      if (keywordsLower.length === 0) {
+      if (keywordsNorm.length === 0) {
         const out = await safeRender(req, res, logType);
         response.addResult(out);
         return;
@@ -117,14 +126,14 @@ const requests = defineTabTool({
 
       try {
         const detailed = await renderRequestDetailed(req, res, logType);
-        const hasAll = containsAllKeywords(detailed, keywordsLower);
+        const hasAll = containsAllKeywords(detailed, keywordsNorm);
         if (hasAll) {
           response.addResult(detailed);
           return;
         }
       } catch {
         const basic = renderRequest(req, res);
-        const hasAll = containsAllKeywords(basic, keywordsLower);
+        const hasAll = containsAllKeywords(basic, keywordsNorm);
         if (hasAll) {
           response.addResult(basic);
           return;
@@ -138,7 +147,7 @@ const requests = defineTabTool({
     if (endpointFilter) parts.push(`endpoint~="${endpointFilter}"`);
     if (keywords.length > 0) parts.push(`keywords=[${keywords.join(', ')}]`);
 
-    throw new Error(
+    throw new RequestsNotFound(
       `No network requests found that match filters (${parts.join(', ') || 'none'}) and contain ALL keywords.`
     );
   },
@@ -151,22 +160,22 @@ function matchesStructuredFilters(
   endpointNorm?: string
 ): boolean {
   if (methodNorm) {
-    const reqMethod = (request.method() || '').trim().toLowerCase();
+    const reqMethod = (request.method() || '').trim();
     if (reqMethod !== methodNorm) return false;
   }
 
   if (urlNorm) {
-    const reqUrl = (request.url() || '').toLowerCase();
+    const reqUrl = request.url() || '';
     if (!reqUrl.includes(urlNorm)) return false;
   }
 
   if (endpointNorm) {
     try {
       const u = new URL(request.url());
-      const pathname = (u.pathname || '').toLowerCase();
+      const pathname = u.pathname || '';
       if (!pathname.includes(endpointNorm)) return false;
     } catch {
-      const reqUrl = (request.url() || '').toLowerCase();
+      const reqUrl = request.url() || '';
       if (!reqUrl.includes(endpointNorm)) return false;
     }
   }
@@ -174,16 +183,19 @@ function matchesStructuredFilters(
   return true;
 }
 
-function containsAllKeywords(haystack: string, keywordsLower: string[]): boolean {
-  const text = haystack.toLowerCase();
-  return keywordsLower.every((kw) => text.includes(kw));
+function containsAllKeywords(haystack: string, keywordsNorm: string[]): boolean {
+  return keywordsNorm.every((kw) => haystack.includes(kw));
 }
 
 function renderRequest(request: playwright.Request, response: playwright.Response | null) {
-  const result: string[] = [];
-  result.push(`[${request.method().toUpperCase()}] ${request.url()}`);
-  if (response) result.push(`=> [${response.status()}] ${response.statusText()}`);
-  return result.join(' ');
+  return JSON.stringify({
+    method: request.method().toUpperCase(),
+    url: request.url(),
+    requestHeaders: null,
+    responseHeaders: null,
+    requestBody: null,
+    responseBody: null,
+  }, null, 2);
 }
 
 async function safeRender(
@@ -193,8 +205,17 @@ async function safeRender(
 ): Promise<string> {
   try {
     return await renderRequestDetailed(request, response, logType);
-  } catch {
-    return renderRequest(request, response);
+  } catch (error) {
+    // Fallback to basic JSON structure with error info
+    return JSON.stringify({
+      method: request.method().toUpperCase(),
+      url: request.url(),
+      requestHeaders: null,
+      responseHeaders: null,
+      requestBody: null,
+      responseBody: null,
+      error: `Error rendering detailed request: ${error}`,
+    }, null, 2);
   }
 }
 
@@ -203,72 +224,72 @@ async function renderRequestDetailed(
   response: playwright.Response | null,
   logType: LogType
 ) {
-  const result: string[] = [];
+  const result: {
+    method: string;
+    url: string;
+    requestHeaders: Record<string, string> | null;
+    responseHeaders: Record<string, string> | null;
+    requestBody: string | null;
+    responseBody: string | null;
+  } = {
+    method: request.method().toUpperCase(),
+    url: request.url(),
+    requestHeaders: null,
+    responseHeaders: null,
+    requestBody: null,
+    responseBody: null,
+  };
 
-  result.push(`=== REQUEST ===`);
-  result.push(`Method: ${request.method().toUpperCase()}`);
-  result.push(`URL: ${request.url()}`);
-
+  // Include request headers if specified in logType
   if (logType.request.headers) {
     const requestHeaders = request.headers();
     if (Object.keys(requestHeaders).length > 0) {
-      result.push(`\nRequest Headers:`);
-      for (const [key, value] of Object.entries(requestHeaders)) {
-        result.push(`  ${key}: ${value}`);
-      }
+      result.requestHeaders = requestHeaders;
     }
   }
 
+  // Include request body if specified in logType
   if (logType.request.body) {
     try {
       const requestBody = request.postData();
       if (requestBody) {
-        result.push(`\nRequest Body:\n${requestBody}`);
+        result.requestBody = requestBody;
       }
     } catch (error) {
-      result.push(`\nRequest Body: [Error accessing body: ${error}]`);
+      result.requestBody = `[Error accessing body: ${error}]`;
     }
   }
 
-  result.push(`\n=== RESPONSE ===`);
-  if (response) {
-    result.push(`Status: ${response.status()} ${response.statusText()}`);
-
-    if (logType.response.headers) {
-      try {
-        const responseHeaders = await response.allHeaders();
-        if (Object.keys(responseHeaders).length > 0) {
-          result.push(`\nResponse Headers:`);
-          for (const [key, value] of Object.entries(responseHeaders)) {
-            result.push(`  ${key}: ${value}`);
-          }
-        }
-      } catch (error) {
-        result.push(`\nResponse Headers: [Error accessing headers: ${error}]`);
+  // Include response headers if specified in logType
+  if (response && logType.response.headers) {
+    try {
+      const responseHeaders = await response.allHeaders();
+      if (Object.keys(responseHeaders).length > 0) {
+        result.responseHeaders = responseHeaders;
       }
+    } catch (error) {
+      // Keep as null if error occurs
     }
-
-    if (logType.response.body) {
-      try {
-        const responseBody = await response.text();
-        if (responseBody) {
-          result.push(`\nResponse Body:`);
-          const contentType = (await response.allHeaders())['content-type'] || '';
-          if (contentType.includes('image/') || contentType.includes('application/octet-stream')) {
-            result.push(`  [Binary content - ${contentType}] (${responseBody.length} bytes)`);
-          } else {
-            result.push(`  ${responseBody}`);
-          }
-        }
-      } catch (error) {
-        result.push(`\nResponse Body: [Error accessing body: ${error}]`);
-      }
-    }
-  } else {
-    result.push(`Status: [No response received]`);
   }
 
-  return result.join('\n');
+  // Include response body if specified in logType
+  if (response && logType.response.body) {
+    try {
+      const responseBody = await response.text();
+      if (responseBody) {
+        const contentType = (await response.allHeaders())['content-type'] || '';
+        if (contentType.includes('image/') || contentType.includes('application/octet-stream')) {
+          result.responseBody = `[Binary content - ${contentType}] (${responseBody.length} bytes)`;
+        } else {
+          result.responseBody = responseBody;
+        }
+      }
+    } catch (error) {
+      result.responseBody = `[Error accessing body: ${error}]`;
+    }
+  }
+
+  return JSON.stringify(result, null, 2);
 }
 
 export default [requests];
