@@ -1,7 +1,7 @@
 {
   "name": "zealous-tech/playwright-internal",
   "private": true,
-  "version": "1.55.1",
+  "version": "1.55.8",
   "description": "A high-level API to automate web browsers",
   "repository": {
     "type": "git",

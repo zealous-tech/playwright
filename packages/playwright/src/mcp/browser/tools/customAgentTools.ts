@@ -1680,27 +1680,39 @@ const validate_response = defineTabTool({
     try {
       // Parse JSON string to object
       const parsedResponseData = JSON.parse(responseData);
-
+      console.dir(parsedResponseData, { depth: null });
       // Perform all checks
       const results = checks.map(check => {
-        // Extract value using JSON path
-        const actualValue = getValueByJsonPath(parsedResponseData, check.jsonPath);
+        try {
+          // Extract value using JSON path
+          const actualValue = getValueByJsonPath(parsedResponseData, check.jsonPath);
 
-        // Compare values if expected is provided
-        let passed = true;
-        if (check.expected !== undefined) {
-          const comparisonResult = compareValues(actualValue, check.expected, check.operator);
-          passed = comparisonResult.passed;
+          // Compare values if expected is provided
+          let passed = true;
+          if (check.expected !== undefined) {
+            const comparisonResult = compareValues(actualValue, check.expected, check.operator);
+            passed = comparisonResult.passed;
+          }
+
+          return {
+            name: check.name,
+            jsonPath: check.jsonPath,
+            expected: check.expected,
+            operator: check.operator,
+            actual: actualValue,
+            result: passed ? 'pass' : 'fail',
+          };
+        } catch (error) {
+          // Handle case when value is not found at JSON path
+          return {
+            name: check.name,
+            jsonPath: check.jsonPath,
+            expected: check.expected,
+            operator: check.operator,
+            actual: `ERROR: ${error.message}`,
+            result: 'fail',
+          };
         }
-
-        return {
-          name: check.name,
-          jsonPath: check.jsonPath,
-          expected: check.expected,
-          operator: check.operator,
-          actual: actualValue,
-          result: passed ? 'pass' : 'fail',
-        };
       });
 
       const passedCount = results.filter(r => r.result === 'pass').length;
@@ -1719,14 +1731,11 @@ const validate_response = defineTabTool({
       }
 
       const payload = {
-        responseData: {
-          ...parsedResponseData,
-          data: typeof parsedResponseData.data === 'object' ?
-            (JSON.stringify(parsedResponseData.data).length > 500 ?
-              JSON.stringify(parsedResponseData.data).slice(0, 500) + '...' :
-              parsedResponseData.data) :
-            (parsedResponseData.data.length > 500 ? parsedResponseData.data.slice(0, 500) + '...' : parsedResponseData.data)
-        },
+        responseData: typeof parsedResponseData === 'object' ?
+          (JSON.stringify(parsedResponseData).length > 500 ?
+            JSON.stringify(parsedResponseData).slice(0, 500) + '...' :
+            parsedResponseData) :
+          (parsedResponseData.length > 500 ? parsedResponseData.slice(0, 500) + '...' : parsedResponseData),
         summary: {
           total: results.length,
           passed: passedCount,
@@ -1745,14 +1754,11 @@ const validate_response = defineTabTool({
       let displayResponseData;
       try {
         const parsedForDisplay = JSON.parse(responseData);
-        displayResponseData = {
-          ...parsedForDisplay,
-          data: typeof parsedForDisplay.data === 'object' ?
-            (JSON.stringify(parsedForDisplay.data).length > 500 ?
-              JSON.stringify(parsedForDisplay.data).slice(0, 500) + '...' :
-              parsedForDisplay.data) :
-            (parsedForDisplay.data.length > 500 ? parsedForDisplay.data.slice(0, 500) + '...' : parsedForDisplay.data)
-        };
+        displayResponseData = typeof parsedForDisplay === 'object' ?
+          (JSON.stringify(parsedForDisplay).length > 500 ?
+            JSON.stringify(parsedForDisplay).slice(0, 500) + '...' :
+            parsedForDisplay) :
+          (parsedForDisplay.length > 500 ? parsedForDisplay.slice(0, 500) + '...' : parsedForDisplay);
       } catch {
         displayResponseData = responseData.length > 500 ? responseData.slice(0, 500) + '...' : responseData;
       }
@@ -2464,7 +2470,16 @@ const data_extraction = defineTabTool({
       if (jsonPath) {
         // If jsonPath is provided, parse as JSON and extract using path
         parsedResponseData = JSON.parse(data);
-        extractedValue = getValueByJsonPath(parsedResponseData, jsonPath);
+        try {
+          extractedValue = getValueByJsonPath(parsedResponseData, jsonPath);
+        } catch (error) {
+          response.addResult(JSON.stringify({
+            success: false,
+            error: `Failed to extract value using JSON path "${jsonPath}": ${error.message}`,
+            extractedData: null
+          }, null, 2));
+          return;
+        }
       } else {
         // If jsonPath is not provided, return data as is
         extractedValue = data;
@@ -2473,7 +2488,7 @@ const data_extraction = defineTabTool({
 
       // Create object with $$ prefix
       const result = {
-        [`$$${name}`]: extractedValue
+        [`\$\{${name}\}`]: extractedValue
       };
 
       const toolResult = {
@@ -2481,7 +2496,7 @@ const data_extraction = defineTabTool({
         result: result,
         extractedData: {
           value: extractedValue,
-          variableName: `$$${name}`,
+          variableName: `\$\{${name}\}`,
         },
         data: parsedResponseData,
       };
@@ -2496,7 +2511,7 @@ const data_extraction = defineTabTool({
         error: error instanceof Error ? error.message : String(error),
         extractedData: {
           value: null,
-          variableName: `$$${name}`
+          variableName: `\$\{${name}\}`
         }
       };
 
@@ -2505,6 +2520,9 @@ const data_extraction = defineTabTool({
     }
   },
 });
+
+
+
 
 
 export default [

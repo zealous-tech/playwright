@@ -575,7 +575,7 @@ export async function runCommandClean(command: string): Promise<ParsedCurlRespon
  */
 function getValueByJsonPath(obj: any, path: string): any {
   if (!path || path === '') return obj;
-  if (path === null || path === undefined) return undefined;
+  if (path === null || path === undefined) throw new Error(`JSON path is null or undefined`);
 
   // More sophisticated parsing to handle brackets properly
   const parts: string[] = [];
@@ -619,7 +619,7 @@ function getValueByJsonPath(obj: any, path: string): any {
     const part = parts[i];
 
     if (currentObj === null || currentObj === undefined)
-      return undefined;
+      throw new Error(`Value not found at JSON path "${path}". Path segment "${part}" points to null/undefined value.`);
 
 
     // Handle array notation with filters or indices
@@ -630,7 +630,7 @@ function getValueByJsonPath(obj: any, path: string): any {
       if (content.startsWith('?(@')) {
         const filterResult = applyArrayFilter(currentObj, content);
         if (filterResult === undefined)
-          return undefined;
+          throw new Error(`Value not found at JSON path "${path}". Array filter "${content}" did not match any elements.`);
 
         currentObj = filterResult;
       }
@@ -638,16 +638,19 @@ function getValueByJsonPath(obj: any, path: string): any {
       else {
         const index = parseInt(content, 10);
         if (isNaN(index) || !Array.isArray(currentObj))
-          return undefined;
+          throw new Error(`Value not found at JSON path "${path}". Expected array at index "${content}" but found ${Array.isArray(currentObj) ? 'array' : typeof currentObj}.`);
 
         currentObj = currentObj[index];
       }
     }
     // Handle object properties
     else if (typeof currentObj === 'object' && !Array.isArray(currentObj)) {
+      if (!(part in currentObj)) {
+        throw new Error(`Value not found at JSON path "${path}". Property "${part}" does not exist in object.`);
+      }
       currentObj = currentObj[part];
     } else {
-      return undefined;
+      throw new Error(`Value not found at JSON path "${path}". Expected object at segment "${part}" but found ${typeof currentObj}.`);
     }
   }
 
