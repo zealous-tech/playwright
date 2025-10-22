@@ -1719,14 +1719,11 @@ const validate_response = defineTabTool({
       }
 
       const payload = {
-        responseData: {
-          ...parsedResponseData,
-          data: typeof parsedResponseData.data === 'object' ?
-            (JSON.stringify(parsedResponseData.data).length > 500 ?
-              JSON.stringify(parsedResponseData.data).slice(0, 500) + '...' :
-              parsedResponseData.data) :
-            (parsedResponseData.data.length > 500 ? parsedResponseData.data.slice(0, 500) + '...' : parsedResponseData.data)
-        },
+        responseData: typeof parsedResponseData === 'object' ?
+          (JSON.stringify(parsedResponseData).length > 500 ?
+            JSON.stringify(parsedResponseData).slice(0, 500) + '...' :
+            parsedResponseData) :
+          (parsedResponseData.length > 500 ? parsedResponseData.slice(0, 500) + '...' : parsedResponseData),
         summary: {
           total: results.length,
           passed: passedCount,
@@ -1745,14 +1742,11 @@ const validate_response = defineTabTool({
       let displayResponseData;
       try {
         const parsedForDisplay = JSON.parse(responseData);
-        displayResponseData = {
-          ...parsedForDisplay,
-          data: typeof parsedForDisplay.data === 'object' ?
-            (JSON.stringify(parsedForDisplay.data).length > 500 ?
-              JSON.stringify(parsedForDisplay.data).slice(0, 500) + '...' :
-              parsedForDisplay.data) :
-            (parsedForDisplay.data.length > 500 ? parsedForDisplay.data.slice(0, 500) + '...' : parsedForDisplay.data)
-        };
+        displayResponseData = typeof parsedForDisplay === 'object' ?
+          (JSON.stringify(parsedForDisplay).length > 500 ?
+            JSON.stringify(parsedForDisplay).slice(0, 500) + '...' :
+            parsedForDisplay) :
+          (parsedForDisplay.length > 500 ? parsedForDisplay.slice(0, 500) + '...' : parsedForDisplay);
       } catch {
         displayResponseData = responseData.length > 500 ? responseData.slice(0, 500) + '...' : responseData;
       }
@@ -2473,7 +2467,7 @@ const data_extraction = defineTabTool({
 
       // Create object with $$ prefix
       const result = {
-        [`$$${name}`]: extractedValue
+        [`\$\{${name}\}`]: extractedValue
       };
 
       const toolResult = {
@@ -2481,7 +2475,7 @@ const data_extraction = defineTabTool({
         result: result,
         extractedData: {
           value: extractedValue,
-          variableName: `$$${name}`,
+          variableName: `\$\{${name}\}`,
         },
         data: parsedResponseData,
       };
@@ -2496,13 +2490,81 @@ const data_extraction = defineTabTool({
         error: error instanceof Error ? error.message : String(error),
         extractedData: {
           value: null,
-          variableName: `$$${name}`
+          variableName: `\$\{${name}\}`
         }
       };
 
       console.error('Data extraction error:', errorResult);
       response.addResult(JSON.stringify(errorResult, null, 2));
     }
+  },
+});
+
+
+// Dynamic switch tool: choose a tool based on flag value
+const dynamicSwitchSchema = z.object({
+  flagName: z.string().describe('Flag value to match against cases (agent will replace this with actual value)'),
+  cases: z.array(z.object({
+    equals: z.string().describe('Exact string value to match against flag value'),
+    toolName: z.string().describe('Tool name to invoke when matched'),
+    params: z.any().optional().describe('Parameters to pass to the selected tool')
+  })).min(1).describe('Ordered switch-cases; first matching case wins'),
+  defaultCase: z.object({
+    toolName: z.string(),
+    params: z.any().optional()
+  }).optional().describe('Fallback if no case matches'),
+  execute: z.boolean().optional().default(false).describe('If true, returns an actions entry indicating which tool to execute with params')
+});
+
+const dynamic_switch = defineTabTool({
+  capability: 'core',
+  schema: {
+    name: 'dynamic_switch',
+    title: 'Dynamic Switch',
+    description: 'Select which tool to run based on flag value matching switch-cases. The flagName parameter contains the actual value to match against cases. Returns the chosen tool and params; can be used by the orchestrator to invoke the tool.',
+    inputSchema: dynamicSwitchSchema,
+    type: 'readOnly',
+  },
+  handle: async (tab, rawParams, response) => {
+    const { flagName, cases, defaultCase, execute } = dynamicSwitchSchema.parse(rawParams);
+
+    // Use flagName as the actual value (agent will replace flagName with actual value)
+    const flagValue = flagName;
+
+    // Find first matching case
+    let matchedIndex = -1;
+    let chosenTool: { toolName: string; params?: any } | null = null;
+
+    for (let i = 0; i < cases.length; i++) {
+      const c = cases[i];
+      if (flagValue === c.equals) {
+        matchedIndex = i;
+        chosenTool = { toolName: c.toolName, params: c.params };
+        break;
+      }
+    }
+
+    // Use default case if no match found
+    if (matchedIndex === -1 && defaultCase) {
+      chosenTool = { toolName: defaultCase.toolName, params: defaultCase.params };
+    }
+
+    const payload = {
+      flagName,
+      flagValue,
+      matchedCaseIndex: matchedIndex,
+      selected: chosenTool,
+      summary: {
+        total: 1,
+        passed: chosenTool ? 1 : 0,
+        failed: chosenTool ? 0 : 1,
+        status: chosenTool ? 'pass' : 'fail',
+        evidence: chosenTool ? `Selected tool "${chosenTool.toolName}" for flag value "${flagValue}"` : `No case matched for flag value "${flagValue}" and no defaultCase provided`
+      },
+      actions: chosenTool && execute ? [{ type: 'invoke_tool', toolName: chosenTool.toolName, params: chosenTool.params }] : []
+    };
+
+    response.addResult(JSON.stringify(payload, null, 2));
   },
 });
 
@@ -2521,5 +2583,6 @@ export default [
   validate_tab_exist,
   generate_locator,
   make_request,
+  dynamic_switch,
   data_extraction,
 ];
