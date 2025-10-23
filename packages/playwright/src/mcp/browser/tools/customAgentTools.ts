@@ -2513,7 +2513,7 @@ const dynamicSwitchSchema = z.object({
     toolName: z.string(),
     params: z.any().optional()
   }).optional().describe('Fallback if no case matches'),
-  execute: z.boolean().optional().default(false).describe('If true, returns an actions entry indicating which tool to execute with params')
+  execute: z.boolean().optional().default(false).describe('Set to true if all tools and parameters are successfully obtained - the model clearly knows which parameters to use for each tool. Set to false if at least one tool is missing required information for parameters, e.g. an action needs a ref that is not available in the snapshot')
 });
 
 const dynamic_switch = defineTabTool({
