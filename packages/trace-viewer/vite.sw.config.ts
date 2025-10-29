@@ -35,6 +35,7 @@ export default defineConfig({
       '@testIsomorphic': path.resolve(__dirname, '../playwright-core/src/utils/testIsomorphic'),
       '@trace': path.resolve(__dirname, '../trace/src'),
       '@web': path.resolve(__dirname, '../web/src'),
+      '@zip.js/zip.js/lib/zip-no-worker-inflate.js': '@zip.js/zip.js',
     },
   },
   publicDir: false,

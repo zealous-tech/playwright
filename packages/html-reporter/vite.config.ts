@@ -28,6 +28,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@web': path.resolve(__dirname, '../web/src'),
+      '@zip.js/zip.js/lib/zip-no-worker-inflate.js': '@zip.js/zip.js',
     },
   },
   build: {
