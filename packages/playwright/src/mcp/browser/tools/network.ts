@@ -120,10 +120,11 @@ const requests = defineTabTool({
     const endpointNorm = endpointFilter?.trim();
     const keywordsNorm = keywords.map((k) => k);
 
-    for (const [req, res] of (await allRequests).entries()) {
+    for (const req of await allRequests) {
       if (!matchesStructuredFilters(req, methodNorm, urlNorm, endpointNorm)) {
         continue;
       }
+      const res = await req.response().catch(() => null);
       if (keywordsNorm.length === 0) {
         const out = await safeRender(req, res, logType);
         response.addResult(out);

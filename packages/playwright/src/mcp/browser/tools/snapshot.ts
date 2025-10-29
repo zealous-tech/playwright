@@ -79,6 +79,16 @@ const click = defineTabTool({
       } catch (e: any) {
         const msg = String(e?.message || e);
         const isIntercept = msg.includes('intercepts pointer events');
+        const isDisabled = msg.includes('disabled') || msg.includes('is not enabled') || msg.includes('not clickable') || msg.includes('is disabled');
+
+        if (isDisabled) {
+          // Force click on disabled elements for testing purposes
+          if (params.doubleClick)
+            await locator.dblclick({ button, force: true });
+          else
+            await locator.click({ button, force: true });
+          return;
+        }
 
         if (isIntercept) {
           // Detect checkbox input

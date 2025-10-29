@@ -68,7 +68,7 @@ function toInternalOptions(options: AriaTreeOptions): InternalOptions {
     // For AI consumption.
     return {
       visibility: 'ariaOrVisible',
-      refs: 'interactable',
+      refs: 'all',
       refPrefix: options.refPrefix,
       includeGenericRole: true,
       renderActive: true,
