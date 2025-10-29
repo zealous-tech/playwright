@@ -22,14 +22,17 @@ import path from 'path';
 import * as playwright from 'playwright-core';
 import { registryDirectory } from 'playwright-core/lib/server/registry/index';
 import { startTraceViewerServer } from 'playwright-core/lib/server';
-import { findBrowserProcess, getBrowserExecPath } from './processUtils';
 import { logUnhandledError, testDebug } from '../log';
-import { outputFile  } from './config';
+import { outputFile } from './config';
+import { firstRootPath } from '../sdk/server';
 
 import type { FullConfig } from './config';
-import type { LaunchOptions } from '../../../../playwright-core/src/client/types';
+import type { LaunchOptions, BrowserContextOptions } from '../../../../playwright-core/src/client/types';
+import type { ClientInfo } from '../sdk/server';
 
 export function contextFactory(config: FullConfig): BrowserContextFactory {
+  if (config.sharedBrowserContext)
+    return SharedContextFactory.create(config);
   if (config.browser.remoteEndpoint)
     return new RemoteContextFactory(config);
   if (config.browser.cdpEndpoint)
@@ -39,10 +42,13 @@ export function contextFactory(config: FullConfig): BrowserContextFactory {
   return new PersistentContextFactory(config);
 }
 
-export type ClientInfo = { name?: string, version?: string, rootPath?: string };
+export type BrowserContextFactoryResult = {
+  browserContext: playwright.BrowserContext;
+  close: (afterClose: () => Promise<void>) => Promise<void>;
+};
 
 export interface BrowserContextFactory {
-  createContext(clientInfo: ClientInfo, abortSignal: AbortSignal, toolName: string | undefined): Promise<{ browserContext: playwright.BrowserContext, close: () => Promise<void> }>;
+  createContext(clientInfo: ClientInfo, abortSignal: AbortSignal, toolName: string | undefined): Promise<BrowserContextFactoryResult>;
 }
 
 class BaseContextFactory implements BrowserContextFactory {
@@ -74,22 +80,27 @@ class BaseContextFactory implements BrowserContextFactory {
     throw new Error('Not implemented');
   }
 
-  async createContext(clientInfo: ClientInfo): Promise<{ browserContext: playwright.BrowserContext, close: () => Promise<void> }> {
+  async createContext(clientInfo: ClientInfo): Promise<BrowserContextFactoryResult> {
     testDebug(`create browser context (${this._logName})`);
     const browser = await this._obtainBrowser(clientInfo);
     const browserContext = await this._doCreateContext(browser);
-    return { browserContext, close: () => this._closeBrowserContext(browserContext, browser) };
+    await addInitScript(browserContext, this.config.browser.initScript);
+    return {
+      browserContext,
+      close: (afterClose: () => Promise<void>) => this._closeBrowserContext(browserContext, browser, afterClose)
+    };
   }
 
   protected async _doCreateContext(browser: playwright.Browser): Promise<playwright.BrowserContext> {
     throw new Error('Not implemented');
   }
 
-  private async _closeBrowserContext(browserContext: playwright.BrowserContext, browser: playwright.Browser) {
+  private async _closeBrowserContext(browserContext: playwright.BrowserContext, browser: playwright.Browser, afterClose: () => Promise<void>) {
     testDebug(`close browser context (${this._logName})`);
     if (browser.contexts().length === 1)
       this._browserPromise = undefined;
     await browserContext.close().catch(logUnhandledError);
+    await afterClose();
     if (browser.contexts().length === 0) {
       testDebug(`close browser (${this._logName})`);
       await browser.close().catch(logUnhandledError);
@@ -105,8 +116,8 @@ class IsolatedContextFactory extends BaseContextFactory {
   protected override async _doObtainBrowser(clientInfo: ClientInfo): Promise<playwright.Browser> {
     await injectCdpPort(this.config.browser);
     const browserType = playwright[this.config.browser.browserName];
-    const tracesDir = await outputFile(this.config, clientInfo.rootPath, `traces`);
-    if (this.config.saveTrace)
+    const tracesDir = await computeTracesDir(this.config, clientInfo);
+    if (tracesDir && this.config.saveTrace)
       await startTraceServer(this.config, tracesDir);
     return browserType.launch({
       tracesDir,
@@ -168,12 +179,12 @@ class PersistentContextFactory implements BrowserContextFactory {
     this.config = config;
   }
 
-  async createContext(clientInfo: ClientInfo): Promise<{ browserContext: playwright.BrowserContext, close: () => Promise<void> }> {
+  async createContext(clientInfo: ClientInfo): Promise<BrowserContextFactoryResult> {
     await injectCdpPort(this.config.browser);
     testDebug('create browser context (persistent)');
-    const userDataDir = this.config.browser.userDataDir ?? await this._createUserDataDir(clientInfo.rootPath);
-    const tracesDir = await outputFile(this.config, clientInfo.rootPath, `traces`);
-    if (this.config.saveTrace)
+    const userDataDir = this.config.browser.userDataDir ?? await this._createUserDataDir(clientInfo);
+    const tracesDir = await computeTracesDir(this.config, clientInfo);
+    if (tracesDir && this.config.saveTrace)
       await startTraceServer(this.config, tracesDir);
 
     this._userDataDirs.add(userDataDir);
@@ -181,59 +192,55 @@ class PersistentContextFactory implements BrowserContextFactory {
 
     const browserType = playwright[this.config.browser.browserName];
     for (let i = 0; i < 5; i++) {
-      if (!await alreadyRunning(this.config, browserType, userDataDir))
-        break;
-      // User data directory is already in use, wait for the previous browser instance to close.
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      const launchOptions: LaunchOptions & BrowserContextOptions = {
+        tracesDir,
+        ...this.config.browser.launchOptions,
+        ...this.config.browser.contextOptions,
+        handleSIGINT: false,
+        handleSIGTERM: false,
+        ignoreDefaultArgs: [
+          '--disable-extensions',
+        ],
+        assistantMode: true,
+      };
+      try {
+        const browserContext = await browserType.launchPersistentContext(userDataDir, launchOptions);
+        await addInitScript(browserContext, this.config.browser.initScript);
+        const close = (afterClose: () => Promise<void>) => this._closeBrowserContext(browserContext, userDataDir, afterClose);
+        return { browserContext, close };
+      } catch (error: any) {
+        if (error.message.includes('Executable doesn\'t exist'))
+          throw new Error(`Browser specified in your config is not installed. Either install it (likely) or change the config.`);
+        if (error.message.includes('ProcessSingleton') || error.message.includes('Invalid URL')) {
+          // User data directory is already in use, try again.
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          continue;
+        }
+        throw error;
+      }
     }
-    const launchOptions: LaunchOptions = {
-      tracesDir,
-      ...this.config.browser.launchOptions,
-      ...this.config.browser.contextOptions,
-      handleSIGINT: false,
-      handleSIGTERM: false,
-      ignoreDefaultArgs: [
-        '--disable-extensions',
-      ],
-      assistantMode: true,
-    };
-    try {
-      const browserContext = await browserType.launchPersistentContext(userDataDir, launchOptions);
-      const close = () => this._closeBrowserContext(browserContext, userDataDir);
-      return { browserContext, close };
-    } catch (error: any) {
-      if (error.message.includes('Executable doesn\'t exist'))
-        throw new Error(`Browser specified in your config is not installed. Either install it (likely) or change the config.`);
-      if (error.message.includes('ProcessSingleton') || error.message.includes('Invalid URL'))
-        throw new Error(`Browser is already in use for ${userDataDir}, use --isolated to run multiple instances of the same browser`);
-      throw error;
-    }
+    throw new Error(`Browser is already in use for ${userDataDir}, use --isolated to run multiple instances of the same browser`);
   }
 
-  private async _closeBrowserContext(browserContext: playwright.BrowserContext, userDataDir: string) {
+  private async _closeBrowserContext(browserContext: playwright.BrowserContext, userDataDir: string, afterClose: () => Promise<void>) {
     testDebug('close browser context (persistent)');
     testDebug('release user data dir', userDataDir);
     await browserContext.close().catch(() => {});
+    await afterClose();
     this._userDataDirs.delete(userDataDir);
     testDebug('close browser context complete (persistent)');
   }
 
-  private async _createUserDataDir(rootPath: string | undefined) {
+  private async _createUserDataDir(clientInfo: ClientInfo) {
     const dir = process.env.PWMCP_PROFILES_DIR_FOR_TEST ?? registryDirectory;
     const browserToken = this.config.browser.launchOptions?.channel ?? this.config.browser?.browserName;
     // Hesitant putting hundreds of files into the user's workspace, so using it for hashing instead.
+    const rootPath = firstRootPath(clientInfo);
     const rootPathToken = rootPath ? `-${createHash(rootPath)}` : '';
     const result = path.join(dir, `mcp-${browserToken}${rootPathToken}`);
     await fs.promises.mkdir(result, { recursive: true });
     return result;
   }
-}
-
-async function alreadyRunning(config: FullConfig, browserType: playwright.BrowserType, userDataDir: string) {
-  const execPath = config.browser.launchOptions.executablePath ?? getBrowserExecPath(config.browser.launchOptions.channel ?? browserType.name());
-  if (!execPath)
-    return false;
-  return !!findBrowserProcess(execPath, userDataDir);
 }
 
 async function injectCdpPort(browserConfig: FullConfig['browser']) {
@@ -265,4 +272,63 @@ async function startTraceServer(config: FullConfig, tracesDir: string): Promise<
 
 function createHash(data: string): string {
   return crypto.createHash('sha256').update(data).digest('hex').slice(0, 7);
+}
+
+async function addInitScript(browserContext: playwright.BrowserContext, initScript: string[] | undefined) {
+  for (const scriptPath of initScript ?? [])
+    await browserContext.addInitScript({ path: path.resolve(scriptPath) });
+}
+
+export class SharedContextFactory implements BrowserContextFactory {
+  private _contextPromise: Promise<BrowserContextFactoryResult> | undefined;
+  private _baseFactory: BrowserContextFactory;
+  private static _instance: SharedContextFactory | undefined;
+
+  static create(config: FullConfig) {
+    if (SharedContextFactory._instance)
+      throw new Error('SharedContextFactory already exists');
+    const baseConfig = { ...config, sharedBrowserContext: false };
+    const baseFactory = contextFactory(baseConfig);
+    SharedContextFactory._instance = new SharedContextFactory(baseFactory);
+    return SharedContextFactory._instance;
+  }
+
+  private constructor(baseFactory: BrowserContextFactory) {
+    this._baseFactory = baseFactory;
+  }
+
+  async createContext(clientInfo: ClientInfo, abortSignal: AbortSignal, toolName: string | undefined): Promise<{ browserContext: playwright.BrowserContext, close: () => Promise<void> }> {
+    if (!this._contextPromise) {
+      testDebug('create shared browser context');
+      this._contextPromise = this._baseFactory.createContext(clientInfo, abortSignal, toolName);
+    }
+
+    const { browserContext } = await this._contextPromise;
+    testDebug(`shared context client connected`);
+    return {
+      browserContext,
+      close: async () => {
+        testDebug(`shared context client disconnected`);
+      },
+    };
+  }
+
+  static async dispose() {
+    await SharedContextFactory._instance?._dispose();
+  }
+
+  private async _dispose() {
+    const contextPromise = this._contextPromise;
+    this._contextPromise = undefined;
+    if (!contextPromise)
+      return;
+    const { close } = await contextPromise;
+    await close(async () => {});
+  }
+}
+
+async function computeTracesDir(config: FullConfig, clientInfo: ClientInfo): Promise<string | undefined> {
+  if (!config.saveTrace && !config.capabilities?.includes('tracing'))
+    return;
+  return await outputFile(config, clientInfo, `traces`, { origin: 'code', reason: 'Collecting trace' });
 }

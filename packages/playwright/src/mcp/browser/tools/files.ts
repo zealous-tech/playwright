@@ -17,7 +17,7 @@
 import { z } from '../../sdk/bundle';
 import { defineTabTool } from './tool';
 
-const uploadFile = defineTabTool({
+export const uploadFile = defineTabTool({
   capability: 'core',
 
   schema: {
@@ -27,7 +27,7 @@ const uploadFile = defineTabTool({
     inputSchema: z.object({
       paths: z.array(z.string()).optional().describe('The absolute paths to the files to upload. Can be single file or multiple files. If omitted, file chooser is cancelled.'),
     }),
-    type: 'destructive',
+    type: 'action',
   },
 
   handle: async (tab, params, response) => {

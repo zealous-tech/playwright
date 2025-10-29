@@ -146,7 +146,7 @@ jobs:
     - uses: actions/checkout@v5
     - uses: actions/setup-node@v5
       with:
-        node-version: 18
+        node-version: 20
     - run: npm ci
     - run: npm run build
 
@@ -182,12 +182,12 @@ jobs:
     - uses: actions/checkout@v5
     - uses: actions/setup-node@v5
       with:
-        node-version: 18
+        node-version: 20
     - run: npm ci
       env:
         DEBUG: pw:install
     - run: npm run build
-    - run: npx playwright install chromium firefox
+    - run: npx playwright install chromium
     - name: Checkout extension
       run: git clone https://github.com/microsoft/playwright-vscode.git
     - name: Print extension revision
@@ -220,7 +220,7 @@ jobs:
         - macos-latest
         - windows-latest
     runs-on: ${{ matrix.os  }}
-    timeout-minutes: 30
+    timeout-minutes: 45
     permissions:
       id-token: write   # This is required for OIDC login (azure/login) to succeed
       contents: read    # This is required for actions/checkout to succeed

@@ -28,6 +28,7 @@ export const DefaultSettingsView: React.FC<{}> = () => {
     setShouldPopulateCanvasFromScreenshot,
   ] = useSetting('shouldPopulateCanvasFromScreenshot', false);
   const [darkMode, setDarkMode] = useDarkModeSetting();
+  const [mergeFiles, setMergeFiles] = useSetting('mergeFiles', false);
 
   return (
     <SettingsView
@@ -37,6 +38,12 @@ export const DefaultSettingsView: React.FC<{}> = () => {
           value: darkMode,
           set: setDarkMode,
           name: 'Dark mode'
+        },
+        {
+          type: 'check',
+          value: mergeFiles,
+          set: setMergeFiles,
+          name: 'Merge files'
         },
         {
           type: 'check',

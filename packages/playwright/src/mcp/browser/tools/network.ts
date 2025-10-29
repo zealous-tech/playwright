@@ -20,10 +20,10 @@
 *
 */
 
-import {z} from 'zod';
-import {defineTabTool} from './tool.js';
 
-import type * as playwright from 'playwright';
+import { z } from '../../sdk/bundle';
+import { defineTabTool } from './tool';
+import type * as playwright from 'playwright-core';
 
 class RequestsNotFound extends Error {
   constructor(message: string) {
@@ -120,7 +120,7 @@ const requests = defineTabTool({
     const endpointNorm = endpointFilter?.trim();
     const keywordsNorm = keywords.map((k) => k);
 
-    for (const [req, res] of allRequests.entries()) {
+    for (const [req, res] of (await allRequests).entries()) {
       if (!matchesStructuredFilters(req, methodNorm, urlNorm, endpointNorm)) {
         continue;
       }

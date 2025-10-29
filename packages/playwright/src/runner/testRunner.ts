@@ -73,6 +73,9 @@ export type RunTestsParams = {
   connectWsEndpoint?: string;
   pauseOnError?: boolean;
   pauseAtEnd?: boolean;
+  doNotRunDepsOutsideProjectFilter?: boolean;
+  disableConfigReporters?: boolean;
+  failOnLoadErrors?: boolean;
 };
 
 type FullResultStatus = reporterTypes.FullResult['status'];
@@ -137,6 +140,13 @@ export class TestRunner extends EventEmitter<TestRunnerEventMap> {
   async installBrowsers() {
     const executables = registry.defaultExecutables();
     await registry.install(executables, false);
+  }
+
+  async loadConfig() {
+    const { config, error } = await this._loadConfig(this._configCLIOverrides);
+    if (config)
+      return config;
+    throw new Error('Failed to load config: ' + (error ? error.message : 'Unknown error'));
   }
 
   async runGlobalSetup(userReporters: AnyReporter[]): Promise<{ status: FullResultStatus }> {
@@ -330,12 +340,12 @@ export class TestRunner extends EventEmitter<TestRunnerEventMap> {
       config.preOnlyTestFilters.push(test => testIdSet.has(test.id));
     }
 
-    const configReporters = await createReporters(config, 'test', true);
+    const configReporters = params.disableConfigReporters ? [] : await createReporters(config, 'test', true);
     const reporter = new InternalReporter([...configReporters, userReporter]);
     const stop = new ManualPromise();
     const tasks = [
       createApplyRebaselinesTask(),
-      createLoadTask('out-of-process', { filterOnly: true, failOnLoadErrors: false, doNotRunDepsOutsideProjectFilter: true }),
+      createLoadTask('out-of-process', { filterOnly: true, failOnLoadErrors: !!params.failOnLoadErrors, doNotRunDepsOutsideProjectFilter: params.doNotRunDepsOutsideProjectFilter }),
       ...createRunTestsTasks(config),
     ];
     const testRun = new TestRun(config, reporter, { pauseOnError: params.pauseOnError, pauseAtEnd: params.pauseAtEnd });
@@ -445,7 +455,8 @@ export async function runAllTestsWithConfig(config: FullConfigInternal): Promise
 
   const reporters = await createReporters(config, listOnly ? 'list' : 'test', false);
   const lastRun = new LastRunReporter(config);
-  await lastRun.applyFilter();
+  if (config.cliLastFailed)
+    await lastRun.filterLastFailed();
 
   const reporter = new InternalReporter([...reporters, lastRun]);
   const tasks = listOnly ? [

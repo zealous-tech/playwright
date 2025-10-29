@@ -53,7 +53,7 @@ const click = defineTabTool({
     title: 'Click',
     description: 'Perform click on a web page',
     inputSchema: clickSchema,
-    type: 'destructive',
+    type: 'input',
   },
 
   handle: async (tab, params, response) => {
@@ -125,7 +125,7 @@ const drag = defineTabTool({
       endElement: z.string().describe('Human-readable target element description used to obtain the permission to interact with the element'),
       endRef: z.string().describe('Exact target element reference from the page snapshot'),
     }),
-    type: 'destructive',
+    type: 'input',
   },
 
   handle: async (tab, params, response) => {
@@ -151,7 +151,7 @@ const hover = defineTabTool({
     title: 'Hover mouse',
     description: 'Hover over element on page',
     inputSchema: elementSchema,
-    type: 'readOnly',
+    type: 'input',
   },
 
   handle: async (tab, params, response) => {
@@ -177,7 +177,7 @@ const selectOption = defineTabTool({
     title: 'Select option',
     description: 'Select an option in a dropdown',
     inputSchema: selectOptionSchema,
-    type: 'destructive',
+    type: 'input',
   },
 
   handle: async (tab, params, response) => {
