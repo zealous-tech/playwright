@@ -2525,6 +2525,29 @@ const data_extraction = defineTabTool({
 
 
 
+const waitSchema = z.object({
+  seconds: z.number().positive().describe('Duration to wait in seconds'),
+});
+
+const wait = defineTabTool({
+  capability: 'core',
+  schema: {
+    name: 'wait',
+    title: 'Wait',
+    description: 'Wait for a specified duration in seconds',
+    inputSchema: waitSchema,
+    type: 'readOnly',
+  },
+  handle: async (tab, params, response) => {
+    const { seconds } = waitSchema.parse(params);
+    
+    await tab.waitForCompletion(async () => {
+      await new Promise(resolve => setTimeout(resolve, seconds * 1000));
+      response.addResult(`Waited for ${seconds} second(s)`);
+    });
+  },
+});
+
 export default [
   extract_svg_from_element,
   extract_image_urls,
@@ -2540,4 +2563,5 @@ export default [
   generate_locator,
   make_request,
   data_extraction,
+  wait,
 ];
