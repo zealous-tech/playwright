@@ -887,7 +887,7 @@ const validate_dom_assertions = defineTabTool({
       const results = [];
 
       for (const check of checks) {
-        const { negate, timeout = 2000, assertion: args } = check;
+        const { negate, timeout = 15000, assertion: args } = check;
         if (!args || !args.assertionType) {
           throw new Error('Each check must have assertion with assertionType');
         }
