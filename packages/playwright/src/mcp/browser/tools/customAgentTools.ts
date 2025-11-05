@@ -2693,6 +2693,75 @@ const validate_element_position = defineTabTool({
   },
 });
 
+// Dynamic switch tool: choose a tool based on flag value
+const dynamicSwitchSchema = z.object({
+  flagName: z.string().describe('Flag value to match against cases (agent will replace this with actual value)'),
+  cases: z.array(z.object({
+    equals: z.string().describe('Exact string value to match against flag value'),
+    toolName: z.string().describe('Tool name to invoke when matched'),
+    params: z.any().optional().describe('Parameters to pass to the selected tool'),
+    readyForCaching: z.boolean().optional().default(false).describe('Set to true if all tools and parameters are successfully obtained for this specific case - the model clearly knows which parameters to use for this case and tool. Set to false if this case is missing required information for parameters, e.g. an action needs a ref that is not available in the snapshot')
+  })).min(1).describe('Ordered switch-cases; first matching case wins'),
+  defaultCase: z.object({
+    toolName: z.string(),
+    params: z.any().optional(),
+    readyForCaching: z.boolean().optional().default(false).describe('Set to true if all tools and parameters are successfully obtained for this default case - the model clearly knows which parameters to use for this case and tool. Set to false if this case is missing required information for parameters, e.g. an action needs a ref that is not available in the snapshot')
+  }).optional().describe('Fallback if no case matches. If it is not specified what needs to be done for defaultCase, then it should be left empty (not provided)'),
+});
+
+const dynamic_switch = defineTabTool({
+  capability: 'core',
+  schema: {
+    name: 'dynamic_switch',
+    title: 'Dynamic Switch',
+    description: 'Select which tool to run based on flag value matching switch-cases. The flagName parameter contains the actual value to match against cases. Returns the chosen tool and params; can be used by the orchestrator to invoke the tool.',
+    inputSchema: dynamicSwitchSchema,
+    type: 'readOnly',
+  },
+  handle: async (tab, rawParams, response) => {
+    const { flagName, cases, defaultCase } = dynamicSwitchSchema.parse(rawParams);
+
+    // Use flagName as the actual value (agent will replace flagName with actual value)
+    const flagValue = flagName;
+
+    // Find first matching case
+    let matchedIndex = -1;
+    let chosenTool: { toolName: string; params?: any; readyForCaching?: boolean } | null = null;
+
+    for (let i = 0; i < cases.length; i++) {
+      const c = cases[i];
+      if (flagValue === c.equals) {
+        matchedIndex = i;
+        chosenTool = { toolName: c.toolName, params: c.params, readyForCaching: c.readyForCaching };
+        break;
+      }
+    }
+
+    // Use default case if no match found
+    if (matchedIndex === -1 && defaultCase) {
+      chosenTool = { toolName: defaultCase.toolName, params: defaultCase.params, readyForCaching: defaultCase.readyForCaching };
+    }
+
+    const payload = {
+      flagName,
+      flagValue,
+      matchedCaseIndex: matchedIndex,
+      selected: chosenTool,
+      summary: {
+        total: 1,
+        passed: chosenTool ? 1 : 0,
+        failed: chosenTool ? 0 : 1,
+        status: chosenTool ? 'pass' : 'fail',
+        evidence: chosenTool ? `Selected tool "${chosenTool.toolName}" for flag value "${flagValue}"` : `No case matched for flag value "${flagValue}" and no defaultCase provided`
+      },
+      actions: chosenTool && chosenTool.readyForCaching ? [{ type: 'invoke_tool', toolName: chosenTool.toolName, params: chosenTool.params }] : []
+    };
+
+    response.addResult(JSON.stringify(payload, null, 2));
+  },
+});
+
+
 export default [
   extract_svg_from_element,
   extract_image_urls,
@@ -2710,4 +2779,5 @@ export default [
   make_request,
   data_extraction,
   wait,
+  dynamic_switch
 ];
