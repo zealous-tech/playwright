@@ -40,16 +40,16 @@ function convertStringToRegExp(obj: any): any {
   if (typeof obj === 'string') {
     return stringToRegExp(obj);
   }
-  
+
   if (Array.isArray(obj)) {
     return obj.map(convertStringToRegExp);
   }
-  
+
   if (obj && typeof obj === 'object') {
     const converted: any = {};
     for (const [key, value] of Object.entries(obj)) {
       // Convert specific fields that can contain RegExp values
-      if (key === 'expected' || key === 'value' || key === 'values' || 
+      if (key === 'expected' || key === 'value' || key === 'values' ||
           key === 'name' || key === 'description' || key === 'errorMessage' ||
           key === 'id' || key === 'role') {
         converted[key] = convertStringToRegExp(value);
@@ -59,7 +59,7 @@ function convertStringToRegExp(obj: any): any {
     }
     return converted;
   }
-  
+
   return obj;
 }
 
@@ -907,7 +907,7 @@ const validate_dom_assertions = defineTabTool({
         try {
           // Create the assertion
           const assertion = negate ? expect(locator).not : expect(locator);
-          
+
           // Prepare final args - separate main arguments from options
           const { options, ...mainArgs } = convertedArgs;
           const finalOptions = { ...options, ...(timeout && { timeout }) };
@@ -2135,7 +2135,7 @@ const validate_text_in_whole_page = defineTabTool({
       try {
         // Use checkTextVisibilityInAllFrames to search across all frames
         const results = await checkTextVisibilityInAllFrames(tab.page, expectedText, matchType);
-        
+
         // Count found results
         const foundResults = results.filter(result => result.found);
         actualCount = foundResults.length;
@@ -2169,7 +2169,7 @@ const validate_text_in_whole_page = defineTabTool({
         passed = false;
         const errorMessage = error instanceof Error ? error.message : String(error);
         evidence = `Failed to validate text "${expectedText}" on the page. Error: ${errorMessage}`;
-        
+
         console.log(`Failed to validate text in whole page for "${element}". Error: ${errorMessage}`);
       }
 
@@ -2225,7 +2225,7 @@ const validate_element_in_whole_page = defineTabTool({
       try {
         // Use checkElementVisibilityUnique to search across all frames
         const results = await checkElementVisibilityUnique(tab.page, role, accessibleName);
-        
+
         // Count found results
         const foundResults = results.filter(result => result.found);
         actualCount = foundResults.length;
@@ -2259,7 +2259,7 @@ const validate_element_in_whole_page = defineTabTool({
         passed = false;
         const errorMessage = error instanceof Error ? error.message : String(error);
         evidence = `Failed to validate element with role "${role}" and accessible name "${accessibleName}" on the page. Error: ${errorMessage}`;
-        
+
         console.log(`Failed to validate element in whole page for "${element}". Error: ${errorMessage}`);
       }
 
@@ -2315,30 +2315,30 @@ const validate_expanded = defineTabTool({
 
       try {
         const locator = await tab.refLocator({ ref, element });
-        
+
         // First, try to validate aria-expanded on the target element
         await expect(locator).toHaveAttribute('aria-expanded', expected);
         passed = true;
         actualValue = expected;
         evidence = `Element "${element}" has aria-expanded="${expected}" as expected`;
         searchLocation = 'target-element';
-        
+
       } catch (error) {
         // If target element doesn't have the attribute, search in related elements
         try {
           const locator = await tab.refLocator({ ref, element });
-          
+
           // Search function to find aria-expanded in related elements (excluding target)
           const searchResult = await locator.evaluate((el: Element, expectedValue: string) => {
             const results: { location: string; value: string; element: string }[] = [];
-            
+
             // Helper function to get element description
             const getElementDesc = (element: Element): string => {
               if (element.id) return `#${element.id}`;
               if (element.className) return `.${element.className.split(' ').join('.')}`;
               return element.tagName.toLowerCase();
             };
-            
+
             // Check siblings (same level elements)
             if (el.parentElement) {
               const siblings = Array.from(el.parentElement.children);
@@ -2355,7 +2355,7 @@ const validate_expanded = defineTabTool({
                 }
               });
             }
-            
+
             // Check parent element
             if (el.parentElement) {
               const parentValue = el.parentElement.getAttribute('aria-expanded');
@@ -2367,7 +2367,7 @@ const validate_expanded = defineTabTool({
                 });
               }
             }
-            
+
             // Check children elements
             const children = Array.from(el.children);
             children.forEach((child, index) => {
@@ -2380,19 +2380,19 @@ const validate_expanded = defineTabTool({
                 });
               }
             });
-            
+
             return results;
           }, expected);
-          
+
           console.log('Search results for aria-expanded in related elements:', searchResult);
-          
+
           // If we found any aria-expanded attributes in related elements, validation should fail
           // but we need to report where they were found
           if (searchResult.length > 0) {
             passed = false;
             actualValue = 'not-on-target-element';
             searchLocation = 'related-elements';
-            
+
             const foundValues = searchResult.map(r => `${r.location}(${r.element}): "${r.value}"`).join(', ');
             evidence = `Element "${element}" does not have aria-expanded="${expected}" on itself, but found aria-expanded attributes in related elements: ${foundValues}. ` +
               `Alternative validation suggestions: You can validate the element's state using className (e.g., check for 'expanded', 'collapsed', 'open', 'closed' classes), ` +
@@ -2407,7 +2407,7 @@ const validate_expanded = defineTabTool({
               `CSS properties (e.g., display, visibility, height), or other ARIA attributes (e.g., aria-hidden, aria-selected). ` +
               `You can also use validate_computed_styles tool to check CSS properties that indicate expanded/collapsed state.`;
           }
-          
+
         } catch (searchError) {
           passed = false;
           const errorMessage = searchError instanceof Error ? searchError.message : String(searchError);
@@ -2417,7 +2417,7 @@ const validate_expanded = defineTabTool({
             `Alternative validation suggestions: You can validate the element's state using className (e.g., check for 'expanded', 'collapsed', 'open', 'closed' classes), ` +
             `CSS properties (e.g., display, visibility, height), or other ARIA attributes (e.g., aria-hidden, aria-selected). ` +
             `You can also use validate_computed_styles tool to check CSS properties that indicate expanded/collapsed state.`;
-          
+
           console.log(`Failed to search aria-expanded for element with ref "${ref}". Error: ${errorMessage}`);
         }
       }
@@ -2540,10 +2540,155 @@ const wait = defineTabTool({
   },
   handle: async (tab, params, response) => {
     const { seconds } = waitSchema.parse(params);
-    
+
     await tab.waitForCompletion(async () => {
       await new Promise(resolve => setTimeout(resolve, seconds * 1000));
       response.addResult(`Waited for ${seconds} second(s)`);
+    });
+  },
+});
+
+const validateElementPositionSchema = z.object({
+  element1: z.string().describe('Human-readable description of the first element used to obtain permission to interact with the element'),
+  ref1: z.string().describe('Exact target element reference from the page snapshot for the first element'),
+  element2: z.string().describe('Human-readable description of the second element used to obtain permission to interact with the element'),
+  ref2: z.string().describe('Exact target element reference from the page snapshot for the second element'),
+  relationship: z.enum(['left', 'right', 'up', 'down']).describe('Expected positional relationship: "left" means element1 is to the left of element2, "right" means element1 is to the right of element2, "up" means element1 is above element2, "down" means element1 is below element2'),
+});
+
+const validate_element_position = defineTabTool({
+  capability: 'core',
+  schema: {
+    name: 'validate_element_position',
+    title: 'Validate element position relative to another element',
+    description: 'Validate the positional relationship between two elements by comparing their bounding boxes. Checks if element1 is left, right, up, or down relative to element2.',
+    inputSchema: validateElementPositionSchema,
+    type: 'readOnly',
+  },
+  handle: async (tab, params, response) => {
+    const { element1, ref1, element2, ref2, relationship } = validateElementPositionSchema.parse(params);
+
+    await tab.waitForCompletion(async () => {
+      let passed = false;
+      let evidence = '';
+      let actualRelationship = '';
+      let horizontalDiff = 0;
+      let verticalDiff = 0;
+      let center1 = { x: 0, y: 0 };
+      let center2 = { x: 0, y: 0 };
+
+      try {
+        const locator1 = await tab.refLocator({ ref: ref1, element: element1 });
+        const locator2 = await tab.refLocator({ ref: ref2, element: element2 });
+
+        // Get bounding boxes for both elements
+        const box1 = await locator1.boundingBox();
+        const box2 = await locator2.boundingBox();
+
+        if (!box1) {
+          throw new Error(`Could not get bounding box for element1: "${element1}"`);
+        }
+        if (!box2) {
+          throw new Error(`Could not get bounding box for element2: "${element2}"`);
+        }
+
+        // Calculate center points for more accurate comparison
+        center1 = {
+          x: box1.x + box1.width / 2,
+          y: box1.y + box1.height / 2,
+        };
+        center2 = {
+          x: box2.x + box2.width / 2,
+          y: box2.y + box2.height / 2,
+        };
+
+        // Determine actual relationship
+        horizontalDiff = center1.x - center2.x;
+        verticalDiff = center1.y - center2.y;
+
+        // Determine relationships
+        const isLeft = horizontalDiff < 0;
+        const isRight = horizontalDiff > 0;
+        const isUp = verticalDiff < 0;
+        const isDown = verticalDiff > 0;
+
+        // Build actual relationship description
+        const relationships: string[] = [];
+        if (isLeft) relationships.push('left');
+        if (isRight) relationships.push('right');
+        if (isUp) relationships.push('up');
+        if (isDown) relationships.push('down');
+
+        actualRelationship = relationships.length > 0 ? relationships.join(', ') : 'overlapping';
+
+        // Validate based on expected relationship
+        switch (relationship) {
+          case 'left':
+            passed = isLeft && !isRight;
+            break;
+          case 'right':
+            passed = isRight && !isLeft;
+            break;
+          case 'up':
+            passed = isUp && !isDown;
+            break;
+          case 'down':
+            passed = isDown && !isUp;
+            break;
+        }
+
+        // Generate evidence message
+        if (passed) {
+          evidence = `Element "${element1}" is ${relationship} relative to element "${element2}" as expected. ` +
+            `Actual relationship: ${actualRelationship}. ` +
+            `Horizontal difference: ${Math.round(horizontalDiff)}px, Vertical difference: ${Math.round(verticalDiff)}px.`;
+        } else {
+          evidence = `Element "${element1}" is NOT ${relationship} relative to element "${element2}". ` +
+            `Expected: ${relationship}, Actual: ${actualRelationship}. ` +
+            `Horizontal difference: ${Math.round(horizontalDiff)}px, Vertical difference: ${Math.round(verticalDiff)}px. ` +
+            `Element1 center: (${Math.round(center1.x)}, ${Math.round(center1.y)}), ` +
+            `Element2 center: (${Math.round(center2.x)}, ${Math.round(center2.y)}).`;
+        }
+
+      } catch (error) {
+        passed = false;
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        evidence = `Failed to validate element position: ${errorMessage}`;
+
+        console.error(`Failed to validate element position for "${element1}" and "${element2}". Error: ${errorMessage}`);
+      }
+
+      // Generate final payload matching the structure of other validation tools
+      const payload = {
+        element1,
+        ref1,
+        element2,
+        ref2,
+        relationship,
+        summary: {
+          total: 1,
+          passed: passed ? 1 : 0,
+          failed: passed ? 0 : 1,
+          status: passed ? 'pass' : 'fail',
+          evidence,
+        },
+        checks: [{
+          property: 'position-relationship',
+          operator: 'equals',
+          expected: relationship,
+          actual: actualRelationship || 'unknown',
+          result: passed ? 'pass' : 'fail',
+          horizontalDifference: Math.round(horizontalDiff),
+          verticalDifference: Math.round(verticalDiff),
+          element1Center: { x: Math.round(center1.x), y: Math.round(center1.y) },
+          element2Center: { x: Math.round(center2.x), y: Math.round(center2.y) },
+        }],
+        scope: 'two-elements',
+        comparisonMethod: 'bounding-box-centers',
+      };
+
+      console.log('Validate element position:', payload);
+      response.addResult(JSON.stringify(payload, null, 2));
     });
   },
 });
@@ -2557,6 +2702,7 @@ export default [
   validate_dom_assertions,
   validate_alert_in_snapshot,
   validate_expanded,
+  validate_element_position,
   default_validation,
   validate_response,
   validate_tab_exist,
