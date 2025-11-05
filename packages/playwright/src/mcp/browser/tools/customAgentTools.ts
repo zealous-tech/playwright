@@ -40,16 +40,16 @@ function convertStringToRegExp(obj: any): any {
   if (typeof obj === 'string') {
     return stringToRegExp(obj);
   }
-  
+
   if (Array.isArray(obj)) {
     return obj.map(convertStringToRegExp);
   }
-  
+
   if (obj && typeof obj === 'object') {
     const converted: any = {};
     for (const [key, value] of Object.entries(obj)) {
       // Convert specific fields that can contain RegExp values
-      if (key === 'expected' || key === 'value' || key === 'values' || 
+      if (key === 'expected' || key === 'value' || key === 'values' ||
           key === 'name' || key === 'description' || key === 'errorMessage' ||
           key === 'id' || key === 'role') {
         converted[key] = convertStringToRegExp(value);
@@ -59,7 +59,7 @@ function convertStringToRegExp(obj: any): any {
     }
     return converted;
   }
-  
+
   return obj;
 }
 
@@ -887,7 +887,7 @@ const validate_dom_assertions = defineTabTool({
       const results = [];
 
       for (const check of checks) {
-        const { negate, timeout = 2000, assertion: args } = check;
+        const { negate, timeout = 15000, assertion: args } = check;
         if (!args || !args.assertionType) {
           throw new Error('Each check must have assertion with assertionType');
         }
@@ -907,7 +907,7 @@ const validate_dom_assertions = defineTabTool({
         try {
           // Create the assertion
           const assertion = negate ? expect(locator).not : expect(locator);
-          
+
           // Prepare final args - separate main arguments from options
           const { options, ...mainArgs } = convertedArgs;
           const finalOptions = { ...options, ...(timeout && { timeout }) };
@@ -1680,27 +1680,39 @@ const validate_response = defineTabTool({
     try {
       // Parse JSON string to object
       const parsedResponseData = JSON.parse(responseData);
-
+      console.dir(parsedResponseData, { depth: null });
       // Perform all checks
       const results = checks.map(check => {
-        // Extract value using JSON path
-        const actualValue = getValueByJsonPath(parsedResponseData, check.jsonPath);
+        try {
+          // Extract value using JSON path
+          const actualValue = getValueByJsonPath(parsedResponseData, check.jsonPath);
 
-        // Compare values if expected is provided
-        let passed = true;
-        if (check.expected !== undefined) {
-          const comparisonResult = compareValues(actualValue, check.expected, check.operator);
-          passed = comparisonResult.passed;
+          // Compare values if expected is provided
+          let passed = true;
+          if (check.expected !== undefined) {
+            const comparisonResult = compareValues(actualValue, check.expected, check.operator);
+            passed = comparisonResult.passed;
+          }
+
+          return {
+            name: check.name,
+            jsonPath: check.jsonPath,
+            expected: check.expected,
+            operator: check.operator,
+            actual: actualValue,
+            result: passed ? 'pass' : 'fail',
+          };
+        } catch (error) {
+          // Handle case when value is not found at JSON path
+          return {
+            name: check.name,
+            jsonPath: check.jsonPath,
+            expected: check.expected,
+            operator: check.operator,
+            actual: `ERROR: ${error.message}`,
+            result: 'fail',
+          };
         }
-
-        return {
-          name: check.name,
-          jsonPath: check.jsonPath,
-          expected: check.expected,
-          operator: check.operator,
-          actual: actualValue,
-          result: passed ? 'pass' : 'fail',
-        };
       });
 
       const passedCount = results.filter(r => r.result === 'pass').length;
@@ -2123,7 +2135,7 @@ const validate_text_in_whole_page = defineTabTool({
       try {
         // Use checkTextVisibilityInAllFrames to search across all frames
         const results = await checkTextVisibilityInAllFrames(tab.page, expectedText, matchType);
-        
+
         // Count found results
         const foundResults = results.filter(result => result.found);
         actualCount = foundResults.length;
@@ -2157,7 +2169,7 @@ const validate_text_in_whole_page = defineTabTool({
         passed = false;
         const errorMessage = error instanceof Error ? error.message : String(error);
         evidence = `Failed to validate text "${expectedText}" on the page. Error: ${errorMessage}`;
-        
+
         console.log(`Failed to validate text in whole page for "${element}". Error: ${errorMessage}`);
       }
 
@@ -2213,7 +2225,7 @@ const validate_element_in_whole_page = defineTabTool({
       try {
         // Use checkElementVisibilityUnique to search across all frames
         const results = await checkElementVisibilityUnique(tab.page, role, accessibleName);
-        
+
         // Count found results
         const foundResults = results.filter(result => result.found);
         actualCount = foundResults.length;
@@ -2247,7 +2259,7 @@ const validate_element_in_whole_page = defineTabTool({
         passed = false;
         const errorMessage = error instanceof Error ? error.message : String(error);
         evidence = `Failed to validate element with role "${role}" and accessible name "${accessibleName}" on the page. Error: ${errorMessage}`;
-        
+
         console.log(`Failed to validate element in whole page for "${element}". Error: ${errorMessage}`);
       }
 
@@ -2303,30 +2315,30 @@ const validate_expanded = defineTabTool({
 
       try {
         const locator = await tab.refLocator({ ref, element });
-        
+
         // First, try to validate aria-expanded on the target element
         await expect(locator).toHaveAttribute('aria-expanded', expected);
         passed = true;
         actualValue = expected;
         evidence = `Element "${element}" has aria-expanded="${expected}" as expected`;
         searchLocation = 'target-element';
-        
+
       } catch (error) {
         // If target element doesn't have the attribute, search in related elements
         try {
           const locator = await tab.refLocator({ ref, element });
-          
+
           // Search function to find aria-expanded in related elements (excluding target)
           const searchResult = await locator.evaluate((el: Element, expectedValue: string) => {
             const results: { location: string; value: string; element: string }[] = [];
-            
+
             // Helper function to get element description
             const getElementDesc = (element: Element): string => {
               if (element.id) return `#${element.id}`;
               if (element.className) return `.${element.className.split(' ').join('.')}`;
               return element.tagName.toLowerCase();
             };
-            
+
             // Check siblings (same level elements)
             if (el.parentElement) {
               const siblings = Array.from(el.parentElement.children);
@@ -2343,7 +2355,7 @@ const validate_expanded = defineTabTool({
                 }
               });
             }
-            
+
             // Check parent element
             if (el.parentElement) {
               const parentValue = el.parentElement.getAttribute('aria-expanded');
@@ -2355,7 +2367,7 @@ const validate_expanded = defineTabTool({
                 });
               }
             }
-            
+
             // Check children elements
             const children = Array.from(el.children);
             children.forEach((child, index) => {
@@ -2368,19 +2380,19 @@ const validate_expanded = defineTabTool({
                 });
               }
             });
-            
+
             return results;
           }, expected);
-          
+
           console.log('Search results for aria-expanded in related elements:', searchResult);
-          
+
           // If we found any aria-expanded attributes in related elements, validation should fail
           // but we need to report where they were found
           if (searchResult.length > 0) {
             passed = false;
             actualValue = 'not-on-target-element';
             searchLocation = 'related-elements';
-            
+
             const foundValues = searchResult.map(r => `${r.location}(${r.element}): "${r.value}"`).join(', ');
             evidence = `Element "${element}" does not have aria-expanded="${expected}" on itself, but found aria-expanded attributes in related elements: ${foundValues}. ` +
               `Alternative validation suggestions: You can validate the element's state using className (e.g., check for 'expanded', 'collapsed', 'open', 'closed' classes), ` +
@@ -2395,7 +2407,7 @@ const validate_expanded = defineTabTool({
               `CSS properties (e.g., display, visibility, height), or other ARIA attributes (e.g., aria-hidden, aria-selected). ` +
               `You can also use validate_computed_styles tool to check CSS properties that indicate expanded/collapsed state.`;
           }
-          
+
         } catch (searchError) {
           passed = false;
           const errorMessage = searchError instanceof Error ? searchError.message : String(searchError);
@@ -2405,7 +2417,7 @@ const validate_expanded = defineTabTool({
             `Alternative validation suggestions: You can validate the element's state using className (e.g., check for 'expanded', 'collapsed', 'open', 'closed' classes), ` +
             `CSS properties (e.g., display, visibility, height), or other ARIA attributes (e.g., aria-hidden, aria-selected). ` +
             `You can also use validate_computed_styles tool to check CSS properties that indicate expanded/collapsed state.`;
-          
+
           console.log(`Failed to search aria-expanded for element with ref "${ref}". Error: ${errorMessage}`);
         }
       }
@@ -2458,7 +2470,16 @@ const data_extraction = defineTabTool({
       if (jsonPath) {
         // If jsonPath is provided, parse as JSON and extract using path
         parsedResponseData = JSON.parse(data);
-        extractedValue = getValueByJsonPath(parsedResponseData, jsonPath);
+        try {
+          extractedValue = getValueByJsonPath(parsedResponseData, jsonPath);
+        } catch (error) {
+          response.addResult(JSON.stringify({
+            success: false,
+            error: `Failed to extract value using JSON path "${jsonPath}": ${error.message}`,
+            extractedData: null
+          }, null, 2));
+          return;
+        }
       } else {
         // If jsonPath is not provided, return data as is
         extractedValue = data;
@@ -2497,74 +2518,6 @@ const data_extraction = defineTabTool({
       console.error('Data extraction error:', errorResult);
       response.addResult(JSON.stringify(errorResult, null, 2));
     }
-  },
-});
-
-// Dynamic switch tool: choose a tool based on flag value
-const dynamicSwitchSchema = z.object({
-  flagName: z.string().describe('Flag value to match against cases (agent will replace this with actual value)'),
-  cases: z.array(z.object({
-    equals: z.string().describe('Exact string value to match against flag value'),
-    toolName: z.string().describe('Tool name to invoke when matched'),
-    params: z.any().optional().describe('Parameters to pass to the selected tool'),
-    readyForCaching: z.boolean().optional().default(false).describe('Set to true if all tools and parameters are successfully obtained for this specific case - the model clearly knows which parameters to use for this case and tool. Set to false if this case is missing required information for parameters, e.g. an action needs a ref that is not available in the snapshot')
-  })).min(1).describe('Ordered switch-cases; first matching case wins'),
-  defaultCase: z.object({
-    toolName: z.string(),
-    params: z.any().optional(),
-    readyForCaching: z.boolean().optional().default(false).describe('Set to true if all tools and parameters are successfully obtained for this default case - the model clearly knows which parameters to use for this case and tool. Set to false if this case is missing required information for parameters, e.g. an action needs a ref that is not available in the snapshot')
-  }).optional().describe('Fallback if no case matches. If it is not specified what needs to be done for defaultCase, then it should be left empty (not provided)'),
-});
-
-const dynamic_switch = defineTabTool({
-  capability: 'core',
-  schema: {
-    name: 'dynamic_switch',
-    title: 'Dynamic Switch',
-    description: 'Select which tool to run based on flag value matching switch-cases. The flagName parameter contains the actual value to match against cases. Returns the chosen tool and params; can be used by the orchestrator to invoke the tool.',
-    inputSchema: dynamicSwitchSchema,
-    type: 'readOnly',
-  },
-  handle: async (tab, rawParams, response) => {
-    const { flagName, cases, defaultCase } = dynamicSwitchSchema.parse(rawParams);
-
-    // Use flagName as the actual value (agent will replace flagName with actual value)
-    const flagValue = flagName;
-
-    // Find first matching case
-    let matchedIndex = -1;
-    let chosenTool: { toolName: string; params?: any; readyForCaching?: boolean } | null = null;
-
-    for (let i = 0; i < cases.length; i++) {
-      const c = cases[i];
-      if (flagValue === c.equals) {
-        matchedIndex = i;
-        chosenTool = { toolName: c.toolName, params: c.params, readyForCaching: c.readyForCaching };
-        break;
-      }
-    }
-
-    // Use default case if no match found
-    if (matchedIndex === -1 && defaultCase) {
-      chosenTool = { toolName: defaultCase.toolName, params: defaultCase.params, readyForCaching: defaultCase.readyForCaching };
-    }
-
-    const payload = {
-      flagName,
-      flagValue,
-      matchedCaseIndex: matchedIndex,
-      selected: chosenTool,
-      summary: {
-        total: 1,
-        passed: chosenTool ? 1 : 0,
-        failed: chosenTool ? 0 : 1,
-        status: chosenTool ? 'pass' : 'fail',
-        evidence: chosenTool ? `Selected tool "${chosenTool.toolName}" for flag value "${flagValue}"` : `No case matched for flag value "${flagValue}" and no defaultCase provided`
-      },
-      actions: chosenTool && chosenTool.readyForCaching ? [{ type: 'invoke_tool', toolName: chosenTool.toolName, params: chosenTool.params }] : []
-    };
-
-    response.addResult(JSON.stringify(payload, null, 2));
   },
 });
 
@@ -2740,6 +2693,75 @@ const validate_element_position = defineTabTool({
   },
 });
 
+// Dynamic switch tool: choose a tool based on flag value
+const dynamicSwitchSchema = z.object({
+  flagName: z.string().describe('Flag value to match against cases (agent will replace this with actual value)'),
+  cases: z.array(z.object({
+    equals: z.string().describe('Exact string value to match against flag value'),
+    toolName: z.string().describe('Tool name to invoke when matched'),
+    params: z.any().optional().describe('Parameters to pass to the selected tool'),
+    readyForCaching: z.boolean().optional().default(false).describe('Set to true if all tools and parameters are successfully obtained for this specific case - the model clearly knows which parameters to use for this case and tool. Set to false if this case is missing required information for parameters, e.g. an action needs a ref that is not available in the snapshot')
+  })).min(1).describe('Ordered switch-cases; first matching case wins'),
+  defaultCase: z.object({
+    toolName: z.string(),
+    params: z.any().optional(),
+    readyForCaching: z.boolean().optional().default(false).describe('Set to true if all tools and parameters are successfully obtained for this default case - the model clearly knows which parameters to use for this case and tool. Set to false if this case is missing required information for parameters, e.g. an action needs a ref that is not available in the snapshot')
+  }).optional().describe('Fallback if no case matches. If it is not specified what needs to be done for defaultCase, then it should be left empty (not provided)'),
+});
+
+const dynamic_switch = defineTabTool({
+  capability: 'core',
+  schema: {
+    name: 'dynamic_switch',
+    title: 'Dynamic Switch',
+    description: 'Select which tool to run based on flag value matching switch-cases. The flagName parameter contains the actual value to match against cases. Returns the chosen tool and params; can be used by the orchestrator to invoke the tool.',
+    inputSchema: dynamicSwitchSchema,
+    type: 'readOnly',
+  },
+  handle: async (tab, rawParams, response) => {
+    const { flagName, cases, defaultCase } = dynamicSwitchSchema.parse(rawParams);
+
+    // Use flagName as the actual value (agent will replace flagName with actual value)
+    const flagValue = flagName;
+
+    // Find first matching case
+    let matchedIndex = -1;
+    let chosenTool: { toolName: string; params?: any; readyForCaching?: boolean } | null = null;
+
+    for (let i = 0; i < cases.length; i++) {
+      const c = cases[i];
+      if (flagValue === c.equals) {
+        matchedIndex = i;
+        chosenTool = { toolName: c.toolName, params: c.params, readyForCaching: c.readyForCaching };
+        break;
+      }
+    }
+
+    // Use default case if no match found
+    if (matchedIndex === -1 && defaultCase) {
+      chosenTool = { toolName: defaultCase.toolName, params: defaultCase.params, readyForCaching: defaultCase.readyForCaching };
+    }
+
+    const payload = {
+      flagName,
+      flagValue,
+      matchedCaseIndex: matchedIndex,
+      selected: chosenTool,
+      summary: {
+        total: 1,
+        passed: chosenTool ? 1 : 0,
+        failed: chosenTool ? 0 : 1,
+        status: chosenTool ? 'pass' : 'fail',
+        evidence: chosenTool ? `Selected tool "${chosenTool.toolName}" for flag value "${flagValue}"` : `No case matched for flag value "${flagValue}" and no defaultCase provided`
+      },
+      actions: chosenTool && chosenTool.readyForCaching ? [{ type: 'invoke_tool', toolName: chosenTool.toolName, params: chosenTool.params }] : []
+    };
+
+    response.addResult(JSON.stringify(payload, null, 2));
+  },
+});
+
+
 export default [
   extract_svg_from_element,
   extract_image_urls,
@@ -2755,7 +2777,7 @@ export default [
   validate_tab_exist,
   generate_locator,
   make_request,
-  dynamic_switch,
   data_extraction,
-  wait
+  wait,
+  dynamic_switch
 ];
