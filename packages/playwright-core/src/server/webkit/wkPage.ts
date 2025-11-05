@@ -24,7 +24,6 @@ import { eventsHelper } from '../utils/eventsHelper';
 import { hostPlatform } from '../utils/hostPlatform';
 import { splitErrorMessage } from '../../utils/isomorphic/stackTrace';
 import { PNG, jpegjs } from '../../utilsBundle';
-import { BrowserContext } from '../browserContext';
 import * as dialog from '../dialog';
 import * as dom from '../dom';
 import { TargetClosedError } from '../errors';
@@ -309,6 +308,9 @@ export class WKPage implements PageDelegate {
         session.dispatchMessage({ id: message.id, error: { message: e.message } });
       });
     });
+    // TODO: support OOPIFs.
+    if (targetInfo.type === 'frame' as any)
+      return;
     assert(targetInfo.type === 'page', 'Only page targets are expected in WebKit, received: ' + targetInfo.type);
 
     if (!targetInfo.isProvisional) {
@@ -368,7 +370,6 @@ export class WKPage implements PageDelegate {
       eventsHelper.addEventListener(this._session, 'Page.frameDetached', event => this._onFrameDetached(event.frameId)),
       eventsHelper.addEventListener(this._session, 'Page.willCheckNavigationPolicy', event => this._onWillCheckNavigationPolicy(event.frameId)),
       eventsHelper.addEventListener(this._session, 'Page.didCheckNavigationPolicy', event => this._onDidCheckNavigationPolicy(event.frameId, event.cancel)),
-      eventsHelper.addEventListener(this._session, 'Page.frameScheduledNavigation', event => this._onFrameScheduledNavigation(event.frameId, event.delay, event.targetIsCurrentFrame)),
       eventsHelper.addEventListener(this._session, 'Page.loadEventFired', event => this._page.frameManager.frameLifecycleEvent(event.frameId, 'load')),
       eventsHelper.addEventListener(this._session, 'Page.domContentEventFired', event => this._page.frameManager.frameLifecycleEvent(event.frameId, 'domcontentloaded')),
       eventsHelper.addEventListener(this._session, 'Runtime.executionContextCreated', event => this._onExecutionContextCreated(event.context)),
@@ -432,11 +433,6 @@ export class WKPage implements PageDelegate {
     if (this._provisionalPage)
       return;
     this._page.frameManager.frameAbortedNavigation(frameId, 'Navigation canceled by policy check');
-  }
-
-  private _onFrameScheduledNavigation(frameId: string, delay: number, targetIsCurrentFrame: boolean) {
-    if (targetIsCurrentFrame)
-      this._page.frameManager.frameRequestedNavigation(frameId);
   }
 
   private _handleFrameTree(frameTree: Protocol.Page.FrameResourceTree) {
@@ -540,7 +536,7 @@ export class WKPage implements PageDelegate {
       error.stack = stack;
       error.name = name;
 
-      this._page.emitOnContextOnceInitialized(BrowserContext.Events.PageError, error, this._page);
+      this._page.addPageError(error);
       return;
     }
 

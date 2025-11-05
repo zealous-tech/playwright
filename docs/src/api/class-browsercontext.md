@@ -63,39 +63,10 @@ await context.CloseAsync();
 
 ## event: BrowserContext.backgroundPage
 * since: v1.11
+* deprecated: Background pages have been removed from Chromium together with Manifest V2 extensions.
 - argument: <[Page]>
 
-:::note
-Only works with Chromium browser's persistent context.
-:::
-
-Emitted when new background page is created in the context.
-
-```java
-context.onBackgroundPage(backgroundPage -> {
-  System.out.println(backgroundPage.url());
-});
-```
-
-```js
-const backgroundPage = await context.waitForEvent('backgroundpage');
-```
-
-```python async
-background_page = await context.wait_for_event("backgroundpage")
-```
-
-```python sync
-background_page = context.wait_for_event("backgroundpage")
-```
-
-```csharp
-context.BackgroundPage += (_, backgroundPage) =>
-{
-    Console.WriteLine(backgroundPage.Url);
-};
-
-```
+This event is not emitted.
 
 ## property: BrowserContext.clock
 * since: v1.45
@@ -456,13 +427,10 @@ Script to be evaluated in all pages in the browser context. Optional.
 
 ## method: BrowserContext.backgroundPages
 * since: v1.11
+* deprecated: Background pages have been removed from Chromium together with Manifest V2 extensions.
 - returns: <[Array]<[Page]>>
 
-:::note
-Background pages are only supported on Chromium-based browsers.
-:::
-
-All existing background pages in the context.
+Returns an empty list.
 
 ## method: BrowserContext.browser
 * since: v1.8
@@ -980,6 +948,8 @@ Here are some permissions that may be supported by some browsers:
 * `'clipboard-write'`
 * `'geolocation'`
 * `'gyroscope'`
+* `'local-fonts'`
+* `'local-network-access'`
 * `'magnetometer'`
 * `'microphone'`
 * `'midi-sysex'` (system-exclusive midi)
@@ -987,7 +957,6 @@ Here are some permissions that may be supported by some browsers:
 * `'notifications'`
 * `'payment-handler'`
 * `'storage-access'`
-* `'local-fonts'`
 
 ### option: BrowserContext.grantPermissions.origin
 * since: v1.8

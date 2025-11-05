@@ -2500,20 +2500,20 @@ const data_extraction = defineTabTool({
   },
 });
 
-
 // Dynamic switch tool: choose a tool based on flag value
 const dynamicSwitchSchema = z.object({
   flagName: z.string().describe('Flag value to match against cases (agent will replace this with actual value)'),
   cases: z.array(z.object({
     equals: z.string().describe('Exact string value to match against flag value'),
     toolName: z.string().describe('Tool name to invoke when matched'),
-    params: z.any().optional().describe('Parameters to pass to the selected tool')
+    params: z.any().optional().describe('Parameters to pass to the selected tool'),
+    readyForCaching: z.boolean().optional().default(false).describe('Set to true if all tools and parameters are successfully obtained for this specific case - the model clearly knows which parameters to use for this case and tool. Set to false if this case is missing required information for parameters, e.g. an action needs a ref that is not available in the snapshot')
   })).min(1).describe('Ordered switch-cases; first matching case wins'),
   defaultCase: z.object({
     toolName: z.string(),
-    params: z.any().optional()
-  }).optional().describe('Fallback if no case matches'),
-  execute: z.boolean().optional().default(false).describe('Set to true if all tools and parameters are successfully obtained - the model clearly knows which parameters to use for each tool. Set to false if at least one tool is missing required information for parameters, e.g. an action needs a ref that is not available in the snapshot')
+    params: z.any().optional(),
+    readyForCaching: z.boolean().optional().default(false).describe('Set to true if all tools and parameters are successfully obtained for this default case - the model clearly knows which parameters to use for this case and tool. Set to false if this case is missing required information for parameters, e.g. an action needs a ref that is not available in the snapshot')
+  }).optional().describe('Fallback if no case matches. If it is not specified what needs to be done for defaultCase, then it should be left empty (not provided)'),
 });
 
 const dynamic_switch = defineTabTool({
@@ -2526,27 +2526,27 @@ const dynamic_switch = defineTabTool({
     type: 'readOnly',
   },
   handle: async (tab, rawParams, response) => {
-    const { flagName, cases, defaultCase, execute } = dynamicSwitchSchema.parse(rawParams);
+    const { flagName, cases, defaultCase } = dynamicSwitchSchema.parse(rawParams);
 
     // Use flagName as the actual value (agent will replace flagName with actual value)
     const flagValue = flagName;
 
     // Find first matching case
     let matchedIndex = -1;
-    let chosenTool: { toolName: string; params?: any } | null = null;
+    let chosenTool: { toolName: string; params?: any; readyForCaching?: boolean } | null = null;
 
     for (let i = 0; i < cases.length; i++) {
       const c = cases[i];
       if (flagValue === c.equals) {
         matchedIndex = i;
-        chosenTool = { toolName: c.toolName, params: c.params };
+        chosenTool = { toolName: c.toolName, params: c.params, readyForCaching: c.readyForCaching };
         break;
       }
     }
 
     // Use default case if no match found
     if (matchedIndex === -1 && defaultCase) {
-      chosenTool = { toolName: defaultCase.toolName, params: defaultCase.params };
+      chosenTool = { toolName: defaultCase.toolName, params: defaultCase.params, readyForCaching: defaultCase.readyForCaching };
     }
 
     const payload = {
@@ -2561,13 +2561,184 @@ const dynamic_switch = defineTabTool({
         status: chosenTool ? 'pass' : 'fail',
         evidence: chosenTool ? `Selected tool "${chosenTool.toolName}" for flag value "${flagValue}"` : `No case matched for flag value "${flagValue}" and no defaultCase provided`
       },
-      actions: chosenTool && execute ? [{ type: 'invoke_tool', toolName: chosenTool.toolName, params: chosenTool.params }] : []
+      actions: chosenTool && chosenTool.readyForCaching ? [{ type: 'invoke_tool', toolName: chosenTool.toolName, params: chosenTool.params }] : []
     };
 
     response.addResult(JSON.stringify(payload, null, 2));
   },
 });
 
+
+
+
+
+const waitSchema = z.object({
+  seconds: z.number().positive().describe('Duration to wait in seconds'),
+});
+
+const wait = defineTabTool({
+  capability: 'core',
+  schema: {
+    name: 'wait',
+    title: 'Wait',
+    description: 'Wait for a specified duration in seconds',
+    inputSchema: waitSchema,
+    type: 'readOnly',
+  },
+  handle: async (tab, params, response) => {
+    const { seconds } = waitSchema.parse(params);
+
+    await tab.waitForCompletion(async () => {
+      await new Promise(resolve => setTimeout(resolve, seconds * 1000));
+      response.addResult(`Waited for ${seconds} second(s)`);
+    });
+  },
+});
+
+const validateElementPositionSchema = z.object({
+  element1: z.string().describe('Human-readable description of the first element used to obtain permission to interact with the element'),
+  ref1: z.string().describe('Exact target element reference from the page snapshot for the first element'),
+  element2: z.string().describe('Human-readable description of the second element used to obtain permission to interact with the element'),
+  ref2: z.string().describe('Exact target element reference from the page snapshot for the second element'),
+  relationship: z.enum(['left', 'right', 'up', 'down']).describe('Expected positional relationship: "left" means element1 is to the left of element2, "right" means element1 is to the right of element2, "up" means element1 is above element2, "down" means element1 is below element2'),
+});
+
+const validate_element_position = defineTabTool({
+  capability: 'core',
+  schema: {
+    name: 'validate_element_position',
+    title: 'Validate element position relative to another element',
+    description: 'Validate the positional relationship between two elements by comparing their bounding boxes. Checks if element1 is left, right, up, or down relative to element2.',
+    inputSchema: validateElementPositionSchema,
+    type: 'readOnly',
+  },
+  handle: async (tab, params, response) => {
+    const { element1, ref1, element2, ref2, relationship } = validateElementPositionSchema.parse(params);
+
+    await tab.waitForCompletion(async () => {
+      let passed = false;
+      let evidence = '';
+      let actualRelationship = '';
+      let horizontalDiff = 0;
+      let verticalDiff = 0;
+      let center1 = { x: 0, y: 0 };
+      let center2 = { x: 0, y: 0 };
+
+      try {
+        const locator1 = await tab.refLocator({ ref: ref1, element: element1 });
+        const locator2 = await tab.refLocator({ ref: ref2, element: element2 });
+
+        // Get bounding boxes for both elements
+        const box1 = await locator1.boundingBox();
+        const box2 = await locator2.boundingBox();
+
+        if (!box1) {
+          throw new Error(`Could not get bounding box for element1: "${element1}"`);
+        }
+        if (!box2) {
+          throw new Error(`Could not get bounding box for element2: "${element2}"`);
+        }
+
+        // Calculate center points for more accurate comparison
+        center1 = {
+          x: box1.x + box1.width / 2,
+          y: box1.y + box1.height / 2,
+        };
+        center2 = {
+          x: box2.x + box2.width / 2,
+          y: box2.y + box2.height / 2,
+        };
+
+        // Determine actual relationship
+        horizontalDiff = center1.x - center2.x;
+        verticalDiff = center1.y - center2.y;
+
+        // Determine relationships
+        const isLeft = horizontalDiff < 0;
+        const isRight = horizontalDiff > 0;
+        const isUp = verticalDiff < 0;
+        const isDown = verticalDiff > 0;
+
+        // Build actual relationship description
+        const relationships: string[] = [];
+        if (isLeft) relationships.push('left');
+        if (isRight) relationships.push('right');
+        if (isUp) relationships.push('up');
+        if (isDown) relationships.push('down');
+
+        actualRelationship = relationships.length > 0 ? relationships.join(', ') : 'overlapping';
+
+        // Validate based on expected relationship
+        switch (relationship) {
+          case 'left':
+            passed = isLeft && !isRight;
+            break;
+          case 'right':
+            passed = isRight && !isLeft;
+            break;
+          case 'up':
+            passed = isUp && !isDown;
+            break;
+          case 'down':
+            passed = isDown && !isUp;
+            break;
+        }
+
+        // Generate evidence message
+        if (passed) {
+          evidence = `Element "${element1}" is ${relationship} relative to element "${element2}" as expected. ` +
+            `Actual relationship: ${actualRelationship}. ` +
+            `Horizontal difference: ${Math.round(horizontalDiff)}px, Vertical difference: ${Math.round(verticalDiff)}px.`;
+        } else {
+          evidence = `Element "${element1}" is NOT ${relationship} relative to element "${element2}". ` +
+            `Expected: ${relationship}, Actual: ${actualRelationship}. ` +
+            `Horizontal difference: ${Math.round(horizontalDiff)}px, Vertical difference: ${Math.round(verticalDiff)}px. ` +
+            `Element1 center: (${Math.round(center1.x)}, ${Math.round(center1.y)}), ` +
+            `Element2 center: (${Math.round(center2.x)}, ${Math.round(center2.y)}).`;
+        }
+
+      } catch (error) {
+        passed = false;
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        evidence = `Failed to validate element position: ${errorMessage}`;
+
+        console.error(`Failed to validate element position for "${element1}" and "${element2}". Error: ${errorMessage}`);
+      }
+
+      // Generate final payload matching the structure of other validation tools
+      const payload = {
+        element1,
+        ref1,
+        element2,
+        ref2,
+        relationship,
+        summary: {
+          total: 1,
+          passed: passed ? 1 : 0,
+          failed: passed ? 0 : 1,
+          status: passed ? 'pass' : 'fail',
+          evidence,
+        },
+        checks: [{
+          property: 'position-relationship',
+          operator: 'equals',
+          expected: relationship,
+          actual: actualRelationship || 'unknown',
+          result: passed ? 'pass' : 'fail',
+          horizontalDifference: Math.round(horizontalDiff),
+          verticalDifference: Math.round(verticalDiff),
+          element1Center: { x: Math.round(center1.x), y: Math.round(center1.y) },
+          element2Center: { x: Math.round(center2.x), y: Math.round(center2.y) },
+        }],
+        scope: 'two-elements',
+        comparisonMethod: 'bounding-box-centers',
+      };
+
+      console.log('Validate element position:', payload);
+      response.addResult(JSON.stringify(payload, null, 2));
+    });
+  },
+});
 
 export default [
   extract_svg_from_element,
@@ -2578,6 +2749,7 @@ export default [
   validate_dom_assertions,
   validate_alert_in_snapshot,
   validate_expanded,
+  validate_element_position,
   default_validation,
   validate_response,
   validate_tab_exist,
@@ -2585,4 +2757,5 @@ export default [
   make_request,
   dynamic_switch,
   data_extraction,
+  wait
 ];

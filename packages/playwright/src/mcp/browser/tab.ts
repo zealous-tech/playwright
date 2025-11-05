@@ -21,6 +21,9 @@ import { ManualPromise } from 'playwright-core/lib/utils';
 import { callOnPageNoTrace, waitForCompletion } from './tools/utils';
 import { logUnhandledError } from '../log';
 import { ModalState } from './tools/tool';
+import { handleDialog } from './tools/dialogs';
+import { uploadFile } from './tools/files';
+
 import type { Context } from './context';
 
 type PageEx = playwright.Page & {
@@ -50,10 +53,11 @@ export class Tab extends EventEmitter<TabEventsInterface> {
   private _lastTitle = 'about:blank';
   private _consoleMessages: ConsoleMessage[] = [];
   private _recentConsoleMessages: ConsoleMessage[] = [];
-  private _requests: Map<playwright.Request, playwright.Response | null> = new Map();
+  private _requests: Set<playwright.Request> = new Set();
   private _onPageClose: (tab: Tab) => void;
   private _modalStates: ModalState[] = [];
   private _downloads: { download: playwright.Download, finished: boolean, outputFile: string }[] = [];
+  private _initializedPromise: Promise<void>;
 
   constructor(context: Context, page: playwright.Page, onPageClose: (tab: Tab) => void) {
     super();
@@ -62,15 +66,14 @@ export class Tab extends EventEmitter<TabEventsInterface> {
     this._onPageClose = onPageClose;
     page.on('console', event => this._handleConsoleMessage(messageToConsoleMessage(event)));
     page.on('pageerror', error => this._handleConsoleMessage(pageErrorToConsoleMessage(error)));
-    page.on('request', request => this._requests.set(request, null));
-    page.on('response', response => this._requests.set(response.request(), response));
+    page.on('request', request => this._requests.add(request));
     page.on('close', () => this._onClose());
     page.on('filechooser', chooser => {
       this.setModalState({
         type: 'fileChooser',
         description: 'File chooser',
         fileChooser: chooser,
-        clearedBy: 'browser_file_upload',
+        clearedBy: uploadFile.schema.name,
       });
     });
     page.on('dialog', dialog => this._dialogShown(dialog));
@@ -80,10 +83,30 @@ export class Tab extends EventEmitter<TabEventsInterface> {
     page.setDefaultNavigationTimeout(this.context.config.timeouts.navigation);
     page.setDefaultTimeout(this.context.config.timeouts.action);
     (page as any)[tabSymbol] = this;
+    this._initializedPromise = this._initialize();
   }
 
   static forPage(page: playwright.Page): Tab | undefined {
     return (page as any)[tabSymbol];
+  }
+
+  static async collectConsoleMessages(page: playwright.Page): Promise<ConsoleMessage[]> {
+    const result: ConsoleMessage[] = [];
+    const messages = await page.consoleMessages().catch(() => []);
+    for (const message of messages)
+      result.push(messageToConsoleMessage(message));
+    const errors = await page.pageErrors().catch(() => []);
+    for (const error of errors)
+      result.push(pageErrorToConsoleMessage(error));
+    return result;
+  }
+
+  private async _initialize() {
+    for (const message of await Tab.collectConsoleMessages(this.page))
+      this._handleConsoleMessage(message);
+    const requests = await this.page.requests().catch(() => []);
+    for (const request of requests)
+      this._requests.add(request);
   }
 
   modalStates(): ModalState[] {
@@ -108,7 +131,7 @@ export class Tab extends EventEmitter<TabEventsInterface> {
       type: 'dialog',
       description: `"${dialog.type()}" dialog with message "${dialog.message()}"`,
       dialog,
-      clearedBy: 'browser_handle_dialog',
+      clearedBy: handleDialog.schema.name
     });
   }
 
@@ -116,7 +139,7 @@ export class Tab extends EventEmitter<TabEventsInterface> {
     const entry = {
       download,
       finished: false,
-      outputFile: await this.context.outputFile(download.suggestedFilename())
+      outputFile: await this.context.outputFile(download.suggestedFilename(), { origin: 'web', reason: 'Saving download' })
     };
     this._downloads.push(entry);
     await download.saveAs(entry.outputFile);
@@ -186,11 +209,13 @@ export class Tab extends EventEmitter<TabEventsInterface> {
     await this.waitForLoadState('load', { timeout: 5000 });
   }
 
-  consoleMessages(): ConsoleMessage[] {
-    return this._consoleMessages;
+  async consoleMessages(type?: 'error'): Promise<ConsoleMessage[]> {
+    await this._initializedPromise;
+    return this._consoleMessages.filter(message => type ? message.type === type : true);
   }
 
-  requests(): Map<playwright.Request, playwright.Response | null> {
+  async requests(): Promise<Set<playwright.Request>> {
+    await this._initializedPromise;
     return this._requests;
   }
 
@@ -260,7 +285,7 @@ export class Tab extends EventEmitter<TabEventsInterface> {
         if (code.startsWith('getBy') || code.startsWith('locator')) {
           try {
               const getLocator = new Function('page', `return page.${code}`);
-              const locator = getLocator(this.page);   
+              const locator = getLocator(this.page);
             //const locator = this.parsePlaywrightCommand(code);
               return locator.describe(params.element);
           } catch (error) {
@@ -274,7 +299,6 @@ export class Tab extends EventEmitter<TabEventsInterface> {
     // If ref provided, get locator using ref
     return  (await this.refLocators([{ element: params.element, ref: params.ref }]))[0];
   }
-
 
   async refLocators(params: { element: string, ref: string }[]): Promise<playwright.Locator[]> {
     const snapshot = await (this.page as PageEx)._snapshotForAI();
@@ -314,13 +338,13 @@ function messageToConsoleMessage(message: playwright.ConsoleMessage): ConsoleMes
 function pageErrorToConsoleMessage(errorOrValue: Error | any): ConsoleMessage {
   if (errorOrValue instanceof Error) {
     return {
-      type: undefined,
+      type: 'error',
       text: errorOrValue.message,
       toString: () => errorOrValue.stack || errorOrValue.message,
     };
   }
   return {
-    type: undefined,
+    type: 'error',
     text: String(errorOrValue),
     toString: () => String(errorOrValue),
   };

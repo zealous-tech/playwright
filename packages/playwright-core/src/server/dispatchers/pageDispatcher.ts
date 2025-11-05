@@ -16,7 +16,7 @@
 
 import { Page, Worker } from '../page';
 import { Dispatcher } from './dispatcher';
-import { parseError } from '../errors';
+import { parseError, serializeError } from '../errors';
 import { ArtifactDispatcher } from './artifactDispatcher';
 import { ElementHandleDispatcher } from './elementHandlerDispatcher';
 import { FrameDispatcher } from './frameDispatcher';
@@ -31,7 +31,6 @@ import { urlMatches } from '../../utils/isomorphic/urlMatch';
 import type { Artifact } from '../artifact';
 import type { BrowserContext } from '../browserContext';
 import type { CRCoverage } from '../chromium/crCoverage';
-import type { ConsoleMessage } from '../console';
 import type { Download } from '../download';
 import type { FileChooser } from '../fileChooser';
 import type { JSHandle } from '../javascript';
@@ -41,6 +40,7 @@ import type { RouteHandler } from '../network';
 import type { InitScript, PageBinding } from '../page';
 import type * as channels from '@protocol/channels';
 import type { Progress } from '@protocol/progress';
+import type { ConsoleMessage } from '../console';
 
 export class PageDispatcher extends Dispatcher<Page, channels.PageChannel, BrowserContextDispatcher> implements channels.PageChannel {
   _type_EventTarget = true;
@@ -124,6 +124,20 @@ export class PageDispatcher extends Dispatcher<Page, channels.PageChannel, Brows
 
   page(): Page {
     return this._page;
+  }
+
+  serializeConsoleMessage(message: ConsoleMessage) {
+    return {
+      type: message.type(),
+      text: message.text(),
+      args: message.args().map(a => {
+        const elementHandle = a.asElement();
+        if (elementHandle)
+          return ElementHandleDispatcher.from(FrameDispatcher.from(this.parentScope(), elementHandle._frame), elementHandle);
+        return JSHandleDispatcher.fromJSHandle(this, a);
+      }),
+      location: message.location(),
+    };
   }
 
   async exposeBinding(params: channels.PageExposeBindingParams, progress: Progress): Promise<void> {
@@ -273,6 +287,18 @@ export class PageDispatcher extends Dispatcher<Page, channels.PageChannel, Brows
     await this._page.keyboard.press(progress, params.key, params);
   }
 
+  async consoleMessages(params: channels.PageConsoleMessagesParams, progress: Progress): Promise<channels.PageConsoleMessagesResult> {
+    // Send all future console messages to the client, so that it can reliably receive all of them.
+    // Otherwise, if subscription is added in a different task from this call (either before or after),
+    // there is a chance for a duplicate or a lost console message.
+    this._subscriptions.add('console');
+    return { messages: this._page.consoleMessages().map(message => this.serializeConsoleMessage(message)) };
+  }
+
+  async pageErrors(params: channels.PagePageErrorsParams, progress: Progress): Promise<channels.PagePageErrorsResult> {
+    return { errors: this._page.pageErrors().map(error => serializeError(error)) };
+  }
+
   async mouseMove(params: channels.PageMouseMoveParams, progress: Progress): Promise<void> {
     progress.metadata.point = { x: params.x, y: params.y };
     await this._page.mouse.move(progress, params.x, params.y, params);
@@ -315,6 +341,14 @@ export class PageDispatcher extends Dispatcher<Page, channels.PageChannel, Brows
       throw new Error('PDF generation is only supported for Headless Chromium');
     const buffer = await progress.race(this._page.pdf(params));
     return { pdf: buffer };
+  }
+
+  async requests(params: channels.PageRequestsParams, progress: Progress): Promise<channels.PageRequestsResult> {
+    // Send all future requests to the client, so that it can reliably receive all of them.
+    // Otherwise, if subscription is added in a different task from this call (either before or after),
+    // there is a chance for a duplicate or a lost request.
+    this._subscriptions.add('request');
+    return { requests: this._page.networkRequests().map(request => RequestDispatcher.from(this.parentScope(), request)) };
   }
 
   async snapshotForAI(params: channels.PageSnapshotForAIParams, progress: Progress): Promise<channels.PageSnapshotForAIResult> {
@@ -388,7 +422,6 @@ export class PageDispatcher extends Dispatcher<Page, channels.PageChannel, Brows
 
 export class WorkerDispatcher extends Dispatcher<Worker, channels.WorkerChannel, PageDispatcher | BrowserContextDispatcher> implements channels.WorkerChannel {
   _type_Worker = true;
-  private readonly _subscriptions = new Set<channels.WorkerUpdateSubscriptionParams['event']>();
 
   static fromNullable(scope: PageDispatcher | BrowserContextDispatcher, worker: Worker | null): WorkerDispatcher | undefined {
     if (!worker)
@@ -402,23 +435,6 @@ export class WorkerDispatcher extends Dispatcher<Worker, channels.WorkerChannel,
       url: worker.url
     });
     this.addObjectListener(Worker.Events.Close, () => this._dispatchEvent('close'));
-    this.addObjectListener(Worker.Events.Console, (message: ConsoleMessage) => {
-      if (!this._subscriptions.has('console'))
-        return;
-      this._dispatchEvent('console', {
-        type: message.type(),
-        text: message.text(),
-        args: message.args().map(a => JSHandleDispatcher.fromJSHandle(this, a)),
-        location: message.location(),
-      });
-    });
-  }
-
-  async updateSubscription(params: channels.WorkerUpdateSubscriptionParams, progress: Progress): Promise<void> {
-    if (params.enabled)
-      this._subscriptions.add(params.event);
-    else
-      this._subscriptions.delete(params.event);
   }
 
   async evaluateExpression(params: channels.WorkerEvaluateExpressionParams, progress: Progress): Promise<channels.WorkerEvaluateExpressionResult> {

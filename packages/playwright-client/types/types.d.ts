@@ -2285,6 +2285,12 @@ export interface Page {
   }): Promise<void>;
 
   /**
+   * Returns up to (currently) 200 last console messages from this page. See
+   * [page.on('console')](https://playwright.dev/docs/api/class-page#page-event-console) for more details.
+   */
+  consoleMessages(): Promise<Array<ConsoleMessage>>;
+
+  /**
    * Gets the full HTML contents of the page, including the doctype.
    */
   content(): Promise<string>;
@@ -3599,6 +3605,12 @@ export interface Page {
   opener(): Promise<null|Page>;
 
   /**
+   * Returns up to (currently) 200 last page errors from this page. See
+   * [page.on('pageerror')](https://playwright.dev/docs/api/class-page#page-event-page-error) for more details.
+   */
+  pageErrors(): Promise<Array<Error>>;
+
+  /**
    * Pauses script execution. Playwright will stop executing the script and wait for the user to either press the
    * 'Resume' button in the page overlay or to call `playwright.resume()` in the DevTools console.
    *
@@ -3913,6 +3925,21 @@ export interface Page {
    *
    */
   requestGC(): Promise<void>;
+
+  /**
+   * Returns up to (currently) 100 last network request from this page. See
+   * [page.on('request')](https://playwright.dev/docs/api/class-page#page-event-request) for more details.
+   *
+   * Returned requests should be accessed immediately, otherwise they might be collected to prevent unbounded memory
+   * growth as new requests come in. Once collected, retrieving most information about the request is impossible.
+   *
+   * Note that requests reported through the
+   * [page.on('request')](https://playwright.dev/docs/api/class-page#page-event-request) request are not collected, so
+   * there is a trade off between efficient memory usage with
+   * [page.requests()](https://playwright.dev/docs/api/class-page#page-requests) and the amount of available information
+   * reported through [page.on('request')](https://playwright.dev/docs/api/class-page#page-event-request).
+   */
+  requests(): Promise<Array<Request>>;
 
   /**
    * Routing provides the capability to modify network requests that are made by a page.
@@ -8181,14 +8208,7 @@ export interface BrowserContext {
     behavior?: 'wait'|'ignoreErrors'|'default'
   }): Promise<void>;
   /**
-   * **NOTE** Only works with Chromium browser's persistent context.
-   *
-   * Emitted when new background page is created in the context.
-   *
-   * ```js
-   * const backgroundPage = await context.waitForEvent('backgroundpage');
-   * ```
-   *
+   * This event is not emitted.
    */
   on(event: 'backgroundpage', listener: (page: Page) => any): this;
 
@@ -8380,14 +8400,7 @@ export interface BrowserContext {
   once(event: 'weberror', listener: (webError: WebError) => any): this;
 
   /**
-   * **NOTE** Only works with Chromium browser's persistent context.
-   *
-   * Emitted when new background page is created in the context.
-   *
-   * ```js
-   * const backgroundPage = await context.waitForEvent('backgroundpage');
-   * ```
-   *
+   * This event is not emitted.
    */
   addListener(event: 'backgroundpage', listener: (page: Page) => any): this;
 
@@ -8634,14 +8647,7 @@ export interface BrowserContext {
   off(event: 'weberror', listener: (webError: WebError) => any): this;
 
   /**
-   * **NOTE** Only works with Chromium browser's persistent context.
-   *
-   * Emitted when new background page is created in the context.
-   *
-   * ```js
-   * const backgroundPage = await context.waitForEvent('backgroundpage');
-   * ```
-   *
+   * This event is not emitted.
    */
   prependListener(event: 'backgroundpage', listener: (page: Page) => any): this;
 
@@ -8840,9 +8846,8 @@ export interface BrowserContext {
   }>): Promise<void>;
 
   /**
-   * **NOTE** Background pages are only supported on Chromium-based browsers.
-   *
-   * All existing background pages in the context.
+   * Returns an empty list.
+   * @deprecated Background pages have been removed from Chromium together with Manifest V2 extensions.
    */
   backgroundPages(): Array<Page>;
 
@@ -8986,6 +8991,8 @@ export interface BrowserContext {
    * - `'clipboard-write'`
    * - `'geolocation'`
    * - `'gyroscope'`
+   * - `'local-fonts'`
+   * - `'local-network-access'`
    * - `'magnetometer'`
    * - `'microphone'`
    * - `'midi-sysex'` (system-exclusive midi)
@@ -8993,7 +9000,6 @@ export interface BrowserContext {
    * - `'notifications'`
    * - `'payment-handler'`
    * - `'storage-access'`
-   * - `'local-fonts'`
    * @param options
    */
   grantPermissions(permissions: ReadonlyArray<string>, options?: {
@@ -9359,14 +9365,7 @@ export interface BrowserContext {
   }): Promise<void>;
 
   /**
-   * **NOTE** Only works with Chromium browser's persistent context.
-   *
-   * Emitted when new background page is created in the context.
-   *
-   * ```js
-   * const backgroundPage = await context.waitForEvent('backgroundpage');
-   * ```
-   *
+   * This event is not emitted.
    */
   waitForEvent(event: 'backgroundpage', optionsOrPredicate?: { predicate?: (page: Page) => boolean | Promise<boolean>, timeout?: number } | ((page: Page) => boolean | Promise<boolean>)): Promise<Page>;
 
@@ -10327,36 +10326,15 @@ export interface Worker {
   on(event: 'close', listener: (worker: Worker) => any): this;
 
   /**
-   * **NOTE** Console events from Web Workers are dispatched on the page object. Note that console events are only
-   * supported on Chromium-based browsers and within Service Workers.
-   *
-   * Emitted when JavaScript within the worker calls one of console API methods, e.g. `console.log` or `console.dir`.
-   */
-  on(event: 'console', listener: (consoleMessage: ConsoleMessage) => any): this;
-
-  /**
    * Adds an event listener that will be automatically removed after it is triggered once. See `addListener` for more information about this event.
    */
   once(event: 'close', listener: (worker: Worker) => any): this;
-
-  /**
-   * Adds an event listener that will be automatically removed after it is triggered once. See `addListener` for more information about this event.
-   */
-  once(event: 'console', listener: (consoleMessage: ConsoleMessage) => any): this;
 
   /**
    * Emitted when this dedicated [WebWorker](https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API) is
    * terminated.
    */
   addListener(event: 'close', listener: (worker: Worker) => any): this;
-
-  /**
-   * **NOTE** Console events from Web Workers are dispatched on the page object. Note that console events are only
-   * supported on Chromium-based browsers and within Service Workers.
-   *
-   * Emitted when JavaScript within the worker calls one of console API methods, e.g. `console.log` or `console.dir`.
-   */
-  addListener(event: 'console', listener: (consoleMessage: ConsoleMessage) => any): this;
 
   /**
    * Removes an event listener added by `on` or `addListener`.
@@ -10366,31 +10344,13 @@ export interface Worker {
   /**
    * Removes an event listener added by `on` or `addListener`.
    */
-  removeListener(event: 'console', listener: (consoleMessage: ConsoleMessage) => any): this;
-
-  /**
-   * Removes an event listener added by `on` or `addListener`.
-   */
   off(event: 'close', listener: (worker: Worker) => any): this;
-
-  /**
-   * Removes an event listener added by `on` or `addListener`.
-   */
-  off(event: 'console', listener: (consoleMessage: ConsoleMessage) => any): this;
 
   /**
    * Emitted when this dedicated [WebWorker](https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API) is
    * terminated.
    */
   prependListener(event: 'close', listener: (worker: Worker) => any): this;
-
-  /**
-   * **NOTE** Console events from Web Workers are dispatched on the page object. Note that console events are only
-   * supported on Chromium-based browsers and within Service Workers.
-   *
-   * Emitted when JavaScript within the worker calls one of console API methods, e.g. `console.log` or `console.dir`.
-   */
-  prependListener(event: 'console', listener: (consoleMessage: ConsoleMessage) => any): this;
 
   url(): string;
 }
@@ -16268,18 +16228,16 @@ export type AndroidKey =
   'Home' |
   'Back' |
   'Call' | 'EndCall' |
-  '0' |  '1' |  '2' |  '3' |  '4' |  '5' |  '6' |  '7' |  '8' |  '9' |
-  'Star' | 'Pound' | '*' | '#' |
+  '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' |
+  'Star' | '*' | 'Pound' | '#' |
   'DialUp' | 'DialDown' | 'DialLeft' | 'DialRight' | 'DialCenter' |
   'VolumeUp' | 'VolumeDown' |
-  'ChannelUp' | 'ChannelDown' |
   'Power' |
   'Camera' |
   'Clear' |
   'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I' | 'J' | 'K' | 'L' | 'M' |
   'N' | 'O' | 'P' | 'Q' | 'R' | 'S' | 'T' | 'U' | 'V' | 'W' | 'X' | 'Y' | 'Z' |
-  'Comma' | ',' |
-  'Period' | '.' |
+  'Comma' | ',' | 'Period' | '.' |
   'AltLeft' | 'AltRight' |
   'ShiftLeft' | 'ShiftRight' |
   'Tab' | '\t' |
@@ -16307,8 +16265,26 @@ export type AndroidKey =
   'Notification' |
   'Search' |
   'RecentApps' |
+  'MediaPlayPause' |
+  'MediaStop' |
+  'MediaNext' |
+  'MediaPrevious' |
+  'MediaRewind' |
+  'MediaFastForward' |
+  'MediaPlay' |
+  'MediaPause' |
+  'MediaClose' |
+  'MediaEject' |
+  'MediaRecord' |
+  'ChannelUp' | 'ChannelDown' |
   'AppSwitch' |
   'Assist' |
+  'MediaAudioTrack' |
+  'MediaTopMenu' |
+  'MediaSkipForward' |
+  'MediaSkipBackward' |
+  'MediaStepForward' |
+  'MediaStepBackward' |
   'Cut' |
   'Copy' |
   'Paste';

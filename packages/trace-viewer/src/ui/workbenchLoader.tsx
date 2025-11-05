@@ -20,7 +20,8 @@ import { MultiTraceModel } from './modelUtil';
 import './workbenchLoader.css';
 import { Workbench } from './workbench';
 import { TestServerConnection, WebSocketTestServerTransport } from '@testIsomorphic/testServerConnection';
-import { Dialog, DialogToolbarButton } from '@web/components/dialog';
+import { DialogToolbarButton } from '@web/components/dialogToolbarButton';
+import { Dialog } from '@web/shared/dialog';
 import { DefaultSettingsView } from './defaultSettingsView';
 
 export const WorkbenchLoader: React.FunctionComponent<{
@@ -169,7 +170,7 @@ export const WorkbenchLoader: React.FunctionComponent<{
     })();
   }, [isServer, traceURLs, uploadedTraceNames]);
 
-  const showLoading = progress.done !== progress.total && progress.total !== 0;
+  const showLoading = progress.done !== progress.total && progress.total !== 0 && !processingErrorMessage;
 
   React.useEffect(() => {
     if (showLoading) {
@@ -186,7 +187,7 @@ export const WorkbenchLoader: React.FunctionComponent<{
   const showFileUploadDropArea = !!(!isServer && !dragOver && !fileForLocalModeError && (!traceURLs.length || processingErrorMessage));
 
   return <div className='vbox workbench-loader' onDragOver={event => { event.preventDefault(); setDragOver(true); }}>
-    <div className='hbox header' {...(showFileUploadDropArea ? { inert: 'true' } : {})}>
+    <div className='hbox header' {...(showFileUploadDropArea ? { inert: true } : {})}>
       <div className='logo'>
         <img src='playwright-logo.svg' alt='Playwright logo' />
       </div>

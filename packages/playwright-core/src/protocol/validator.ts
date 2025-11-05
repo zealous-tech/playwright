@@ -445,16 +445,6 @@ scheme.DebugControllerSetModeRequestedEvent = tObject({
 });
 scheme.DebugControllerStateChangedEvent = tObject({
   pageCount: tInt,
-  browsers: tArray(tObject({
-    id: tString,
-    name: tString,
-    channel: tOptional(tString),
-    contexts: tArray(tObject({
-      pages: tArray(tObject({
-        url: tString,
-      })),
-    })),
-  })),
 });
 scheme.DebugControllerSourceChangedEvent = tObject({
   text: tString,
@@ -475,7 +465,6 @@ scheme.DebugControllerSetReportStateChangedParams = tObject({
 });
 scheme.DebugControllerSetReportStateChangedResult = tOptional(tObject({}));
 scheme.DebugControllerSetRecorderModeParams = tObject({
-  browserId: tOptional(tString),
   mode: tEnum(['inspecting', 'recording', 'none']),
   testIdAttributeName: tOptional(tString),
   generateAutoExpect: tOptional(tBoolean),
@@ -490,11 +479,6 @@ scheme.DebugControllerHideHighlightParams = tOptional(tObject({}));
 scheme.DebugControllerHideHighlightResult = tOptional(tObject({}));
 scheme.DebugControllerResumeParams = tOptional(tObject({}));
 scheme.DebugControllerResumeResult = tOptional(tObject({}));
-scheme.DebugControllerCloseBrowserParams = tObject({
-  id: tString,
-  reason: tOptional(tString),
-});
-scheme.DebugControllerCloseBrowserResult = tOptional(tObject({}));
 scheme.DebugControllerKillParams = tOptional(tObject({}));
 scheme.DebugControllerKillResult = tOptional(tObject({}));
 scheme.SocksSupportInitializer = tOptional(tObject({}));
@@ -963,9 +947,6 @@ scheme.BrowserContextWebSocketRouteEvent = tObject({
 scheme.BrowserContextVideoEvent = tObject({
   artifact: tChannel(['Artifact']),
 });
-scheme.BrowserContextBackgroundPageEvent = tObject({
-  page: tChannel(['Page']),
-});
 scheme.BrowserContextServiceWorkerEvent = tObject({
   worker: tChannel(['Worker']),
 });
@@ -1245,6 +1226,19 @@ scheme.PageCloseParams = tObject({
   reason: tOptional(tString),
 });
 scheme.PageCloseResult = tOptional(tObject({}));
+scheme.PageConsoleMessagesParams = tOptional(tObject({}));
+scheme.PageConsoleMessagesResult = tObject({
+  messages: tArray(tObject({
+    type: tString,
+    text: tString,
+    args: tArray(tChannel(['ElementHandle', 'JSHandle'])),
+    location: tObject({
+      url: tString,
+      lineNumber: tInt,
+      columnNumber: tInt,
+    }),
+  })),
+});
 scheme.PageEmulateMediaParams = tObject({
   media: tOptional(tEnum(['screen', 'print', 'no-override'])),
   colorScheme: tOptional(tEnum(['dark', 'light', 'no-preference', 'no-override'])),
@@ -1440,6 +1434,10 @@ scheme.PageAccessibilitySnapshotParams = tObject({
 scheme.PageAccessibilitySnapshotResult = tObject({
   rootAXNode: tOptional(tType('AXNode')),
 });
+scheme.PagePageErrorsParams = tOptional(tObject({}));
+scheme.PagePageErrorsResult = tObject({
+  errors: tArray(tType('SerializedError')),
+});
 scheme.PagePdfParams = tObject({
   scale: tOptional(tFloat),
   displayHeaderFooter: tOptional(tBoolean),
@@ -1463,6 +1461,10 @@ scheme.PagePdfParams = tObject({
 });
 scheme.PagePdfResult = tObject({
   pdf: tBinary,
+});
+scheme.PageRequestsParams = tOptional(tObject({}));
+scheme.PageRequestsResult = tObject({
+  requests: tArray(tChannel(['Request'])),
 });
 scheme.PageSnapshotForAIParams = tObject({
   timeout: tFloat,
@@ -1929,16 +1931,6 @@ scheme.WorkerInitializer = tObject({
   url: tString,
 });
 scheme.WorkerCloseEvent = tOptional(tObject({}));
-scheme.WorkerConsoleEvent = tObject({
-  type: tString,
-  text: tString,
-  args: tArray(tChannel(['ElementHandle', 'JSHandle'])),
-  location: tObject({
-    url: tString,
-    lineNumber: tInt,
-    columnNumber: tInt,
-  }),
-});
 scheme.WorkerEvaluateExpressionParams = tObject({
   expression: tString,
   isFunction: tOptional(tBoolean),
@@ -1955,11 +1947,6 @@ scheme.WorkerEvaluateExpressionHandleParams = tObject({
 scheme.WorkerEvaluateExpressionHandleResult = tObject({
   handle: tChannel(['ElementHandle', 'JSHandle']),
 });
-scheme.WorkerUpdateSubscriptionParams = tObject({
-  event: tEnum(['console']),
-  enabled: tBoolean,
-});
-scheme.WorkerUpdateSubscriptionResult = tOptional(tObject({}));
 scheme.JSHandleInitializer = tObject({
   preview: tString,
 });
@@ -2263,7 +2250,9 @@ scheme.RequestInitializer = tObject({
   headers: tArray(tType('NameValue')),
   isNavigationRequest: tBoolean,
   redirectedFrom: tOptional(tChannel(['Request'])),
+  hasResponse: tBoolean,
 });
+scheme.RequestResponseEvent = tOptional(tObject({}));
 scheme.RequestResponseParams = tOptional(tObject({}));
 scheme.RequestResponseResult = tObject({
   response: tOptional(tChannel(['Response'])),
