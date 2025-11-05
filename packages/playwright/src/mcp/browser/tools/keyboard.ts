@@ -34,8 +34,8 @@ const pressKey = defineTabTool({
 
   handle: async (tab, params, response) => {
     response.setIncludeSnapshot();
-    response.addCode(`// Press ${params.key}`);
-    response.addCode(`await page.keyboard.press('${params.key}');`);
+    //response.addCode(`// Press ${params.key}`);
+    //response.addCode(`await page.keyboard.press('${params.key}');`);
 
     await tab.waitForCompletion(async () => {
       await tab.page.keyboard.press(params.key);
@@ -66,16 +66,16 @@ const type = defineTabTool({
     await tab.waitForCompletion(async () => {
       if (params.slowly) {
         response.setIncludeSnapshot();
-        response.addCode(`await page.${await generateLocator(locator)}.pressSequentially(${secret.code});`);
+        //response.addCode(`await page.${await generateLocator(locator)}.pressSequentially(${secret.code});`);
         await locator.pressSequentially(secret.value);
       } else {
-        response.addCode(`await page.${await generateLocator(locator)}.fill(${secret.code});`);
+        //response.addCode(`await page.${await generateLocator(locator)}.fill(${secret.code});`);
         await locator.fill(secret.value);
       }
 
       if (params.submit) {
         response.setIncludeSnapshot();
-        response.addCode(`await page.${await generateLocator(locator)}.press('Enter');`);
+        //response.addCode(`await page.${await generateLocator(locator)}.press('Enter');`);
         await locator.press('Enter');
       }
     });
