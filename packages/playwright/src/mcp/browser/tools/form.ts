@@ -44,13 +44,13 @@ const fillForm = defineTabTool({
       if (field.type === 'textbox' || field.type === 'slider') {
         const secret = tab.context.lookupSecret(field.value);
         await locator.fill(secret.value);
-        //response.addCode(`${locatorSource}.fill(${secret.code});`);
+        response.addCode(`${locatorSource}.fill(${secret.code});`);
       } else if (field.type === 'checkbox' || field.type === 'radio') {
         await locator.setChecked(field.value === 'true');
-        //response.addCode(`${locatorSource}.setChecked(${field.value});`);
+        response.addCode(`${locatorSource}.setChecked(${field.value});`);
       } else if (field.type === 'combobox') {
         await locator.selectOption({ label: field.value });
-        //response.addCode(`${locatorSource}.selectOption(${codegen.quote(field.value)});`);
+        response.addCode(`${locatorSource}.selectOption(${codegen.quote(field.value)});`);
       }
     }
   },
