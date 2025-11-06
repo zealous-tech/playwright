@@ -31,7 +31,7 @@ const close = defineTool({
   handle: async (context, params, response) => {
     await context.closeBrowserContext();
     response.setIncludeTabs();
-    ////response.addCode(`await page.close()`);
+    response.addCode(`await page.close()`);
   },
 });
 
@@ -49,7 +49,7 @@ const resize = defineTabTool({
   },
 
   handle: async (tab, params, response) => {
-    //response.addCode(`await page.setViewportSize({ width: ${params.width}, height: ${params.height} });`);
+    response.addCode(`await page.setViewportSize({ width: ${params.width}, height: ${params.height} });`);
 
     await tab.waitForCompletion(async () => {
       await tab.page.setViewportSize({ width: params.width, height: params.height });

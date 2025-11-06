@@ -114,7 +114,7 @@ const get_computed_styles = defineTabTool({
         return result;
       };
 
-      // //response.addCode(`// Get computed styles for ${params.element}`);
+      // response.addCode(`// Get computed styles for ${params.element}`);
       const computedStyles = await locator.evaluate(getStylesFunction, params.propertyNames);
       console.log('Requested Computed Styles : ', computedStyles);
       response.addResult(JSON.stringify(computedStyles, null, 2) || 'Couldn\'t get requested styles');
@@ -206,12 +206,12 @@ const extract_svg_from_element = defineTabTool({
           };
         };
 
-        // //response.addCode(`// Extract SVG content from ${params.element}`);
+        // response.addCode(`// Extract SVG content from ${params.element}`);
         const svgContent = await locator.evaluate(extractSvgFunction, { extractMethod, includeStyles, minifyOutput });
         response.addResult(svgContent.svgContent);
 
       } catch (error) {
-        // //response.addCode(`// Failed to extract SVG from ${params.element}`);
+        // response.addCode(`// Failed to extract SVG from ${params.element}`);
         const errorMessage = `Failed to extract SVG from ${element}. Error: ${error instanceof Error ? error.message : String(error)}`;
         response.addResult(errorMessage);
       }
@@ -402,7 +402,7 @@ const extract_image_urls = defineTabTool({
           };
         };
 
-        // //response.addCode(`// Extract image URLs from ${params.element}`);
+        // response.addCode(`// Extract image URLs from ${params.element}`);
         const imageData = await locator.evaluate(extractImageFunction, { includeBackgroundImages, includeDataUrls, searchDepth });
         console.log('Extracted Image URLs: ', imageData);
 
@@ -417,7 +417,7 @@ const extract_image_urls = defineTabTool({
         response.addResult(JSON.stringify(imageData));
 
       } catch (error) {
-        // //response.addCode(`// Failed to extract image URLs from ${params.element}`);
+        // response.addCode(`// Failed to extract image URLs from ${params.element}`);
         const errorMessage = `Failed to extract image URLs from ${element}. Error: ${error instanceof Error ? error.message : String(error)}`;
         response.addResult(errorMessage);
       }

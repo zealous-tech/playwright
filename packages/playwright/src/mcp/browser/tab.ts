@@ -285,8 +285,7 @@ export class Tab extends EventEmitter<TabEventsInterface> {
         if (code.startsWith('getBy') || code.startsWith('locator')) {
           try {
               const getLocator = new Function('page', `return page.${code}`);
-              const locator = getLocator(this.page);
-            //const locator = this.parsePlaywrightCommand(code);
+              const locator = getLocator(this.page);              
               return locator.describe(params.element);
           } catch (error) {
             throw new Error(`Failed to execute Playwright command "${code}": ${error instanceof Error ? error.message : String(error)}`);

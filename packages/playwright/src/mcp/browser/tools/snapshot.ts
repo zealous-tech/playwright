@@ -63,11 +63,11 @@ const click = defineTabTool({
     const button = params.button;
     const buttonAttr = button ? `{ button: '${button}' }` : '';
     if (params.doubleClick) {
-      ////response.addCode(`// Double click ${params.element}`);
-      ////response.addCode(`await page.${await generateLocator(locator)}.dblclick(${buttonAttr});`);
+      response.addCode(`// Double click ${params.element}`);
+      response.addCode(`await page.${await generateLocator(locator)}.dblclick(${buttonAttr});`);
     } else {
-      ////response.addCode(`// Click ${params.element}`);
-      ////response.addCode(`await page.${await generateLocator(locator)}.click(${buttonAttr});`);
+      response.addCode(`// Click ${params.element}`);
+      response.addCode(`await page.${await generateLocator(locator)}.click(${buttonAttr});`);
     }
 
     await tab.waitForCompletion(async () => {
@@ -150,7 +150,7 @@ const drag = defineTabTool({
       await startLocator.dragTo(endLocator);
     });
 
-    //response.addCode(`await page.${await generateLocator(startLocator)}.dragTo(page.${await generateLocator(endLocator)});`);
+    response.addCode(`await page.${await generateLocator(startLocator)}.dragTo(page.${await generateLocator(endLocator)});`);
   },
 });
 
@@ -168,7 +168,7 @@ const hover = defineTabTool({
     response.setIncludeSnapshot();
 
     const locator = await tab.refLocator(params);
-    //response.addCode(`await page.${await generateLocator(locator)}.hover();`);
+    response.addCode(`await page.${await generateLocator(locator)}.hover();`);
 
     await tab.waitForCompletion(async () => {
       await locator.hover();
@@ -194,7 +194,7 @@ const selectOption = defineTabTool({
     response.setIncludeSnapshot();
 
     const locator = await tab.refLocator(params);
-    //response.addCode(`await page.${await generateLocator(locator)}.selectOption(${javascript.formatObject(params.values)});`);
+    response.addCode(`await page.${await generateLocator(locator)}.selectOption(${javascript.formatObject(params.values)});`);
 
     await tab.waitForCompletion(async () => {
       await locator.selectOption(params.values);
