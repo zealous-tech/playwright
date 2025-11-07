@@ -67,7 +67,9 @@ export async function waitForCompletion<R>(tab: Tab, callback: () => Promise<R>)
     if (!requests.size && !frameNavigated)
       waitCallback();
     await waitBarrier;
-    await tab.waitForTimeout(1000);
+    //ZEALOUS UPDATE setting this to 1 second to avoid waiting for the timeout
+    //await tab.waitForTimeout(1000);
+    await new Promise(f => setTimeout(f, 1000));
     return result;
   } finally {
     dispose();
