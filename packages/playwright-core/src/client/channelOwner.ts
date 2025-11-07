@@ -203,9 +203,7 @@ export abstract class ChannelOwner<T extends channels.Channel = channels.Channel
         logApiCall(this._platform, logger, `<= ${apiZone.apiName} failed`);
         this._instrumentation.onApiCallEnd(apiZone);
       }
-      //ZEALOUS UPDATE: Ignore errors in _wrapApiCall
-      console.error('Error in _wrapApiCall', e);
-      //throw e;
+      throw e;
     }
   }
 
