@@ -63,6 +63,11 @@ function convertStringToRegExp(obj: any): any {
   return obj;
 }
 
+// Helper function to normalize value by removing spaces and converting to lowercase
+function normalizeValue(value: string): string {
+  return value.replace(/\s+/g, '').toLowerCase();
+}
+
 const elementStyleSchema = z.object({
   element: z.string().describe('Human-readable element description used to obtain permission to interact with the element'),
   ref: z.string().describe('Exact target element reference from the page snapshot'),
@@ -806,6 +811,13 @@ const toHaveValuesArgsSchema = z.object({
   }).optional(),
 });
 
+const selectHasValueArgsSchema = z.object({
+  value: z.string().describe('Expected value (case and space insensitive)'),
+  options: z.object({
+    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
+  }).optional(),
+});
+
 const toMatchAriaSnapshotArgsSchema = z.object({
   expected: z.string().describe('Expected accessibility snapshot'),
   options: z.object({
@@ -853,6 +865,7 @@ const assertionArgumentsSchema = z.discriminatedUnion('assertionType', [
   z.object({ assertionType: z.literal('toHaveText'), ...toHaveTextArgsSchema.shape }),
   z.object({ assertionType: z.literal('toHaveValue'), ...toHaveValueArgsSchema.shape }),
   z.object({ assertionType: z.literal('toHaveValues'), ...toHaveValuesArgsSchema.shape }),
+  z.object({ assertionType: z.literal('selectHasValue'), ...selectHasValueArgsSchema.shape }),
   z.object({ assertionType: z.literal('toMatchAriaSnapshot'), ...toMatchAriaSnapshotArgsSchema.shape }),
   z.object({ assertionType: z.literal('toMatchAriaSnapshotOptions'), ...toMatchAriaSnapshotOptionsArgsSchema.shape }),
 ]);
@@ -1031,8 +1044,6 @@ const validate_dom_assertions = defineTabTool({
               if (!textExpected) {
                 throw new Error('toHaveText requires "expected" argument (string, RegExp, or Array<string | RegExp>)');
               }
-              console.log('textExpected', textExpected);
-              console.log('finalOptions', finalOptions);
               assertionResult = await assertion.toHaveText(textExpected, finalOptions);
               result.actual = `text "${Array.isArray(textExpected) ? textExpected.join(', ') : textExpected}"`;
               break;
@@ -1071,6 +1082,73 @@ const validate_dom_assertions = defineTabTool({
               }
               assertionResult = await assertion.toHaveValues(valuesExpected, finalOptions);
               result.actual = `values [${valuesExpected.join(', ')}]`;
+              break;
+
+            case 'selectHasValue':
+              if (!args || args.assertionType !== 'selectHasValue') {
+                throw new Error('selectHasValue requires proper arguments structure');
+              }
+              const { value: selectValueExpected } = mainArgs;
+              if (selectValueExpected === undefined) {
+                throw new Error('selectHasValue requires "value" argument (string)');
+              }
+              const normalizedExpected = normalizeValue(selectValueExpected);
+
+              // Use expect.poll to retry the assertion with timeout
+              const pollFn = async () => {
+                const actualValue = await locator.inputValue();
+                const normalizedActual = normalizeValue(actualValue);
+                return { actualValue, normalizedActual };
+              };
+
+              const timeout = finalOptions?.timeout || 15000;
+              const startTime = Date.now();
+              let lastError: Error | null = null;
+              let lastActualValue = '';
+              let lastNormalizedActual = '';
+
+              while (Date.now() - startTime < timeout) {
+                try {
+                  const { actualValue, normalizedActual } = await pollFn();
+                  lastActualValue = actualValue;
+                  lastNormalizedActual = normalizedActual;
+
+                  if (negate) {
+                    // For negated assertions, values should NOT match
+                    if (normalizedExpected === normalizedActual) {
+                      throw new Error(`Expected select value to not be "${selectValueExpected}" (normalized: "${normalizedExpected}"), but got "${actualValue}" (normalized: "${normalizedActual}")`);
+                    }
+                    // Values don't match, assertion passes
+                    break;
+                  } else {
+                    // For normal assertions, values should match
+                    if (normalizedExpected === normalizedActual) {
+                      // Values match, assertion passes
+                      break;
+                    }
+                    // Values don't match yet, will retry
+                    throw new Error(`Expected select value to be "${selectValueExpected}" (normalized: "${normalizedExpected}"), but got "${actualValue}" (normalized: "${normalizedActual}")`);
+                  }
+                } catch (error) {
+                  lastError = error instanceof Error ? error : new Error(String(error));
+                  // If timeout hasn't expired, wait a bit and retry
+                  if (Date.now() - startTime < timeout) {
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                    continue;
+                  }
+                  // Timeout expired, throw the last error
+                  throw lastError;
+                }
+              }
+
+              // If we get here and it's a negated assertion that didn't throw, it means values matched when they shouldn't
+              if (negate && normalizedExpected === lastNormalizedActual) {
+                throw new Error(`Expected select value to not be "${selectValueExpected}" (normalized: "${normalizedExpected}"), but got "${lastActualValue}" (normalized: "${lastNormalizedActual}")`);
+              }
+
+              // Use a simple assertion that always passes when values match (or don't match for negated)
+              assertionResult = await assertion.toBeAttached(finalOptions);
+              result.actual = `value "${lastActualValue}" (normalized: "${lastNormalizedActual}")`;
               break;
 
             case 'toMatchAriaSnapshot':
