@@ -53,7 +53,7 @@ export async function waitForCompletion<R>(tab: Tab, callback: () => Promise<R>)
   tab.page.on('request', requestListener);
   tab.page.on('requestfailed', responseListener);
   tab.page.on('framenavigated', frameNavigateListener);
-  const timeout = setTimeout(onTimeout, 1000);
+  const timeout = setTimeout(onTimeout, 10000);
 
   const dispose = () => {
     tab.page.off('request', requestListener);
