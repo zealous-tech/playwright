@@ -15,7 +15,7 @@
  */
 import { z } from 'zod';
 import { defineTabTool } from './tool.js';
-import { getAllComputedStylesDirect, pickActualValue, parseRGBColor, isColorInRange,runCommandClean, getValueByJsonPath, compareValues, checkElementVisibilityUnique, checkTextVisibilityInAllFrames } from './helperFunctions.js';
+import { getAllComputedStylesDirect, pickActualValue, parseRGBColor, isColorInRange,runCommandClean, getValueByJsonPath, compareValues, checkElementVisibilityUnique, checkTextVisibilityInAllFrames, getElementNotFoundMessage, generateLocatorString } from './helperFunctions.js';
 import { generateLocator } from './utils.js';
 import { expect } from '@zealous-tech/playwright/test';
 import type * as playwright from '@zealous-tech/playwright';
@@ -488,76 +488,113 @@ const validate_computed_styles = defineTabTool({
     const { ref, element, checks } = validateStylesSchema.parse(rawParams);
 
     await tab.waitForCompletion(async () => {
+      // Get locator and generate locator string
+      const locator = await tab.refLocator({ ref, element });
+      const locatorString = await generateLocatorString(ref, locator);
+
+      // Helper function to create evidence command
+      const createEvidenceCommand = (property: string, operator: string, expected?: any) => JSON.stringify({
+        description: "Evidence showing how validation was performed",
+        toolName: 'validate_computed_styles',
+        locator: locatorString,
+        arguments: {
+          property,
+          operator,
+          expected: expected !== undefined ? expected : null
+        }
+      });
+
       // 1) Get all computed styles directly
-      const allStyles = await getAllComputedStylesDirect(tab, ref, element);
+      let allStyles: any;
+      let elementNotFound = false;
+      try {
+        allStyles = await getAllComputedStylesDirect(tab, ref, element);
+      } catch (error) {
+        elementNotFound = true;
+        allStyles = {};
+      }
       //console.log("All Computed Styles:", allStyles);
       // 2) Validate rules
-      const results = checks.map(c => {
-        const actual = pickActualValue(allStyles, c.name);
+      const results = elementNotFound
+        ? checks.map(c => ({
+            style: c.name,
+            operator: c.operator,
+            expected: c.expected,
+            actual: undefined,
+            result: 'fail' as const,
+          }))
+        : checks.map(c => {
+            const actual = pickActualValue(allStyles, c.name);
 
-        let passed: boolean;
-        if (c.operator === 'isEqual') {
-          // isEqual operator: strict equality only
-          if (typeof c.expected === 'string' && (c.name.toLowerCase().includes('color') || c.name.toLowerCase().includes('background'))) {
-            // For color properties, check if expected is in RGB format
-            const expectedRGB = parseRGBColor(c.expected);
-            const actualRGB = parseRGBColor(actual || '');
+            let passed: boolean;
+            if (c.operator === 'isEqual') {
+              // isEqual operator: strict equality only
+              if (typeof c.expected === 'string' && (c.name.toLowerCase().includes('color') || c.name.toLowerCase().includes('background'))) {
+                // For color properties, check if expected is in RGB format
+                const expectedRGB = parseRGBColor(c.expected);
+                const actualRGB = parseRGBColor(actual || '');
 
-            if (expectedRGB && actualRGB) {
-              // Compare RGB values with some tolerance for minor variations
-              const tolerance = 5; // Allow small variations in RGB values
-              passed = Math.abs(expectedRGB.r - actualRGB.r) <= tolerance &&
-                      Math.abs(expectedRGB.g - actualRGB.g) <= tolerance &&
-                      Math.abs(expectedRGB.b - actualRGB.b) <= tolerance;
+                if (expectedRGB && actualRGB) {
+                  // Compare RGB values with some tolerance for minor variations
+                  const tolerance = 5; // Allow small variations in RGB values
+                  passed = Math.abs(expectedRGB.r - actualRGB.r) <= tolerance &&
+                          Math.abs(expectedRGB.g - actualRGB.g) <= tolerance &&
+                          Math.abs(expectedRGB.b - actualRGB.b) <= tolerance;
+                } else {
+                  // Fallback to strict equality if RGB parsing fails
+                  passed = actual === c.expected;
+                }
+              } else {
+                // For non-color properties: strict equality
+                passed = actual === c.expected;
+              }
+            } else if (c.operator === 'notEqual') {
+              // notEqual operator: strict inequality
+              passed = actual !== c.expected;
+            } else if (c.operator === 'inRange') {
+              // inRange operator: check if value is in list or RGB color is within range
+              if (Array.isArray(c.expected)) {
+                // For inRange with array: any matching value passes
+                passed = actual !== undefined && c.expected.includes(actual);
+              } else if (typeof c.expected === 'object' && 'minR' in c.expected) {
+                // For inRange with RGB range object: check if color is within range
+                passed = actual !== undefined && isColorInRange(actual, c.expected as { minR: number; maxR: number; minG: number; maxG: number; minB: number; maxB: number });
+              } else {
+                passed = false; // Invalid expected value - inRange only supports arrays and RGB range objects
+              }
             } else {
-              // Fallback to strict equality if RGB parsing fails
-              passed = actual === c.expected;
+              passed = false; // Unknown operator
             }
-          } else {
-            // For non-color properties: strict equality
-            passed = actual === c.expected;
-          }
-        } else if (c.operator === 'notEqual') {
-          // notEqual operator: strict inequality
-          passed = actual !== c.expected;
-        } else if (c.operator === 'inRange') {
-          // inRange operator: check if value is in list or RGB color is within range
-          if (Array.isArray(c.expected)) {
-            // For inRange with array: any matching value passes
-            passed = actual !== undefined && c.expected.includes(actual);
-          } else if (typeof c.expected === 'object' && 'minR' in c.expected) {
-            // For inRange with RGB range object: check if color is within range
-            passed = actual !== undefined && isColorInRange(actual, c.expected as { minR: number; maxR: number; minG: number; maxG: number; minB: number; maxB: number });
-          } else {
-            passed = false; // Invalid expected value - inRange only supports arrays and RGB range objects
-          }
-        } else {
-          passed = false; // Unknown operator
-        }
 
-        return {
-          style: c.name,
-          operator: c.operator,
-          expected: c.expected,
-          actual,
-          result: passed ? 'pass' : 'fail',
-        };
-      });
+            return {
+              style: c.name,
+              operator: c.operator,
+              expected: c.expected,
+              actual,
+              result: passed ? 'pass' : 'fail',
+            };
+          });
+
 
       const passedCount = results.filter(r => r.result === 'pass').length;
 
-      // Generate evidence message
-      let evidence = '';
-      if (passedCount === results.length) {
-        evidence = `Found element "${element}" with all ${results.length} style properties matching expected values`;
-      } else {
-        const failedChecks = results.filter(r => r.result === 'fail');
-        const failedStyles = failedChecks.map(c => {
-          const expectedValue = typeof c.expected === 'object' ? JSON.stringify(c.expected) : c.expected;
-          return `${c.style}: expected "${expectedValue}", got "${c.actual}"`;
-        }).join(', ');
-        evidence = `Found element "${element}" but ${failedChecks.length} style properties failed validation: ${failedStyles}`;
-      }
+      // Generate evidence as array of objects
+      const evidence = elementNotFound
+        ? checks.map(check => ({
+            command: createEvidenceCommand(check.name, check.operator, check.expected),
+            message: `CSS Property "${check.name}" validation failed: UI element not found`
+          }))
+        : results.map(result => {
+            const expectedValue = typeof result.expected === 'object' ? JSON.stringify(result.expected) : result.expected;
+            const message = result.result === 'pass'
+              ? `CSS Property "${result.style}" validation passed: actual value "${result.actual}" ${result.operator === 'isEqual' ? 'equals' : result.operator === 'notEqual' ? 'does not equal' : 'is in range'} expected "${expectedValue}"`
+              : `CSS Property "${result.style}" validation failed: actual value "${result.actual}" ${result.operator === 'isEqual' ? 'does not equal' : result.operator === 'notEqual' ? 'equals' : 'is not in range'} expected "${expectedValue}"`;
+            
+            return {
+              command: createEvidenceCommand(result.style, result.operator, result.expected),
+              message
+            };
+          });
 
       // 3) Answer
       const payload = {
@@ -883,6 +920,254 @@ const validateDomAssertionsSchema = baseDomInputSchema.extend({
   checks: domAssertionChecksSchema,
 });
 
+// Function to generate assertion messages with element description
+const getAssertionMessage = (assertionType: string, elementDescription: string, negate: boolean = false): string => {
+  const positiveMessages: Record<string, string> = {
+    toBeEnabled: `'${elementDescription}' is disabled (should be enabled).`,
+    toBeDisabled: `'${elementDescription}' is enabled (should be disabled).`,
+    toBeVisible: `'${elementDescription}' is hidden (should be visible).`,
+    toBeHidden: `'${elementDescription}' is visible (should be hidden).`,
+    toBeInViewport: `'${elementDescription}' is outside viewport (should be in viewport).`,
+    toBeChecked: `'${elementDescription}' is unchecked (should be checked).`,
+    toBeFocused: `'${elementDescription}' is not focused (should be focused).`,
+    toBeEditable: `'${elementDescription}' is read-only (should be editable).`,
+    toBeEmpty: `'${elementDescription}' contains content (should be empty).`,
+    toBeAttached: `'${elementDescription}' is detached from DOM (should be attached).`,
+    toHaveAttribute: `'${elementDescription}' is missing attribute (attribute required).`,
+    toHaveAttributeValue: `'${elementDescription}' has different attribute value (specific value required).`,
+    toHaveText: `'${elementDescription}' has different text (exact text match required).`,
+    toContainText: `'${elementDescription}' does not contain expected text (text should be present).`,
+    toHaveValue: `'${elementDescription}' has different value (specific value required).`,
+    toHaveValues: `'${elementDescription}' has different values (specific values required).`,
+    selectHasValue: `'${elementDescription}' has different selection (specific value should be selected).`,
+    toMatchAriaSnapshot: `'${elementDescription}' has different ARIA structure (should match snapshot).`,
+    toMatchAriaSnapshotOptions: `'${elementDescription}' has different ARIA structure (should match snapshot with options).`,
+    toContainClass: `'${elementDescription}' is missing class (class should be present).`,
+    toHaveClass: `'${elementDescription}' has different classes (exact class match required).`,
+    toHaveCount: `'${elementDescription}' has different count (specific count required).`,
+    toHaveCSS: `'${elementDescription}' has different CSS property value (specific value required).`,
+    toHaveId: `'${elementDescription}' has different id (specific id required).`,
+    toHaveJSProperty: `'${elementDescription}' has different JS property value (specific value required).`,
+    toHaveRole: `'${elementDescription}' has different role (specific role required).`,
+    toHaveScreenshot: `'${elementDescription}' has visual differences (should match screenshot).`,
+    toHaveScreenshotOptions: `'${elementDescription}' has visual differences (should match screenshot with options).`,
+    toHaveAccessibleDescription: `'${elementDescription}' is missing accessible description or differs (description required).`,
+    toHaveAccessibleErrorMessage: `'${elementDescription}' is missing accessible error message or differs (message required).`,
+    toHaveAccessibleName: `'${elementDescription}' is missing accessible name or differs (name required).`,
+  };
+ 
+ 
+  const negativeMessages: Record<string, string> = {
+    toBeEnabled: `'${elementDescription}' is enabled (should be disabled).`,
+    toBeDisabled: `'${elementDescription}' is disabled (should be enabled).`,
+    toBeVisible: `'${elementDescription}' is visible (should be hidden).`,
+    toBeHidden: `'${elementDescription}' is hidden (should be visible).`,
+    toBeInViewport: `'${elementDescription}' is in viewport (should be outside viewport).`,
+    toBeChecked: `'${elementDescription}' is checked (should be unchecked).`,
+    toBeFocused: `'${elementDescription}' has focus (should not be focused).`,
+    toBeEditable: `'${elementDescription}' is editable (should be read-only).`,
+    toBeEmpty: `'${elementDescription}' is empty (should have content).`,
+    toBeAttached: `'${elementDescription}' is attached to DOM (should be detached)`,
+    toHaveAttribute: `'${elementDescription}' has the attribute (should not have it).`,
+    toHaveAttributeValue: `'${elementDescription}' has matching attribute value (should have different value).`,
+    toHaveText: `'${elementDescription}' has matching text (should have different text).`,
+    toContainText: `'${elementDescription}' contains the text (should not contain it).`,
+    toHaveValue: `'${elementDescription}' has matching value (should have different value).`,
+    toHaveValues: `'${elementDescription}' has matching values (should have different values).`,
+    selectHasValue: `'${elementDescription}' has matching selection (should have different selection).`,
+    toMatchAriaSnapshot: `'${elementDescription}' matches ARIA structure (should have different structure).`,
+    toMatchAriaSnapshotOptions: `'${elementDescription}' matches ARIA structure with options (should have different structure).`,
+    toContainClass: `'${elementDescription}' has the class (should not have it).`,
+    toHaveClass: `'${elementDescription}' has matching classes (should have different classes).`,
+    toHaveCount: `'${elementDescription}' has matching count (should have different count).`,
+    toHaveCSS: `'${elementDescription}' has matching CSS property value (should have different value).`,
+    toHaveId: `'${elementDescription}' has matching id (should have different id).`,
+    toHaveJSProperty: `'${elementDescription}' has matching JS property value (should have different value).`,
+    toHaveRole: `'${elementDescription}' has matching role (should have different role).`,
+    toHaveScreenshot: `'${elementDescription}' matches screenshot (should look different).`,
+    toHaveScreenshotOptions: `'${elementDescription}' matches screenshot with options (should look different).`,
+    toHaveAccessibleDescription: `'${elementDescription}' has accessible description (should not have it).`,
+    toHaveAccessibleErrorMessage: `'${elementDescription}' has accessible error message (should not have it).`,
+    toHaveAccessibleName: `'${elementDescription}' has accessible name (should not have it).`,
+  };
+
+  const messages = negate ? negativeMessages : positiveMessages;
+  return messages[assertionType] || `${elementDescription} assertion ${negate ? 'should not' : 'should'} failed`;
+};
+
+// Function to generate evidence for assertions
+const getAssertionEvidence = (
+  assertionType: string,
+  negate: boolean,
+  timeout: number,
+  locatorString: string,
+  elementDescription: string,
+  mainArgs?: any,
+  options?: any,
+): string => {
+  const timeoutStr = timeout ? ` (timeout: ${timeout}ms)` : '';
+  const negateStr = negate ? 'not ' : '';
+  
+  // Messages for passed assertions
+  const passedEvidenceMessages: Record<string, (args?: any, opts?: any) => string> = {
+    toBeEnabled: (args, opts) => {
+      // Check if options.enabled is explicitly set to false
+      const enabledValue = opts?.enabled;
+      if (enabledValue === false) {
+        // If enabled: false, we're checking that element is disabled
+        return `'${elementDescription}' is ${negate ? 'enabled' : 'disabled'} `;
+      } else {
+        // Default: checking that element is enabled
+        return `'${elementDescription}' is ${negate ? 'disabled' : 'enabled'} `;
+      }
+    },
+    toBeDisabled: () => `'${elementDescription}' is ${negate ? 'enabled' : 'disabled'} `,
+    toBeVisible: (args, opts) => {
+      // Check if options.visible is explicitly set to false
+      const visibleValue = opts?.visible;
+      if (visibleValue === false) {
+        // If visible: false, we're checking that element is hidden
+        return `'${elementDescription}' is ${negate ? 'visible' : 'hidden'} `;
+      } else {
+        // Default: checking that element is visible
+        return `'${elementDescription}' is ${negate ? 'hidden' : 'visible'} `;
+      }
+    },
+    toBeHidden: () => `'${elementDescription}' is ${negate ? 'visible' : 'hidden'} `,
+    toBeInViewport: () => `'${elementDescription}' is ${negate ? 'outside viewport' : 'in viewport'} `,
+    toBeChecked: (args, opts) => {
+      // Check if options.checked is explicitly set to false
+      const checkedValue = opts?.checked;
+      if (checkedValue === false) {
+        // If checked: false, we're checking that element is unchecked
+        return `'${elementDescription}' is ${negate ? 'checked' : 'unchecked'} `;
+      } else {
+        // Default: checking that element is checked
+        return `'${elementDescription}' is ${negate ? 'unchecked' : 'checked'} `;
+      }
+    },
+    toBeFocused: () => `'${elementDescription}' is ${negate ? 'not focused' : 'focused'} `,
+    toBeEditable: (args, opts) => {
+      // Check if options.editable is explicitly set to false
+      const editableValue = opts?.editable;
+      if (editableValue === false) {
+        // If editable: false, we're checking that element is read-only
+        return `'${elementDescription}' is ${negate ? 'editable' : 'read-only'} `;
+      } else {
+        // Default: checking that element is editable
+        return `'${elementDescription}' is ${negate ? 'read-only' : 'editable'} `;
+      }
+    },
+    toBeEmpty: () => `'${elementDescription}' is ${negate ? 'not empty' : 'empty'} `,
+    toBeAttached: (args, opts) => {
+      // Check if options.attached is explicitly set to false
+      const attachedValue = opts?.attached;
+      if (attachedValue === false) {
+        // If attached: false, we're checking that element is detached
+        return `'${elementDescription}' is ${negate ? 'attached to' : 'detached from'} DOM `;
+      } else {
+        // Default: checking that element is attached
+        return `'${elementDescription}' is ${negate ? 'detached from' : 'attached to'} DOM `;
+      }
+    },
+    toHaveAttribute: (args) => {
+      const attrName = args?.name || 'attribute';
+      return `'${elementDescription}' ${negate ? 'does not have' : 'has'} attribute "${attrName}" `;
+    },
+    toHaveAttributeValue: (args) => {
+      const attrName = args?.name || 'attribute';
+      const attrValue = args?.value || 'value';
+      return `'${elementDescription}' attribute "${attrName}" ${negate ? 'does not equal' : 'equals'} "${attrValue}" `;
+    },
+    toHaveText: (args) => {
+      const expected = args?.expected || 'text';
+      const expectedStr = Array.isArray(expected) ? expected.join(', ') : expected;
+      return `'${elementDescription}' text ${negate ? 'does not match' : 'matches'} "${expectedStr}" `;
+    },
+    toContainText: (args) => {
+      const expected = args?.expected || 'text';
+      const expectedStr = Array.isArray(expected) ? expected.join(', ') : expected;
+      return `'${elementDescription}' ${negate ? 'does not contain' : 'contains'} text "${expectedStr}" `;
+    },
+    toHaveValue: (args) => {
+      const value = args?.value !== undefined ? args.value : 'value';
+      return `'${elementDescription}' value ${negate ? 'does not equal' : 'equals'} "${value}" `;
+    },
+    toHaveValues: (args) => {
+      const values = args?.values || [];
+      const valuesStr = Array.isArray(values) ? values.join(', ') : String(values);
+      return `'${elementDescription}' values ${negate ? 'do not match' : 'match'} [${valuesStr}] `;
+    },
+    selectHasValue: (args) => {
+      const value = args?.value || 'value';
+      return `'${elementDescription}' selected value ${negate ? 'does not equal' : 'equals'} "${value}" `;
+    },
+    toMatchAriaSnapshot: (args) => {
+      const expected = args?.expected || 'snapshot';
+      return `'${elementDescription}' ARIA structure ${negate ? 'does not match' : 'matches'} "${expected}" `;
+    },
+    toMatchAriaSnapshotOptions: () => `'${elementDescription}' ARIA structure ${negate ? 'does not match' : 'matches'} snapshot with options `,
+    toContainClass: (args) => {
+      const expected = args?.expected || 'class';
+      const expectedStr = Array.isArray(expected) ? expected.join(' ') : expected;
+      return `'${elementDescription}' ${negate ? 'does not contain' : 'contains'} class "${expectedStr}" `;
+    },
+    toHaveClass: (args) => {
+      const expected = args?.expected || 'class';
+      const expectedStr = Array.isArray(expected) ? expected.join(' ') : expected;
+      return `'${elementDescription}' classes ${negate ? 'do not match' : 'match'} "${expectedStr}" `;
+    },
+    toHaveCount: (args) => {
+      const count = args?.count !== undefined ? args.count : 'count';
+      return `'${elementDescription}' count ${negate ? 'does not equal' : 'equals'} ${count} `;
+    },
+    toHaveCSS: (args) => {
+      const cssName = args?.name || 'property';
+      const cssValue = args?.value || 'value';
+      return `'${elementDescription}' CSS "${cssName}" ${negate ? 'does not equal' : 'equals'} "${cssValue}" `;
+    },
+    toHaveId: (args) => {
+      const id = args?.id || 'id';
+      return `'${elementDescription}' id ${negate ? 'does not equal' : 'equals'} "${id}" `;
+    },
+    toHaveJSProperty: (args) => {
+      const propName = args?.name || 'property';
+      const propValue = args?.value !== undefined ? JSON.stringify(args.value) : 'value';
+      return `'${elementDescription}' JS property "${propName}" ${negate ? 'does not equal' : 'equals'} ${propValue} `;
+    },
+    toHaveRole: (args) => {
+      const role = args?.role || 'role';
+      return `'${elementDescription}' role ${negate ? 'does not equal' : 'equals'} "${role}" `;
+    },
+    toHaveScreenshot: (args) => {
+      const name = args?.name || 'screenshot';
+      const nameStr = Array.isArray(name) ? name.join(', ') : name;
+      return `'${elementDescription}' screenshot ${negate ? 'does not match' : 'matches'} "${nameStr}" `;
+    },
+    toHaveScreenshotOptions: () => `'${elementDescription}' screenshot ${negate ? 'does not match' : 'matches'} with options `,
+    toHaveAccessibleDescription: (args) => {
+      const description = args?.description || 'description';
+      return `'${elementDescription}' accessible description ${negate ? 'does not equal' : 'equals'} "${description}" `;
+    },
+    toHaveAccessibleErrorMessage: (args) => {
+      const errorMessage = args?.errorMessage || 'error message';
+      return `'${elementDescription}' accessible error message ${negate ? 'does not equal' : 'equals'} "${errorMessage}" `;
+    },
+    toHaveAccessibleName: (args) => {
+      const name = args?.name || 'name';
+      return `'${elementDescription}' accessible name ${negate ? 'does not equal' : 'equals'} "${name}" `;
+    },
+  };
+
+  const evidenceFn = passedEvidenceMessages[assertionType];
+  if (evidenceFn) {
+    return evidenceFn(mainArgs, options);
+  }
+  //fallback to default evidence message
+  return `'${elementDescription}' assertion ${negate ? 'should not' : 'should'} passed.`
+    
+};
+
 const validate_dom_assertions = defineTabTool({
   capability: 'core',
   schema: {
@@ -908,22 +1193,38 @@ const validate_dom_assertions = defineTabTool({
         const convertedArgs = convertStringToRegExp(args);
         //console.log('convertedArgs', convertedArgs);
         const { assertionType: name } = convertedArgs;
+        // Get message for current assertion with element description
+        const message : string = getAssertionMessage(name, element, negate);
+        // Prepare final args - separate main arguments from options
+        const { options, ...mainArgs } = convertedArgs;
+        const finalOptions = { ...options, ...(timeout && { timeout }) };
+        
         let result = {
           assertion: name,
           negate,
           result: 'fail' as 'pass' | 'fail',
+          evidence: {message: '', command: ''},
           error: '',
           actual: '',
           arguments: args,
         };
 
+        let locatorString: string = '';
+        const createEvidenceCommand = (locatorStr: string) => JSON.stringify({
+          description: "Evidence showing how validation was performed",
+          assertion: name,
+          locator: locatorStr,
+          arguments: Object.keys(mainArgs).length > 1 ? mainArgs : {},
+          options: Object.keys(finalOptions).length > 0 ? finalOptions : {}
+        });
         try {
-          // Create the assertion
-          const assertion = negate ? expect(locator).not : expect(locator);
+          // Create the assertion with message
+          const assertion = message 
+            ? (negate ? expect(locator, message).not : expect(locator, message))
+            : (negate ? expect(locator).not : expect(locator));
 
-          // Prepare final args - separate main arguments from options
-          const { options, ...mainArgs } = convertedArgs;
-          const finalOptions = { ...options, ...(timeout && { timeout }) };
+          // Helper function to create evidence command
+          
 
           // Execute the specific assertion by calling the method dynamically
           let assertionResult;
@@ -934,6 +1235,10 @@ const validate_dom_assertions = defineTabTool({
               }
               assertionResult = await assertion.toBeEnabled(finalOptions);
               result.actual = 'enabled';
+              
+              locatorString = await generateLocatorString(ref, locator);
+              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs, options);
+              result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
             case 'toBeDisabled':
@@ -942,6 +1247,9 @@ const validate_dom_assertions = defineTabTool({
               }
               assertionResult = await assertion.toBeDisabled(finalOptions);
               result.actual = 'disabled';
+              locatorString = await generateLocatorString(ref, locator);
+              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs, );
+              result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
             case 'toBeVisible':
@@ -950,6 +1258,9 @@ const validate_dom_assertions = defineTabTool({
               }
               assertionResult = await assertion.toBeVisible(finalOptions);
               result.actual = 'visible';
+              locatorString = await generateLocatorString(ref, locator);
+              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs, options);
+              result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
             case 'toBeHidden':
@@ -958,6 +1269,9 @@ const validate_dom_assertions = defineTabTool({
               }
               assertionResult = await assertion.toBeHidden(finalOptions);
               result.actual = 'hidden';
+              locatorString = await generateLocatorString(ref, locator);
+              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs);
+              result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
             case 'toBeInViewport':
@@ -966,6 +1280,9 @@ const validate_dom_assertions = defineTabTool({
               }
               assertionResult = await assertion.toBeInViewport(finalOptions);
               result.actual = 'in viewport';
+              locatorString = await generateLocatorString(ref, locator);
+              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs);
+              result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
             case 'toBeChecked':
@@ -974,6 +1291,9 @@ const validate_dom_assertions = defineTabTool({
               }
               assertionResult = await assertion.toBeChecked(finalOptions);
               result.actual = 'checked';
+              locatorString = await generateLocatorString(ref, locator);
+              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs, options);
+              result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
 
@@ -983,6 +1303,9 @@ const validate_dom_assertions = defineTabTool({
               }
               assertionResult = await assertion.toBeFocused(finalOptions);
               result.actual = 'focused';
+              locatorString = await generateLocatorString(ref, locator);
+              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs);
+              result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
             case 'toBeEditable':
@@ -991,6 +1314,9 @@ const validate_dom_assertions = defineTabTool({
               }
               assertionResult = await assertion.toBeEditable(finalOptions);
               result.actual = 'editable';
+              locatorString = await generateLocatorString(ref, locator);
+              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs, options);
+              result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
             case 'toBeEmpty':
@@ -999,6 +1325,9 @@ const validate_dom_assertions = defineTabTool({
               }
               assertionResult = await assertion.toBeEmpty(finalOptions);
               result.actual = 'empty';
+              locatorString = await generateLocatorString(ref, locator);
+              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs);
+              result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
             case 'toBeAttached':
@@ -1007,6 +1336,9 @@ const validate_dom_assertions = defineTabTool({
               }
               assertionResult = await assertion.toBeAttached(finalOptions);
               result.actual = 'attached';
+              locatorString = await generateLocatorString(ref, locator);
+              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs, options);
+              result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
             case 'toHaveAttribute':
@@ -1019,6 +1351,9 @@ const validate_dom_assertions = defineTabTool({
               }
               assertionResult = await assertion.toHaveAttribute(attrName, finalOptions);
               result.actual = `attribute "${attrName}" exists`;
+              locatorString = await generateLocatorString(ref, locator);
+              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs);
+              result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
             case 'toHaveAttributeValue':
@@ -1034,6 +1369,9 @@ const validate_dom_assertions = defineTabTool({
               }
               assertionResult = await assertion.toHaveAttribute(attrValueName, attrValueValue, finalOptions);
               result.actual = `attribute "${attrValueName}"="${attrValueValue}"`;
+              locatorString = await generateLocatorString(ref, locator);
+              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs);
+              result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
             case 'toHaveText':
@@ -1046,6 +1384,9 @@ const validate_dom_assertions = defineTabTool({
               }
               assertionResult = await assertion.toHaveText(textExpected, finalOptions);
               result.actual = `text "${Array.isArray(textExpected) ? textExpected.join(', ') : textExpected}"`;
+              locatorString = await generateLocatorString(ref, locator);
+              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs);
+              result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
             case 'toContainText':
@@ -1058,6 +1399,9 @@ const validate_dom_assertions = defineTabTool({
               }
               assertionResult = await assertion.toContainText(containExpected, finalOptions);
               result.actual = `contains text "${Array.isArray(containExpected) ? containExpected.join(', ') : containExpected}"`;
+              locatorString = await generateLocatorString(ref, locator);
+              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs);
+              result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
             case 'toHaveValue':
@@ -1070,6 +1414,9 @@ const validate_dom_assertions = defineTabTool({
               }
               assertionResult = await assertion.toHaveValue(valueExpected, finalOptions);
               result.actual = `value "${valueExpected}"`;
+              locatorString = await generateLocatorString(ref, locator);
+              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs);
+              result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
             case 'toHaveValues':
@@ -1082,6 +1429,9 @@ const validate_dom_assertions = defineTabTool({
               }
               assertionResult = await assertion.toHaveValues(valuesExpected, finalOptions);
               result.actual = `values [${valuesExpected.join(', ')}]`;
+              locatorString = await generateLocatorString(ref, locator);
+              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs);
+              result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
             case 'selectHasValue':
@@ -1101,13 +1451,13 @@ const validate_dom_assertions = defineTabTool({
                 return { actualValue, normalizedActual };
               };
 
-              const timeout = finalOptions?.timeout || 15000;
+              const selectTimeout = finalOptions?.timeout || timeout;
               const startTime = Date.now();
               let lastError: Error | null = null;
               let lastActualValue = '';
               let lastNormalizedActual = '';
 
-              while (Date.now() - startTime < timeout) {
+              while (Date.now() - startTime < selectTimeout) {
                 try {
                   const { actualValue, normalizedActual } = await pollFn();
                   lastActualValue = actualValue;
@@ -1132,7 +1482,7 @@ const validate_dom_assertions = defineTabTool({
                 } catch (error) {
                   lastError = error instanceof Error ? error : new Error(String(error));
                   // If timeout hasn't expired, wait a bit and retry
-                  if (Date.now() - startTime < timeout) {
+                  if (Date.now() - startTime < selectTimeout) {
                     await new Promise(resolve => setTimeout(resolve, 100));
                     continue;
                   }
@@ -1149,6 +1499,9 @@ const validate_dom_assertions = defineTabTool({
               // Use a simple assertion that always passes when values match (or don't match for negated)
               assertionResult = await assertion.toBeAttached(finalOptions);
               result.actual = `value "${lastActualValue}" (normalized: "${lastNormalizedActual}")`;
+              locatorString = await generateLocatorString(ref, locator);
+              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs);
+              result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
             case 'toMatchAriaSnapshot':
@@ -1161,6 +1514,9 @@ const validate_dom_assertions = defineTabTool({
               }
               assertionResult = await assertion.toMatchAriaSnapshot(ariaSnapshotExpected, finalOptions);
               result.actual = `aria snapshot "${ariaSnapshotExpected}"`;
+              locatorString = await generateLocatorString(ref, locator);
+              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs);
+              result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
             case 'toMatchAriaSnapshotOptions':
@@ -1169,6 +1525,9 @@ const validate_dom_assertions = defineTabTool({
               }
               assertionResult = await assertion.toMatchAriaSnapshot(finalOptions);
               result.actual = 'aria snapshot (with options)';
+              locatorString = await generateLocatorString(ref, locator);
+              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs);
+              result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
             case 'toContainClass':
@@ -1181,6 +1540,9 @@ const validate_dom_assertions = defineTabTool({
               }
               assertionResult = await assertion.toContainClass(containClassExpected, finalOptions);
               result.actual = `contains class "${Array.isArray(containClassExpected) ? containClassExpected.join(' ') : containClassExpected}"`;
+              locatorString = await generateLocatorString(ref, locator);
+              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs);
+              result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
             case 'toHaveClass':
@@ -1193,6 +1555,9 @@ const validate_dom_assertions = defineTabTool({
               }
               assertionResult = await assertion.toHaveClass(classExpected, finalOptions);
               result.actual = `class "${Array.isArray(classExpected) ? classExpected.join(' ') : classExpected}"`;
+              locatorString = await generateLocatorString(ref, locator);
+              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs);
+              result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
             case 'toHaveCount':
@@ -1205,6 +1570,9 @@ const validate_dom_assertions = defineTabTool({
               }
               assertionResult = await assertion.toHaveCount(count, finalOptions);
               result.actual = `count ${count}`;
+              locatorString = await generateLocatorString(ref, locator);
+              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs);
+              result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
             case 'toHaveCSS':
@@ -1217,6 +1585,9 @@ const validate_dom_assertions = defineTabTool({
               }
               assertionResult = await assertion.toHaveCSS(cssName, cssValue, finalOptions);
               result.actual = `CSS ${cssName}="${cssValue}"`;
+              locatorString = await generateLocatorString(ref, locator);
+              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs);
+              result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
             case 'toHaveId':
@@ -1229,6 +1600,9 @@ const validate_dom_assertions = defineTabTool({
               }
               assertionResult = await assertion.toHaveId(id, finalOptions);
               result.actual = `id "${id}"`;
+              locatorString = await generateLocatorString(ref, locator);
+              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs);
+              result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
             case 'toHaveJSProperty':
@@ -1241,6 +1615,9 @@ const validate_dom_assertions = defineTabTool({
               }
               assertionResult = await assertion.toHaveJSProperty(jsPropertyName, jsPropertyValue, finalOptions);
               result.actual = `JS property ${jsPropertyName}="${JSON.stringify(jsPropertyValue)}"`;
+              locatorString = await generateLocatorString(ref, locator);
+              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs);
+              result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
             case 'toHaveRole':
@@ -1253,6 +1630,9 @@ const validate_dom_assertions = defineTabTool({
               }
               assertionResult = await assertion.toHaveRole(role, finalOptions);
               result.actual = `role "${role}"`;
+              locatorString = await generateLocatorString(ref, locator);
+              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs);
+              result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
             case 'toHaveScreenshot':
@@ -1265,6 +1645,9 @@ const validate_dom_assertions = defineTabTool({
               }
               assertionResult = await assertion.toHaveScreenshot(screenshotName, finalOptions);
               result.actual = `screenshot "${Array.isArray(screenshotName) ? screenshotName.join(', ') : screenshotName}"`;
+              locatorString = await generateLocatorString(ref, locator);
+              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs);
+              result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
             case 'toHaveScreenshotOptions':
@@ -1273,6 +1656,9 @@ const validate_dom_assertions = defineTabTool({
               }
               assertionResult = await assertion.toHaveScreenshot(finalOptions);
               result.actual = 'screenshot (with options)';
+              locatorString = await generateLocatorString(ref, locator);
+              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs);
+              result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
 
@@ -1286,6 +1672,9 @@ const validate_dom_assertions = defineTabTool({
               }
               assertionResult = await assertion.toHaveAccessibleDescription(description, finalOptions);
               result.actual = `accessible description "${description}"`;
+              locatorString = await generateLocatorString(ref, locator);
+              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs);
+              result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
             case 'toHaveAccessibleErrorMessage':
@@ -1298,6 +1687,9 @@ const validate_dom_assertions = defineTabTool({
               }
               assertionResult = await assertion.toHaveAccessibleErrorMessage(errorMessage, finalOptions);
               result.actual = `accessible error message "${errorMessage}"`;
+              locatorString = await generateLocatorString(ref, locator);
+              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs);
+              result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
             case 'toHaveAccessibleName':
@@ -1310,6 +1702,9 @@ const validate_dom_assertions = defineTabTool({
               }
               assertionResult = await assertion.toHaveAccessibleName(accessibleName, finalOptions);
               result.actual = `accessible name "${accessibleName}"`;
+              locatorString = await generateLocatorString(ref, locator);
+              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs);
+              result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
             default:
@@ -1320,9 +1715,18 @@ const validate_dom_assertions = defineTabTool({
           console.log(`validate_dom_assertions: ${name}${negate ? ' (negated)' : ''} passed for element "${element}"`);
 
         } catch (error) {
+          console.log('error in validate_dom_assertions', error);
+          
+          // Handle assertion errors - set result and evidence
           result.result = 'fail';
           result.error = error instanceof Error ? error.message : String(error);
-          console.log(`validate_dom_assertions: ${name}${negate ? ' (negated)' : ''} failed for element "${element}": ${result.error}`);
+          
+          // Check if error indicates element not found
+          const elementNotFoundMessage = getElementNotFoundMessage(error, element);
+          const evidenceMessage = elementNotFoundMessage || getAssertionMessage(name, element, negate);
+          
+          result.evidence = {message: evidenceMessage, command: createEvidenceCommand(locatorString)};
+         
         }
 
         results.push(result);
@@ -1332,14 +1736,12 @@ const validate_dom_assertions = defineTabTool({
       const passedCount = results.filter(r => r.result === 'pass').length;
       const failedCount = results.length - passedCount;
 
-      // Generate evidence message
-      let evidence = '';
-      if (passedCount === results.length) {
-        evidence = `All ${results.length} Playwright assertions passed for element "${element}"`;
-      } else {
-        const failedChecks = results.filter(r => r.result === 'fail');
-        const failedAssertions = failedChecks.map(c => `${c.assertion}${c.negate ? ' (negated)' : ''}`).join(', ');
-        evidence = `Found element "${element}" but ${failedCount} assertions failed: ${failedAssertions}`;
+      // Collect evidence from all results
+      const evidence: {message: string, command: string}[] = [];
+      for (const result of results) {
+        if (result.evidence) {
+          evidence.push(result.evidence);
+        }
       }
 
       // Generate payload
@@ -1389,19 +1791,13 @@ const validate_alert_in_snapshot = defineTabTool({
 
     try {
       // Get the current snapshot
-      console.log('start capture snapshot');
       const tabSnapshot = await tab.captureSnapshot();
 
       // Check if alert dialog exists using modalStates
       const dialogState = tabSnapshot.modalStates.find(state => state.type === 'dialog');
       const alertExists = !!dialogState;
-      console.log('alertExists', alertExists);
-      console.log('matchType:', matchType);
-      console.log('hasText:', hasText);
-
       // Get alert dialog text if it exists
       const alertText = dialogState ? dialogState.description : null;
-      console.log('alertText:', alertText);
 
       // Check text if hasText is provided and alert exists
       let textCheckPassed = true;
@@ -1425,28 +1821,40 @@ const validate_alert_in_snapshot = defineTabTool({
       console.log('passed:', passed);
 
       // Generate evidence message
-      let evidence = '';
+      let evidenceMessage = '';
       if (matchType === 'contains') {
         if (passed) {
           if (hasText)
-            evidence = `Alert dialog found with text: "${alertText}" containing expected: "${hasText}"`;
+            evidenceMessage = `Alert dialog found with text: "${alertText}" containing expected: "${hasText}"`;
           else
-            evidence = `Alert dialog found with text: "${alertText}"`;
+            evidenceMessage = `Alert dialog found with text: "${alertText}"`;
 
         } else {
           if (hasText)
-            evidence = `Alert dialog found but text "${hasText}" not found in: "${alertText}"`;
+            evidenceMessage = `Alert dialog found but text "${hasText}" not found in: "${alertText}"`;
           else
-            evidence = `Alert dialog not found in snapshot`;
+            evidenceMessage = `Alert dialog not found in snapshot`;
 
         }
       } else { // not-contains
         if (passed)
-          evidence = `Alert dialog correctly not found in snapshot`;
+          evidenceMessage = `Alert dialog was not found as expected`;
         else
-          evidence = `Alert dialog unexpectedly found with text: "${alertText}"`;
+          evidenceMessage = `Alert dialog was not expected, but it was ${hasText ? `found with text: "${alertText}"` : 'found'}.`;
 
       }
+
+      // Generate evidence as array of objects
+      const evidence = [{
+        command: {
+          toolName: 'validate_alert_in_snapshot',
+          arguments: {
+            expectedText: hasText || null,
+            matchType: matchType
+          }
+        },
+        message: evidenceMessage
+      }];
 
       const payload = {
         element,
@@ -1466,12 +1874,20 @@ const validate_alert_in_snapshot = defineTabTool({
         }
       };
 
-      console.log('Check alert in snapshot:', payload);
       const resultString = JSON.stringify(payload, null, 2);
       // console.log('Result string:', resultString);
       response.addResult(resultString);
     } catch (error) {
-      const errorMessage = `Failed to check alert dialog in snapshot. Error: ${error instanceof Error ? error.message : String(error)}`;
+      const errorMessage = `Failed to check alert dialog in snapshot.`;
+      console.log(`Failed to check alert dialog in snapshot. Error: ${error instanceof Error ? error.message : String(error)}`)
+      const errorEvidence = [{
+        command: {
+          toolName: 'validate_alert_in_snapshot',
+          expectedText: hasText || null,
+          matchType: matchType
+        },
+        message: errorMessage
+      }];
       const errorPayload = {
         element,
         matchType,
@@ -1482,7 +1898,7 @@ const validate_alert_in_snapshot = defineTabTool({
         textCheckMessage: '',
         summary: {
           status: 'error',
-          evidence: errorMessage
+          evidence: errorEvidence
         },
         error: error instanceof Error ? error.message : String(error)
       };
@@ -1504,73 +1920,106 @@ const default_validation = defineTabTool({
     title: 'Default Validation Tool',
     description: 'Default tool for when LLM cannot find a suitable tool. Accepts ref and JavaScript code to parse and execute.',
     inputSchema: z.object({
-      refs: z.array(z.object({
-        ref: z.string().describe('Element reference from the page snapshot')
-      })).describe('Array of element reference objects from the page snapshot. Each object should have a "ref" key with string value.'),
-      jsCode: z.string().describe('JavaScript code to execute on each element. Function receives single element as parameter. Should return "pass" or "fail" as string. All elements must return "pass" for overall success. Do not use ref in the code - work directly with the element parameter.'),
+      ref: z.string().describe('Element reference from the page snapshot'),
+      element: z.string().min(1).describe('Description of the specific element with the given ref'),
+      jsCode: z.string().describe('JavaScript code to execute on the element. Function receives single element as parameter. Should return "pass" or "fail" as string. Do not use ref in the code - work directly with the element parameter.'),
     }),
     type: 'readOnly',
   },
   handle: async (tab, params, response) => {
-    const { refs, jsCode } = params;
+    const { ref, element, jsCode } = params;
 
     await tab.waitForCompletion(async () => {
       try {
-        // Get element locators for all refs
-        const locators = await Promise.all(
-            refs.map(refObj => tab.refLocator({ ref: refObj.ref, element: 'target element' }))
-        );
-        // for (const locator of locators)
-        //   console.log('generateLocator', await generateLocator(locator));
+        // Get element locator
+        const locator = await tab.refLocator({ ref, element });
 
-        // Execute the JavaScript code on each element and collect results
-        const results = await Promise.all(
-            locators.map(async (locator, index) => {
-              return await locator.evaluate((element, code) => {
-                try {
-                // Safe evaluation function
-                  const safeEval = (code: string, element: Element) => {
-                    const func = new Function('element', 'document', `
-                    'use strict';
-                    ${code}
-                  `);
+        // Generate locator string
+        const locatorString = await generateLocatorString(ref, locator);
 
-                    // Create safe context with necessary objects
-                    const safeContext = {
-                      element,
-                      document, // Keep document for element searching
-                      // Disable potentially dangerous functions
-                      console: { log: () => {}, warn: () => {}, error: () => {} },
-                      setTimeout: undefined,
-                      setInterval: undefined,
-                      eval: undefined,
-                      Function: undefined,
-                      // Keep limited window functionality
-                      window: {
-                        innerWidth: window.innerWidth,
-                        innerHeight: window.innerHeight,
-                        localStorage: window.localStorage,
-                        sessionStorage: window.sessionStorage
-                      }
-                    };
+        // Check if generateLocator returned 'UI Element not found'
+        if (locatorString === 'UI Element not found') {
+          // Generate evidence with UI element not found message
+          const evidence = [{
+            command: JSON.stringify({
+              toolName: 'default_validation',
+              arguments: {
+                jsCode: jsCode
+              },
+              locators: [{
+                element: element,
+                locatorString: locatorString
+              }]
+            }),
+            message: `The UI Element "${element}" not found`
+          }];
 
-                    return func.call(safeContext, element, document);
-                  };
+          const payload = {
+            ref,
+            element,
+            summary: {
+              total: 1,
+              passed: 0,
+              failed: 1,
+              status: 'fail',
+              evidence,
+            },
+            checks: [{
+              property: 'javascript_execution',
+              operator: 'execute',
+              expected: 'success',
+              actual: 'UI element not found',
+              result: 'fail',
+            }],
+            result: 'fail',
+            jsCode,
+          };
 
-                  return safeEval(code, element);
-                } catch (error) {
-                  return {
-                    error: error instanceof Error ? error.message : String(error),
-                    type: 'execution_error'
-                  };
+          console.log('Default validation - UI element not found:', payload);
+          response.addResult(JSON.stringify(payload, null, 2));
+          return;
+        }
+        
+        // Execute the JavaScript code on the element
+        const result = await locator.evaluate((element: Element, code: string) => {
+          try {
+            // Safe evaluation function
+            const safeEval = (code: string, element: Element) => {
+              const func = new Function('element', 'document', `
+              'use strict';
+              ${code}
+            `);
+
+              // Create safe context with necessary objects
+              const safeContext = {
+                element,
+                document, // Keep document for element searching
+                // Disable potentially dangerous functions
+                console: { log: () => {}, warn: () => {}, error: () => {} },
+                setTimeout: undefined,
+                setInterval: undefined,
+                eval: undefined,
+                Function: undefined,
+                // Keep limited window functionality
+                window: {
+                  innerWidth: window.innerWidth,
+                  innerHeight: window.innerHeight,
+                  localStorage: window.localStorage,
+                  sessionStorage: window.sessionStorage
                 }
-              }, jsCode);
-            })
-        );
+              };
 
-        // Check if all results are 'pass'
-        const allPassed = results.every(result => result === 'pass');
-        const result = allPassed ? 'pass' : 'fail';
+              return func.call(safeContext, element, document);
+            };
+
+            return safeEval(code, element);
+          } catch (error) {
+            return {
+              error: error instanceof Error ? error.message : String(error),
+              type: 'execution_error'
+            };
+          }
+        }, jsCode);
 
         // Determine pass/fail based on result
         const isPass = result === 'pass' && !(result && typeof result === 'object' && 'error' in result);
@@ -1579,14 +2028,29 @@ const default_validation = defineTabTool({
         const failed = isPass ? 0 : 1;
 
         // Generate evidence message
-        const refsList = refs.map(refObj => refObj.ref).join(', ');
-        const evidence = isPass
-          ? `Successfully executed JavaScript code on ${refs.length} element(s) with refs: [${refsList}]. Result: ${typeof result === 'object' ? JSON.stringify(result) : String(result)}`
-          : `JavaScript code execution failed on ${refs.length} element(s) with refs: [${refsList}]. Result: ${typeof result === 'object' ? JSON.stringify(result) : String(result)}`;
+        const resultString = typeof result === 'object' ? JSON.stringify(result) : String(result);
+        const evidenceMessage = isPass
+          ? `Successfully executed JavaScript code on element "${element}". Result: ${resultString}`
+          : `JavaScript code execution failed on element "${element}". Result: ${resultString}`;
+
+        // Generate evidence as array of objects with command and message
+        const evidence = [{
+          command: JSON.stringify({
+            toolName: 'default_validation',
+            arguments: {
+              jsCode: jsCode
+            },
+            locators: [{
+              element: element,
+              locatorString: locatorString
+            }]
+          }),
+          message: evidenceMessage
+        }];
 
         const payload = {
-          refs,
-          element: 'target elements',
+          ref,
+          element,
           summary: {
             total: 1,
             passed,
@@ -1609,15 +2073,44 @@ const default_validation = defineTabTool({
         response.addResult(JSON.stringify(payload, null, 2));
 
       } catch (error) {
+        // Generate locator string for error case (try to generate even if execution failed)
+        let locatorString = '';
+        try {
+          const locator = await tab.refLocator({ ref, element });
+          locatorString = await generateLocatorString(ref, locator);
+        } catch {
+          // If locator generation fails, use empty string
+          locatorString = '';
+        }
+
+        // Generate error evidence message
+        const errorMessage = `Failed to execute JavaScript code on element "${element}".`;
+        console.log(`Failed to execute JavaScript code on element "${element}". Error: ${error instanceof Error ? error.message : String(error)}`);
+
+        // Generate evidence as array of objects with command and message
+        const errorEvidence = [{
+          command: JSON.stringify({
+            toolName: 'default_validation',
+            arguments: {
+              jsCode: jsCode
+            },
+            locators: [{
+              element: element,
+              locatorString: locatorString
+            }]
+          }),
+          message: errorMessage
+        }];
+
         const errorPayload = {
-          refs,
-          element: 'target elements',
+          ref,
+          element,
           summary: {
             total: 1,
             passed: 0,
             failed: 1,
             status: 'fail',
-            evidence: `Failed to execute JavaScript code on ${refs.length} element(s) with refs: [${refs.map(refObj => refObj.ref).join(', ')}]. Error: ${error instanceof Error ? error.message : String(error)}`,
+            evidence: errorEvidence,
           },
           checks: [{
             property: 'javascript_execution',
@@ -1797,16 +2290,32 @@ const validate_response = defineTabTool({
       const status = passedCount === results.length ? 'pass' : 'fail';
 
       // Generate evidence message
-      let evidence = '';
+      let evidenceMessage = '';
       if (status === 'pass') {
-        evidence = `All ${results.length} JSON path validation checks passed successfully`;
+        evidenceMessage = `All ${results.length} JSON path validation checks passed successfully`;
       } else {
         const failedChecks = results.filter(r => r.result === 'fail');
         const failedDetails = failedChecks.map(c =>
           `${c.name} (path: ${c.jsonPath}, expected: ${c.expected}, got: ${c.actual})`
         ).join(', ');
-        evidence = `${passedCount}/${results.length} checks passed. Failed: ${failedDetails}`;
+        evidenceMessage = `${passedCount}/${results.length} checks passed. Failed: ${failedDetails}`;
       }
+
+      // Generate evidence as array of objects with command and message
+      const evidenceArray = [{
+        command: JSON.stringify({
+          toolName: 'validate_response',
+          arguments: {
+            responseData: typeof parsedResponseData === 'object' ?
+              (JSON.stringify(parsedResponseData).length > 500 ?
+                JSON.stringify(parsedResponseData).slice(0, 500) + '...' :
+                parsedResponseData) :
+              (parsedResponseData.length > 500 ? parsedResponseData.slice(0, 500) + '...' : parsedResponseData),
+            checks: checks
+          }
+        }),
+        message: evidenceMessage
+      }];
 
       const payload = {
         responseData: typeof parsedResponseData === 'object' ?
@@ -1819,7 +2328,7 @@ const validate_response = defineTabTool({
           passed: passedCount,
           failed: results.length - passedCount,
           status,
-          evidence,
+          evidence: evidenceArray,
         },
         checks: results,
       };
@@ -1841,6 +2350,21 @@ const validate_response = defineTabTool({
         displayResponseData = responseData.length > 500 ? responseData.slice(0, 500) + '...' : responseData;
       }
 
+      // Generate error evidence as array of objects with command and message
+      const errorMessage = `Failed to validate response with JSON path.`;
+      console.log(`Failed to validate response with JSON path. Error: ${error instanceof Error ? error.message : String(error)}`);
+
+      const errorEvidence = [{
+        command: JSON.stringify({
+          toolName: 'validate_response',
+          arguments: {
+            responseData: displayResponseData,
+            checks: checks
+          }
+        }),
+        message: errorMessage
+      }];
+
       const errorPayload = {
         responseData: displayResponseData,
         summary: {
@@ -1848,7 +2372,7 @@ const validate_response = defineTabTool({
           passed: 0,
           failed: checks.length,
           status: 'fail',
-          evidence: `Failed to validate response with JSON path. Error: ${error instanceof Error ? error.message : String(error)}`,
+          evidence: errorEvidence,
         },
         checks: checks.map(check => ({
           name: check.name,
@@ -2036,6 +2560,20 @@ const validate_tab_exist = defineTabTool({
 
       }
 
+      // Generate evidence as array of objects with command and message
+      const evidenceArray = [{
+        command: JSON.stringify({
+          toolName: 'validate_tab_exist',
+          arguments: {
+            url,
+            matchType,
+            exactMatch,
+            isCurrent
+          }
+        }),
+        message: evidence
+      }];
+
       const payload = {
         url,
         matchType,
@@ -2053,7 +2591,7 @@ const validate_tab_exist = defineTabTool({
           passed: status === 'pass' ? 1 : 0,
           failed: status === 'pass' ? 0 : 1,
           status,
-          evidence,
+          evidence: evidenceArray,
         },
         allTabs: tabsWithInfo.map((t: any) => ({
           index: (t as any).index,
@@ -2065,6 +2603,23 @@ const validate_tab_exist = defineTabTool({
       response.addResult(JSON.stringify(payload, null, 2));
 
     } catch (error) {
+      const errorMessage = `Failed to validate tab existence.`;
+      console.log(`Failed to validate tab existence. Error: ${error instanceof Error ? error.message : String(error)}`);
+
+      // Generate evidence as array of objects with command and message
+      const errorEvidence = [{
+        command: JSON.stringify({
+          toolName: 'validate_tab_exist',
+          arguments: {
+            url,
+            matchType,
+            exactMatch,
+            isCurrent
+          }
+        }),
+        message: errorMessage
+      }];
+
       const errorPayload = {
         url,
         exactMatch,
@@ -2073,7 +2628,7 @@ const validate_tab_exist = defineTabTool({
           passed: 0,
           failed: 1,
           status: 'fail',
-          evidence: `Failed to validate tab existence. Error: ${error instanceof Error ? error.message : String(error)}`,
+          evidence: errorEvidence,
         },
         error: error instanceof Error ? error.message : String(error),
       };
@@ -2082,18 +2637,6 @@ const validate_tab_exist = defineTabTool({
     }
   },
 });
-
-const validateElementSchema = z.object({
-  ref: z.string().optional().describe('Exact target element reference from the page snapshot. If provided, will search by ref first, then fallback to role/accessibleName if ref fails'),
-  role: z.string().describe('ROLE of the element. Can be found in the snapshot like this: \`- {ROLE} "Accessible Name":\`'),
-  accessibleName: z.string().describe('ACCESSIBLE_NAME of the element. Can be found in the snapshot like this: \`- role "{ACCESSIBLE_NAME}"\`'),
-  matchType: z.enum(['contains', 'not-contains']).default('contains').describe(
-      "Type of match: 'contains' checks if element is present and visible, 'not-contains' checks that element is NOT present or NOT visible"
-  ),
-});
-
-
-
 
 const makeRequestSchema = z.object({
   command: z.string().describe('Actual finalized command'),
@@ -2205,8 +2748,22 @@ const validate_text_in_whole_page = defineTabTool({
     const { element, expectedText, matchType } = validateTextInWholePageSchema.parse(params);
 
     await tab.waitForCompletion(async () => {
+      // Get locator for whole page and generate locator string
+      const locatorString = 'page.locator("body")'
+
+      // Helper function to create evidence command
+      const createEvidenceCommand = () => JSON.stringify({
+        description: "Evidence showing how validation was performed",
+        toolName: 'validate_text_in_whole_page',
+        locator: locatorString,
+        args: {
+          expectedText,
+          matchType
+        }
+      });
+
       let passed = false;
-      let evidence = '';
+      let evidenceMessage = '';
       let actualCount = 0;
       let foundFrames: string[] = [];
 
@@ -2221,35 +2778,39 @@ const validate_text_in_whole_page = defineTabTool({
 
         // Determine if test passes based on matchType
         if (matchType === 'exact' || matchType === 'contains') {
-          // For exact and contains: should find exactly 1 result
           if (actualCount === 1) {
             passed = true;
-            evidence = `Found text "${expectedText}" exactly once on the page using ${matchType} match in frame: ${foundFrames[0]}`;
+            evidenceMessage = `The text "${expectedText}" was found once on the page using ${matchType} matching in frame: ${foundFrames[0]}.`;
           } else if (actualCount > 1) {
             passed = false;
-            evidence = `Found text "${expectedText}" ${actualCount} times on the page using ${matchType} match in frames: ${foundFrames.join(', ')}. Expected exactly 1 occurrence.`;
+            evidenceMessage = `The text "${expectedText}" appeared ${actualCount} times on the page using ${matchType} matching in frames: ${foundFrames.join(', ')}. Expected only one occurrence.`;
           } else {
             passed = false;
-            evidence = `Text "${expectedText}" not found on the page using ${matchType} match`;
+            evidenceMessage = `The text "${expectedText}" was not found on the page using ${matchType} matching.`;
           }
         } else { // not-contains
-          // For not-contains: should find 0 results
           if (actualCount === 0) {
             passed = true;
-            evidence = `Text "${expectedText}" correctly not found on the page using ${matchType} match`;
+            evidenceMessage = `The text "${expectedText}" was correctly not found on the page using ${matchType} matching.`;
           } else {
             passed = false;
-            evidence = `Text "${expectedText}" unexpectedly found ${actualCount} time(s) on the page using ${matchType} match in frames: ${foundFrames.join(', ')}`;
+            evidenceMessage = `The text "${expectedText}" was found ${actualCount} time(s) on the page using ${matchType} matching in frames: ${foundFrames.join(', ')} — it should not appear.`;
           }
         }
 
       } catch (error) {
         passed = false;
         const errorMessage = error instanceof Error ? error.message : String(error);
-        evidence = `Failed to validate text "${expectedText}" on the page. Error: ${errorMessage}`;
+        evidenceMessage = `Failed to validate text "${expectedText}" on the page.`;
 
         console.log(`Failed to validate text in whole page for "${element}". Error: ${errorMessage}`);
       }
+
+      // Generate evidence as array with single object
+      const evidence = [{
+        command: createEvidenceCommand(),
+        message: evidenceMessage
+      }];
 
       // Generate final payload
       const payload = {
@@ -2295,8 +2856,23 @@ const validate_element_in_whole_page = defineTabTool({
     const { element, role, accessibleName, matchType } = validateElementInWholePageSchema.parse(params);
 
     await tab.waitForCompletion(async () => {
+      // Get locator for whole page and generate locator string
+      const locatorString = 'page.locator("body")'
+
+      // Helper function to create evidence command
+      const createEvidenceCommand = () => JSON.stringify({
+        description: "Evidence showing how validation was performed",
+        toolName: 'validate_element_in_whole_page',
+        locator: locatorString,
+        arguments: {
+          role,
+          accessibleName,
+          matchType
+        }
+      });
+
       let passed = false;
-      let evidence = '';
+      let evidenceMessage = '';
       let actualCount = 0;
       let foundFrames: string[] = [];
 
@@ -2311,35 +2887,39 @@ const validate_element_in_whole_page = defineTabTool({
 
         // Determine if test passes based on matchType
         if (matchType === 'exist') {
-          // For exist: should find exactly 1 result
           if (actualCount === 1) {
             passed = true;
-            evidence = `Found element with role "${role}" and accessible name "${accessibleName}" exactly once on the page in frame: ${foundFrames[0]}`;
+            evidenceMessage = `The element "${element}" was found once on the page using ${matchType} matching in frame: ${foundFrames[0]}.`;
           } else if (actualCount > 1) {
             passed = false;
-            evidence = `Found element with role "${role}" and accessible name "${accessibleName}" ${actualCount} times on the page in frames: ${foundFrames.join(', ')}. Expected exactly 1 occurrence.`;
+            evidenceMessage = `The element "${element}" appeared ${actualCount} times on the page using ${matchType} matching in frames: ${foundFrames.join(', ')}. Expected only one occurrence.`;
           } else {
             passed = false;
-            evidence = `Element with role "${role}" and accessible name "${accessibleName}" not found on the page`;
+            evidenceMessage = `The element "${element}" was not found on the page using ${matchType} matching.`;
           }
         } else { // not-exist
-          // For not-exist: should find 0 results
           if (actualCount === 0) {
             passed = true;
-            evidence = `Element with role "${role}" and accessible name "${accessibleName}" correctly not found on the page`;
+            evidenceMessage = `The element "${element}" was correctly not found on the page using ${matchType} matching.`;
           } else {
             passed = false;
-            evidence = `Element with role "${role}" and accessible name "${accessibleName}" unexpectedly found ${actualCount} time(s) on the page in frames: ${foundFrames.join(', ')}`;
+            evidenceMessage = `The element "${element}" was found ${actualCount} time(s) on the page using ${matchType} matching in frames: ${foundFrames.join(', ')} — it should not appear.`;
           }
         }
 
       } catch (error) {
         passed = false;
         const errorMessage = error instanceof Error ? error.message : String(error);
-        evidence = `Failed to validate element with role "${role}" and accessible name "${accessibleName}" on the page. Error: ${errorMessage}`;
+        evidenceMessage = `Failed to find element "${element}" on the page.`;
 
         console.log(`Failed to validate element in whole page for "${element}". Error: ${errorMessage}`);
       }
+
+      // Generate evidence as array with single object
+      const evidence = [{
+        command: createEvidenceCommand(),
+        message: evidenceMessage
+      }];
 
       // Generate final payload
       const payload = {
@@ -2373,161 +2953,159 @@ const validate_element_in_whole_page = defineTabTool({
   },
 });
 
-const validate_expanded = defineTabTool({
-  capability: 'core',
-  schema: {
-    name: 'validate_expanded',
-    title: 'Validate aria-expanded attribute',
-    description: 'Validate that element has the correct aria-expanded attribute value (true or false). If not found on target element, searches in siblings, parent, and children elements.',
-    inputSchema: validateExpandedSchema,
-    type: 'readOnly',
-  },
-  handle: async (tab, params, response) => {
-    const { ref, element, expected } = validateExpandedSchema.parse(params);
+// const validate_expanded = defineTabTool({
+//   capability: 'core',
+//   schema: {
+//     name: 'validate_expanded',
+//     title: 'Validate aria-expanded attribute',
+//     description: 'Validate that element has the correct aria-expanded attribute value (true or false). If not found on target element, searches in siblings, parent, and children elements.',
+//     inputSchema: validateExpandedSchema,
+//     type: 'readOnly',
+//   },
+//   handle: async (tab, params, response) => {
+//     const { ref, element, expected } = validateExpandedSchema.parse(params);
 
-    await tab.waitForCompletion(async () => {
-      let passed = false;
-      let evidence = '';
-      let actualValue = '';
-      let searchLocation = 'target-element';
+//     await tab.waitForCompletion(async () => {
+//       let passed = false;
+//       let evidence = '';
+//       let actualValue = '';
+//       let searchLocation = 'target-element';
 
-      try {
-        const locator = await tab.refLocator({ ref, element });
+//       try {
+//         const locator = await tab.refLocator({ ref, element });
 
-        // First, try to validate aria-expanded on the target element
-        await expect(locator).toHaveAttribute('aria-expanded', expected);
-        passed = true;
-        actualValue = expected;
-        evidence = `Element "${element}" has aria-expanded="${expected}" as expected`;
-        searchLocation = 'target-element';
+//         // First, try to validate aria-expanded on the target element
+//         await expect(locator).toHaveAttribute('aria-expanded', expected);
+//         passed = true;
+//         actualValue = expected;
+//         evidence = `Element "${element}" has aria-expanded="${expected}" as expected`;
+//         searchLocation = 'target-element';
 
-      } catch (error) {
-        // If target element doesn't have the attribute, search in related elements
-        try {
-          const locator = await tab.refLocator({ ref, element });
+//       } catch (error) {
+        
+//         // If target element doesn't have the attribute, search in related elements
+//         try {
+//           const locator = await tab.refLocator({ ref, element });
 
-          // Search function to find aria-expanded in related elements (excluding target)
-          const searchResult = await locator.evaluate((el: Element, expectedValue: string) => {
-            const results: { location: string; value: string; element: string }[] = [];
+//           // Search function to find aria-expanded in related elements (excluding target)
+//           const searchResult = await locator.evaluate((el: Element, expectedValue: string) => {
+//             const results: { location: string; value: string; element: string }[] = [];
 
-            // Helper function to get element description
-            const getElementDesc = (element: Element): string => {
-              if (element.id) return `#${element.id}`;
-              if (element.className) return `.${element.className.split(' ').join('.')}`;
-              return element.tagName.toLowerCase();
-            };
+//             // Helper function to get element description
+//             const getElementDesc = (element: Element): string => {
+//               if (element.id) return `#${element.id}`;
+//               if (element.className) return `.${element.className.split(' ').join('.')}`;
+//               return element.tagName.toLowerCase();
+//             };
 
-            // Check siblings (same level elements)
-            if (el.parentElement) {
-              const siblings = Array.from(el.parentElement.children);
-              siblings.forEach((sibling, index) => {
-                if (sibling !== el) {
-                  const siblingValue = sibling.getAttribute('aria-expanded');
-                  if (siblingValue !== null) {
-                    results.push({
-                      location: `sibling-${index}`,
-                      value: siblingValue,
-                      element: getElementDesc(sibling)
-                    });
-                  }
-                }
-              });
-            }
+//             // Check siblings (same level elements)
+//             if (el.parentElement) {
+//               const siblings = Array.from(el.parentElement.children);
+//               siblings.forEach((sibling, index) => {
+//                 if (sibling !== el) {
+//                   const siblingValue = sibling.getAttribute('aria-expanded');
+//                   if (siblingValue !== null) {
+//                     results.push({
+//                       location: `sibling-${index}`,
+//                       value: siblingValue,
+//                       element: getElementDesc(sibling)
+//                     });
+//                   }
+//                 }
+//               });
+//             }
 
-            // Check parent element
-            if (el.parentElement) {
-              const parentValue = el.parentElement.getAttribute('aria-expanded');
-              if (parentValue !== null) {
-                results.push({
-                  location: 'parent',
-                  value: parentValue,
-                  element: getElementDesc(el.parentElement)
-                });
-              }
-            }
+//             // Check parent element
+//             if (el.parentElement) {
+//               const parentValue = el.parentElement.getAttribute('aria-expanded');
+//               if (parentValue !== null) {
+//                 results.push({
+//                   location: 'parent',
+//                   value: parentValue,
+//                   element: getElementDesc(el.parentElement)
+//                 });
+//               }
+//             }
 
-            // Check children elements
-            const children = Array.from(el.children);
-            children.forEach((child, index) => {
-              const childValue = child.getAttribute('aria-expanded');
-              if (childValue !== null) {
-                results.push({
-                  location: `child-${index}`,
-                  value: childValue,
-                  element: getElementDesc(child)
-                });
-              }
-            });
+//             // Check children elements
+//             const children = Array.from(el.children);
+//             children.forEach((child, index) => {
+//               const childValue = child.getAttribute('aria-expanded');
+//               if (childValue !== null) {
+//                 results.push({
+//                   location: `child-${index}`,
+//                   value: childValue,
+//                   element: getElementDesc(child)
+//                 });
+//               }
+//             });
 
-            return results;
-          }, expected);
+//             return results;
+//           }, expected);
 
-          console.log('Search results for aria-expanded in related elements:', searchResult);
+//           console.log('Search results for aria-expanded in related elements:', searchResult);
 
-          // If we found any aria-expanded attributes in related elements, validation should fail
-          // but we need to report where they were found
-          if (searchResult.length > 0) {
-            passed = false;
-            actualValue = 'not-on-target-element';
-            searchLocation = 'related-elements';
+//           // If we found any aria-expanded attributes in related elements, validation should fail
+//           // but we need to report where they were found
+//           if (searchResult.length > 0) {
+//             passed = false;
+//             actualValue = 'not-on-target-element';
+//             searchLocation = 'related-elements';
 
-            const foundValues = searchResult.map(r => `${r.location}(${r.element}): "${r.value}"`).join(', ');
-            evidence = `Element "${element}" does not have aria-expanded="${expected}" on itself, but found aria-expanded attributes in related elements: ${foundValues}. ` +
-              `Alternative validation suggestions: You can validate the element's state using className (e.g., check for 'expanded', 'collapsed', 'open', 'closed' classes), ` +
-              `CSS properties (e.g., display, visibility, height), or other ARIA attributes (e.g., aria-hidden, aria-selected). ` +
-              `You can also use validate_computed_styles tool to check CSS properties that indicate expanded/collapsed state.`;
-          } else {
-            passed = false;
-            actualValue = 'not-found';
-            searchLocation = 'none';
-            evidence = `Element "${element}" does not have aria-expanded="${expected}" and no aria-expanded attributes found in related elements (siblings, parent, children). ` +
-              `Alternative validation suggestions: You can validate the element's state using className (e.g., check for 'expanded', 'collapsed', 'open', 'closed' classes), ` +
-              `CSS properties (e.g., display, visibility, height), or other ARIA attributes (e.g., aria-hidden, aria-selected). ` +
-              `You can also use validate_computed_styles tool to check CSS properties that indicate expanded/collapsed state.`;
-          }
+//             const foundValues = searchResult.map(r => `${r.location}(${r.element}): "${r.value}"`).join(', ');
+//             evidence = `Element "${element}" does not have aria-expanded="${expected}" on itself, but found aria-expanded attributes in nearby UI elements: ` +
+//               `Alternative validation suggestions: You can validate the element's state using className (e.g., check for 'expanded', 'collapsed', 'open', 'closed' classes), ` +
+//               `CSS properties (e.g., display, visibility, height), or other ARIA attributes (e.g., aria-hidden, aria-selected). `;
+//           } else {
+//             passed = false;
+//             actualValue = 'not-found';
+//             searchLocation = 'none';
+//             evidence = `Element "${element}" does not have aria-expanded="${expected}" and no aria-expanded attributes found in related elements (siblings, parent, children). ` +
+//               `Alternative validation suggestions: You can validate the element's state using className (e.g., check for 'expanded', 'collapsed', 'open', 'closed' classes), ` +
+//               `CSS properties (e.g., display, visibility, height), or other ARIA attributes (e.g., aria-hidden, aria-selected). `;
+//           }
 
-        } catch (searchError) {
-          passed = false;
-          const errorMessage = searchError instanceof Error ? searchError.message : String(searchError);
-          actualValue = 'search-failed';
-          searchLocation = 'error';
-          evidence = `Failed to search for aria-expanded attribute in related elements. Error: ${errorMessage}. ` +
-            `Alternative validation suggestions: You can validate the element's state using className (e.g., check for 'expanded', 'collapsed', 'open', 'closed' classes), ` +
-            `CSS properties (e.g., display, visibility, height), or other ARIA attributes (e.g., aria-hidden, aria-selected). ` +
-            `You can also use validate_computed_styles tool to check CSS properties that indicate expanded/collapsed state.`;
+//         } catch (searchError) {
+//           passed = false;
+//           const errorMessage = searchError instanceof Error ? searchError.message : String(searchError);
+//           actualValue = 'search-failed';
+//           searchLocation = 'error';
+//           evidence = `Failed to search for aria-expanded attribute in related elements.` +
+//             `Alternative validation suggestions: You can validate the element's state using className (e.g., check for 'expanded', 'collapsed', 'open', 'closed' classes), ` +
+//             `CSS properties (e.g., display, visibility, height), or other ARIA attributes (e.g., aria-hidden, aria-selected). ` ;
 
-          console.log(`Failed to search aria-expanded for element with ref "${ref}". Error: ${errorMessage}`);
-        }
-      }
+//           console.log(`Failed to search aria-expanded for element with ref "${ref}". Error: ${errorMessage}`);
+//         }
+//       }
 
-      // Generate final payload
-      const payload = {
-        ref,
-        element,
-        summary: {
-          total: 1,
-          passed: passed ? 1 : 0,
-          failed: passed ? 0 : 1,
-          status: passed ? 'pass' : 'fail',
-          evidence,
-        },
-        checks: [{
-          property: 'aria-expanded',
-          operator: 'equals',
-          expected: expected,
-          actual: actualValue,
-          result: passed ? 'pass' : 'fail',
-        }],
-        scope: 'element-with-relations',
-        attribute: 'aria-expanded',
-        searchLocation: searchLocation,
-      };
+//       // Generate final payload
+//       const payload = {
+//         ref,
+//         element,
+//         summary: {
+//           total: 1,
+//           passed: passed ? 1 : 0,
+//           failed: passed ? 0 : 1,
+//           status: passed ? 'pass' : 'fail',
+//           evidence,
+//         },
+//         checks: [{
+//           property: 'aria-expanded',
+//           operator: 'equals',
+//           expected: expected,
+//           actual: actualValue,
+//           result: passed ? 'pass' : 'fail',
+//         }],
+//         scope: 'element-with-relations',
+//         attribute: 'aria-expanded',
+//         searchLocation: searchLocation,
+//       };
 
-      console.log('Validate expanded:', payload);
-      response.addResult(JSON.stringify(payload, null, 2));
-    });
-  },
-});
+//       console.log('Validate expanded:', payload);
+//       response.addResult(JSON.stringify(payload, null, 2));
+//     });
+//   },
+// });
 
 const data_extraction = defineTabTool({
   capability: 'core',
@@ -2654,10 +3232,68 @@ const validate_element_position = defineTabTool({
       let verticalDiff = 0;
       let center1 = { x: 0, y: 0 };
       let center2 = { x: 0, y: 0 };
+      let locatorString1 = '';
+      let locatorString2 = '';
 
       try {
         const locator1 = await tab.refLocator({ ref: ref1, element: element1 });
         const locator2 = await tab.refLocator({ ref: ref2, element: element2 });
+
+        // Generate locator strings for both elements
+        locatorString1 = await generateLocatorString(ref1, locator1);
+        locatorString2 = await generateLocatorString(ref2, locator2);
+
+        // Check if generateLocator returned 'UI Element not found' for either element
+        if (locatorString1 === 'UI Element not found' || locatorString2 === 'UI Element not found') {
+          const missingElement = locatorString1 === 'UI Element not found' ? element1 : element2;
+          const evidenceArray = [{
+            command: JSON.stringify({
+              toolName: 'validate_element_position',
+              locators: [
+                {
+                  element: element1,
+                  locatorString: locatorString1
+                },
+                {
+                  element: element2,
+                  locatorString: locatorString2
+                }
+              ],
+              arguments: {
+                relationship: relationship
+              }
+            }),
+            message: `The UI Element "${missingElement}" not found`
+          }];
+
+          const payload = {
+            element1,
+            ref1,
+            element2,
+            ref2,
+            relationship,
+            summary: {
+              total: 1,
+              passed: 0,
+              failed: 1,
+              status: 'fail',
+              evidence: evidenceArray,
+            },
+            checks: [{
+              property: 'position-relationship',
+              operator: 'equals',
+              expected: relationship,
+              actual: 'unknown',
+              result: 'fail',
+            }],
+            scope: 'two-elements',
+            comparisonMethod: 'bounding-box-centers',
+          };
+
+          console.log('Validate element position - UI element not found:', payload);
+          response.addResult(JSON.stringify(payload, null, 2));
+          return;
+        }
 
         // Get bounding boxes for both elements
         const box1 = await locator1.boundingBox();
@@ -2736,6 +3372,36 @@ const validate_element_position = defineTabTool({
         console.error(`Failed to validate element position for "${element1}" and "${element2}". Error: ${errorMessage}`);
       }
 
+      // Generate locator strings for error case (try to generate even if execution failed)
+      
+        
+        const locator1 = await tab.refLocator({ ref: ref1, element: element1 });
+        locatorString1 = await generateLocatorString(ref1, locator1);
+
+        const locator2 = await tab.refLocator({ ref: ref2, element: element2 });
+        locatorString2 = await generateLocatorString(ref2, locator2);
+
+      // Generate evidence as array of objects with command and message
+      const evidenceArray = [{
+        command: JSON.stringify({
+          toolName: 'validate_element_position',
+          locators: [
+            {
+              element: element1,
+              locatorString: locatorString1
+            },
+            {
+              element: element2,
+              locatorString: locatorString2
+            }
+          ],
+          arguments: {
+            relationship: relationship
+          }
+        }),
+        message: evidence
+      }];
+
       // Generate final payload matching the structure of other validation tools
       const payload = {
         element1,
@@ -2748,7 +3414,7 @@ const validate_element_position = defineTabTool({
           passed: passed ? 1 : 0,
           failed: passed ? 0 : 1,
           status: passed ? 'pass' : 'fail',
-          evidence,
+          evidence: evidenceArray,
         },
         checks: [{
           property: 'position-relationship',
@@ -2848,7 +3514,7 @@ export default [
   validate_element_in_whole_page,
   validate_dom_assertions,
   validate_alert_in_snapshot,
-  validate_expanded,
+  //validate_expanded,
   validate_element_position,
   default_validation,
   validate_response,

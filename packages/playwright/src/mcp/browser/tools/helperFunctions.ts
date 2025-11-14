@@ -17,6 +17,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import type * as playwright from 'playwright';
 import { expect } from '@zealous-tech/playwright/test';
+import { generateLocator } from './utils.js';
 const camelToKebab = (prop: string) =>
   prop.replace(/[A-Z]/g, m => `-${m.toLowerCase()}`);
 
@@ -816,4 +817,58 @@ async function collectAllFrames(page: any, level: number): Promise<Array<{frame:
   return frames;
 }
 
-export { pickActualValue, parseRGBColor, isColorInRange, getAllComputedStylesDirect, hasAlertDialog, getAlertDialogText, performRegexCheck, performRegexExtract, performRegexMatch, compareValues,convertToValidJson, getValueByJsonPath, checkElementVisibilityUnique, checkTextVisibilityInAllFrames };
+/**
+ * Generate locator string from ref and locator
+ * If ref starts with ###code, extracts the code directly
+ * Otherwise, generates locator string using generateLocator
+ */
+async function generateLocatorString(ref: string, locator: any): Promise<string> {
+  const isLocatorCode = ref && ref.startsWith('###code');
+  if (isLocatorCode) {
+    const locatorCode = ref.match(/###code(.+)/)?.[1]?.trim() || '';
+    return locatorCode || '';
+  }
+  return await generateLocator(locator);
+}
+
+/**
+ * Helper function to check if error indicates element not found
+ * Returns a formatted message if element not found, null otherwise
+ */
+function getElementNotFoundMessage(err: any, elementDescription: string): string | null {
+  if (!err) return null;
+  
+  // Get error message from multiple possible locations
+  let errorMessage = '';
+  if (err.message) {
+    errorMessage = err.message;
+  } else if (err.matcherResult && err.matcherResult.message) {
+    errorMessage = err.matcherResult.message;
+  } else {
+    errorMessage = String(err);
+  }
+  
+  const errorMessageLower = errorMessage.toLowerCase();
+  
+  // Check for common "element not found" patterns
+  const notFoundPatterns = [
+    'element(s) not found',
+    'element not found',
+    'locator not found',
+    'resolved to 0 elements',
+    'resolved to no elements',
+    'no elements found',
+    'ui element not found',
+    'target closed',
+    'page closed',
+    'navigation failed'
+  ];
+  
+  if (notFoundPatterns.some(pattern => errorMessageLower.includes(pattern))) {
+    return `The UI Element "${elementDescription}" not found`;
+  }
+  
+  return null;
+}
+
+export { pickActualValue, parseRGBColor, isColorInRange, getAllComputedStylesDirect, hasAlertDialog, getAlertDialogText, performRegexCheck, performRegexExtract, performRegexMatch, compareValues,convertToValidJson, getValueByJsonPath, checkElementVisibilityUnique, checkTextVisibilityInAllFrames, getElementNotFoundMessage, generateLocatorString };

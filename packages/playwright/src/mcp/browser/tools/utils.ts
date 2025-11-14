@@ -80,7 +80,7 @@ export async function generateLocator(locator: playwright.Locator): Promise<stri
   // Get caller function name from stack trace
   const stack = new Error().stack;
   let callerInfo = 'unknown';
-  if (stack) {
+  if (stack) { //ZEALOUS UPDATE - adding this to get the caller function name
     const stackLines = stack.split('\n');
     // Skip first line (Error), second line (generateLocator), third line should be the caller
     if (stackLines.length > 2) {
@@ -100,7 +100,7 @@ export async function generateLocator(locator: playwright.Locator): Promise<stri
     return asLocator('javascript', resolvedSelector);
   } catch (e) {
     console.error('Ref not found, likely because element was removed. Use browser_snapshot to see what elements are currently on the page.', e);
-    return "error:notfound";
+    return "UI Element not found";
   }
 }
 
