@@ -1654,7 +1654,7 @@ const default_validation = defineTabTool({
       try {
         // Get element locator
         const locator = await tab.refLocator({ ref, element });
-        
+
         // Generate locator string
         const locatorString = await generateLocatorString(ref, locator);
 
@@ -3179,17 +3179,18 @@ const validate_element_order = defineTabTool({
 
     await tab.waitForCompletion(async () => {
       let passed = false;
-      let evidence = '';
+      let evidenceMessage = '';
       const checks: any[] = [];
       const elementCenters: Array<{ element: string; x: number; y: number }> = [];
+      const locators: Array<{ element: string; locatorString: string }> = [];
 
       try {
         if (elements.length < 2) {
           throw new Error('At least 2 elements are required to validate order');
         }
 
-        // Get bounding boxes for all elements
-        const boxes: Array<{ element: string; ref: string; box: playwright.BoundingBox | null }> = [];
+        // Get bounding boxes for all elements and generate locator strings
+        const boxes: Array<{ element: string; ref: string; box: { x: number; y: number; width: number; height: number } | null }> = [];
         
         for (const { element, ref } of elements) {
           const locator = await tab.refLocator({ ref, element });
@@ -3199,6 +3200,8 @@ const validate_element_order = defineTabTool({
           if (!box) {
             throw new Error(`Could not get bounding box for element: "${element}"`);
           }
+          const locatorString = await generateLocatorString(ref, locator);
+          locators.push({ element, locatorString });
         }
 
         // Calculate center points for all elements
@@ -3266,10 +3269,10 @@ const validate_element_order = defineTabTool({
         // Generate evidence message
         const elementNames = elements.map(e => `"${e.element}"`).join(', ');
         if (passed) {
-          evidence = `All elements are in correct reading order (top-to-bottom, then left-to-right): ${elementNames}. ` +
+          evidenceMessage = `All elements are in correct reading order (top-to-bottom, then left-to-right): ${elementNames}. ` +
             `Total elements validated: ${elements.length}.`;
         } else {
-          evidence = `Elements are NOT in correct reading order. ` +
+          evidenceMessage = `Elements are NOT in correct reading order. ` +
             `Expected order: ${elementNames}. ` +
             `Order issues: ${orderIssues.join('; ')}.`;
         }
@@ -3277,10 +3280,22 @@ const validate_element_order = defineTabTool({
       } catch (error) {
         passed = false;
         const errorMessage = error instanceof Error ? error.message : String(error);
-        evidence = `Failed to validate element order: ${errorMessage}`;
+        evidenceMessage = `Failed to validate element order: ${errorMessage}`;
 
         console.error(`Failed to validate element order. Error: ${errorMessage}`);
       }
+
+      // Generate evidence as array of objects with command and message
+      const evidence = [{
+        command: JSON.stringify({
+          toolName: 'validate_element_order',
+          arguments: {
+            elements: elements.map(e => ({ element: e.element, ref: e.ref }))
+          },
+          locators: locators
+        }),
+        message: evidenceMessage
+      }];
 
       // Generate final payload matching the structure of other validation tools
       const payload = {
