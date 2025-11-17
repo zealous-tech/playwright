@@ -3158,6 +3158,156 @@ const validate_element_position = defineTabTool({
   },
 });
 
+const validateElementOrderSchema = z.object({
+  elements: z.array(z.object({
+    element: z.string().describe('Human-readable description of the element used to obtain permission to interact with the element'),
+    ref: z.string().describe('Exact target element reference from the page snapshot for the element'),
+  })).min(2).describe('Array of elements to validate order for (minimum 2 elements required). Elements should be provided in the expected visual order.'),
+});
+
+const validate_element_order = defineTabTool({
+  capability: 'core',
+  schema: {
+    name: 'validate_element_order',
+    title: 'Validate order of multiple elements',
+    description: 'Validate that multiple elements appear in the expected visual order using natural reading order (top-to-bottom, then left-to-right). Only checks order, not exact positions.',
+    inputSchema: validateElementOrderSchema,
+    type: 'readOnly',
+  },
+  handle: async (tab, params, response) => {
+    const { elements } = validateElementOrderSchema.parse(params);
+
+    await tab.waitForCompletion(async () => {
+      let passed = false;
+      let evidence = '';
+      const checks: any[] = [];
+      const elementCenters: Array<{ element: string; x: number; y: number }> = [];
+
+      try {
+        if (elements.length < 2) {
+          throw new Error('At least 2 elements are required to validate order');
+        }
+
+        // Get bounding boxes for all elements
+        const boxes: Array<{ element: string; ref: string; box: playwright.BoundingBox | null }> = [];
+        
+        for (const { element, ref } of elements) {
+          const locator = await tab.refLocator({ ref, element });
+          const box = await locator.boundingBox();
+          boxes.push({ element, ref, box });
+          
+          if (!box) {
+            throw new Error(`Could not get bounding box for element: "${element}"`);
+          }
+        }
+
+        // Calculate center points for all elements
+        const elementData: Array<{ element: string; ref: string; x: number; y: number; index: number }> = [];
+        for (let i = 0; i < boxes.length; i++) {
+          const { element, ref, box } = boxes[i];
+          if (box) {
+            const center = {
+              x: box.x + box.width / 2,
+              y: box.y + box.height / 2,
+            };
+            elementData.push({ element, ref, ...center, index: i });
+            elementCenters.push({ element, ...center });
+          }
+        }
+
+        // Helper function to compare elements by reading order (top-to-bottom, then left-to-right)
+        // Returns: -1 if a comes before b, 1 if a comes after b, 0 if same position
+        const compareReadingOrder = (a: { y: number; x: number }, b: { y: number; x: number }): number => {
+          // First compare by y (top-to-bottom)
+          const yDiff = a.y - b.y;
+          // Use a threshold to account for elements on the same "row" (within 10px)
+          const rowThreshold = 10;
+          if (Math.abs(yDiff) > rowThreshold) {
+            return yDiff;
+          }
+          // If roughly on the same row, compare by x (left-to-right)
+          return a.x - b.x;
+        };
+
+        // Validate order: check that each element comes before the next one in reading order
+        let allInOrder = true;
+        const orderIssues: string[] = [];
+
+        for (let i = 0; i < elementData.length - 1; i++) {
+          const current = elementData[i];
+          const next = elementData[i + 1];
+          const comparison = compareReadingOrder(current, next);
+          const isInOrder = comparison <= 0;
+          
+          const currentPos = `(x: ${Math.round(current.x)}, y: ${Math.round(current.y)})`;
+          const nextPos = `(x: ${Math.round(next.x)}, y: ${Math.round(next.y)})`;
+          
+          checks.push({
+            property: 'reading-order',
+            operator: 'before-or-equal',
+            expected: `Element "${current.element}" should come before or at same position as "${next.element}" in reading order`,
+            actual: isInOrder ? 'in order' : 'out of order',
+            result: isInOrder ? 'pass' : 'fail',
+            currentElement: current.element,
+            nextElement: next.element,
+            currentPosition: currentPos,
+            nextPosition: nextPos,
+            comparison: comparison,
+          });
+
+          if (!isInOrder) {
+            allInOrder = false;
+            orderIssues.push(`"${current.element}" ${currentPos} comes after "${next.element}" ${nextPos} in reading order`);
+          }
+        }
+
+        passed = allInOrder;
+
+        // Generate evidence message
+        const elementNames = elements.map(e => `"${e.element}"`).join(', ');
+        if (passed) {
+          evidence = `All elements are in correct reading order (top-to-bottom, then left-to-right): ${elementNames}. ` +
+            `Total elements validated: ${elements.length}.`;
+        } else {
+          evidence = `Elements are NOT in correct reading order. ` +
+            `Expected order: ${elementNames}. ` +
+            `Order issues: ${orderIssues.join('; ')}.`;
+        }
+
+      } catch (error) {
+        passed = false;
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        evidence = `Failed to validate element order: ${errorMessage}`;
+
+        console.error(`Failed to validate element order. Error: ${errorMessage}`);
+      }
+
+      // Generate final payload matching the structure of other validation tools
+      const payload = {
+        elements: elements.map(e => ({ element: e.element, ref: e.ref })),
+        summary: {
+          total: elements.length,
+          passed: passed ? elements.length : 0,
+          failed: passed ? 0 : elements.length,
+          status: passed ? 'pass' : 'fail',
+          evidence,
+        },
+        checks,
+        elementCenters: elementCenters.map(ec => ({
+          element: ec.element,
+          x: Math.round(ec.x),
+          y: Math.round(ec.y),
+        })),
+        scope: 'multiple-elements',
+        comparisonMethod: 'reading-order',
+      };
+
+      console.log('Validate element order:', payload);
+      response.addResult(JSON.stringify(payload, null, 2));
+    });
+  },
+});
+
 // Dynamic switch tool: choose a tool based on flag value
 const dynamicSwitchSchema = z.object({
   flagName: z.string().describe('Flag value to match against cases (agent will replace this with actual value)'),
@@ -3237,6 +3387,7 @@ export default [
   validate_alert_in_snapshot,
   //validate_expanded,
   validate_element_position,
+  validate_element_order,
   default_validation,
   validate_response,
   validate_tab_exist,
