@@ -15,7 +15,7 @@
  */
 import { z } from 'zod';
 import { defineTabTool } from './tool.js';
-import { getAllComputedStylesDirect, pickActualValue, parseRGBColor, isColorInRange,runCommandClean, getValueByJsonPath, compareValues, checkElementVisibilityUnique, checkTextVisibilityInAllFrames, getElementNotFoundMessage, generateLocatorString } from './helperFunctions.js';
+import { getAllComputedStylesDirect, pickActualValue, parseRGBColor, isColorInRange,runCommandClean, getValueByJsonPath, compareValues, checkElementVisibilityUnique, checkTextVisibilityInAllFrames, getElementNotFoundMessage, generateLocatorString, getAssertionMessage, getAssertionEvidence } from './helperFunctions.js';
 import { generateLocator } from './utils.js';
 import { expect } from '@zealous-tech/playwright/test';
 import type * as playwright from '@zealous-tech/playwright';
@@ -732,16 +732,9 @@ const toHaveAccessibleNameArgsSchema = z.object({
 
 const toHaveAttributeArgsSchema = z.object({
   name: z.string().describe('Attribute name'),
+  value: z.union([z.string(), z.instanceof(RegExp)]).optional().describe('Expected attribute value. If not provided, only checks that attribute exists'),
   options: z.object({
-    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
-  }).optional(),
-});
-
-const toHaveAttributeValueArgsSchema = z.object({
-  name: z.string().describe('Attribute name'),
-  value: z.union([z.string(), z.instanceof(RegExp)]).describe('Expected attribute value'),
-  options: z.object({
-    ignoreCase: z.boolean().optional().describe('Whether to perform case-insensitive match. ignoreCase option takes precedence over the corresponding regular expression flag if specified'),
+    ignoreCase: z.boolean().optional().describe('Whether to perform case-insensitive match when checking attribute value. Only applicable when "value" is provided. Ignored if "value" is not specified. ignoreCase option takes precedence over the corresponding regular expression flag if specified'),
     timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
   }).optional(),
 });
@@ -791,23 +784,7 @@ const toHaveRoleArgsSchema = z.object({
 });
 
 const toHaveScreenshotArgsSchema = z.object({
-  name: z.union([z.string(), z.array(z.string())]).describe('Snapshot name'),
-  options: z.object({
-    animations: z.enum(['disabled', 'allow']).optional().describe('When set to "disabled", stops CSS animations, CSS transitions and Web Animations'),
-    caret: z.enum(['hide', 'initial']).optional().describe('When set to "hide", screenshot will hide text caret'),
-    mask: z.array(z.any()).optional().describe('Specify locators that should be masked when the screenshot is taken'),
-    maskColor: z.string().optional().describe('Specify the color of the overlay box for masked elements, in CSS color format'),
-    maxDiffPixelRatio: z.number().min(0).max(1).optional().describe('An acceptable ratio of pixels that are different to the total amount of pixels, between 0 and 1'),
-    maxDiffPixels: z.number().optional().describe('An acceptable amount of pixels that could be different'),
-    omitBackground: z.boolean().optional().describe('Hides default white background and allows capturing screenshots with transparency'),
-    scale: z.enum(['css', 'device']).optional().describe('When set to "css", screenshot will have a single pixel per each css pixel on the page'),
-    stylePath: z.union([z.string(), z.array(z.string())]).optional().describe('File name containing the stylesheet to apply while making the screenshot'),
-    threshold: z.number().min(0).max(1).optional().describe('An acceptable perceived color difference in the YIQ color space between the same pixel in compared images, between zero (strict) and one (lax)'),
-    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
-  }).optional(),
-});
-
-const toHaveScreenshotOptionsArgsSchema = z.object({
+  name: z.union([z.string(), z.array(z.string())]).optional().describe('Snapshot name. If not provided, screenshot will be compared without a name (using options only)'),
   options: z.object({
     animations: z.enum(['disabled', 'allow']).optional().describe('When set to "disabled", stops CSS animations, CSS transitions and Web Animations'),
     caret: z.enum(['hide', 'initial']).optional().describe('When set to "hide", screenshot will hide text caret'),
@@ -890,7 +867,6 @@ const assertionArgumentsSchema = z.discriminatedUnion('assertionType', [
   z.object({ assertionType: z.literal('toHaveAccessibleErrorMessage'), ...toHaveAccessibleErrorMessageArgsSchema.shape }),
   z.object({ assertionType: z.literal('toHaveAccessibleName'), ...toHaveAccessibleNameArgsSchema.shape }),
   z.object({ assertionType: z.literal('toHaveAttribute'), ...toHaveAttributeArgsSchema.shape }),
-  z.object({ assertionType: z.literal('toHaveAttributeValue'), ...toHaveAttributeValueArgsSchema.shape }),
   z.object({ assertionType: z.literal('toHaveClass'), ...toHaveClassArgsSchema.shape }),
   z.object({ assertionType: z.literal('toHaveCount'), ...toHaveCountArgsSchema.shape }),
   z.object({ assertionType: z.literal('toHaveCSS'), ...toHaveCSSArgsSchema.shape }),
@@ -898,7 +874,6 @@ const assertionArgumentsSchema = z.discriminatedUnion('assertionType', [
   z.object({ assertionType: z.literal('toHaveJSProperty'), ...toHaveJSPropertyArgsSchema.shape }),
   z.object({ assertionType: z.literal('toHaveRole'), ...toHaveRoleArgsSchema.shape }),
   z.object({ assertionType: z.literal('toHaveScreenshot'), ...toHaveScreenshotArgsSchema.shape }),
-  z.object({ assertionType: z.literal('toHaveScreenshotOptions'), ...toHaveScreenshotOptionsArgsSchema.shape }),
   z.object({ assertionType: z.literal('toHaveText'), ...toHaveTextArgsSchema.shape }),
   z.object({ assertionType: z.literal('toHaveValue'), ...toHaveValueArgsSchema.shape }),
   z.object({ assertionType: z.literal('toHaveValues'), ...toHaveValuesArgsSchema.shape }),
@@ -920,253 +895,6 @@ const validateDomAssertionsSchema = baseDomInputSchema.extend({
   checks: domAssertionChecksSchema,
 });
 
-// Function to generate assertion messages with element description
-const getAssertionMessage = (assertionType: string, elementDescription: string, negate: boolean = false): string => {
-  const positiveMessages: Record<string, string> = {
-    toBeEnabled: `'${elementDescription}' is disabled (should be enabled).`,
-    toBeDisabled: `'${elementDescription}' is enabled (should be disabled).`,
-    toBeVisible: `'${elementDescription}' is hidden (should be visible).`,
-    toBeHidden: `'${elementDescription}' is visible (should be hidden).`,
-    toBeInViewport: `'${elementDescription}' is outside viewport (should be in viewport).`,
-    toBeChecked: `'${elementDescription}' is unchecked (should be checked).`,
-    toBeFocused: `'${elementDescription}' is not focused (should be focused).`,
-    toBeEditable: `'${elementDescription}' is read-only (should be editable).`,
-    toBeEmpty: `'${elementDescription}' contains content (should be empty).`,
-    toBeAttached: `'${elementDescription}' is detached from DOM (should be attached).`,
-    toHaveAttribute: `'${elementDescription}' is missing attribute (attribute required).`,
-    toHaveAttributeValue: `'${elementDescription}' has different attribute value (specific value required).`,
-    toHaveText: `'${elementDescription}' has different text (exact text match required).`,
-    toContainText: `'${elementDescription}' does not contain expected text (text should be present).`,
-    toHaveValue: `'${elementDescription}' has different value (specific value required).`,
-    toHaveValues: `'${elementDescription}' has different values (specific values required).`,
-    selectHasValue: `'${elementDescription}' has different selection (specific value should be selected).`,
-    toMatchAriaSnapshot: `'${elementDescription}' has different ARIA structure (should match snapshot).`,
-    toMatchAriaSnapshotOptions: `'${elementDescription}' has different ARIA structure (should match snapshot with options).`,
-    toContainClass: `'${elementDescription}' is missing class (class should be present).`,
-    toHaveClass: `'${elementDescription}' has different classes (exact class match required).`,
-    toHaveCount: `'${elementDescription}' has different count (specific count required).`,
-    toHaveCSS: `'${elementDescription}' has different CSS property value (specific value required).`,
-    toHaveId: `'${elementDescription}' has different id (specific id required).`,
-    toHaveJSProperty: `'${elementDescription}' has different JS property value (specific value required).`,
-    toHaveRole: `'${elementDescription}' has different role (specific role required).`,
-    toHaveScreenshot: `'${elementDescription}' has visual differences (should match screenshot).`,
-    toHaveScreenshotOptions: `'${elementDescription}' has visual differences (should match screenshot with options).`,
-    toHaveAccessibleDescription: `'${elementDescription}' is missing accessible description or differs (description required).`,
-    toHaveAccessibleErrorMessage: `'${elementDescription}' is missing accessible error message or differs (message required).`,
-    toHaveAccessibleName: `'${elementDescription}' is missing accessible name or differs (name required).`,
-  };
- 
- 
-  const negativeMessages: Record<string, string> = {
-    toBeEnabled: `'${elementDescription}' is enabled (should be disabled).`,
-    toBeDisabled: `'${elementDescription}' is disabled (should be enabled).`,
-    toBeVisible: `'${elementDescription}' is visible (should be hidden).`,
-    toBeHidden: `'${elementDescription}' is hidden (should be visible).`,
-    toBeInViewport: `'${elementDescription}' is in viewport (should be outside viewport).`,
-    toBeChecked: `'${elementDescription}' is checked (should be unchecked).`,
-    toBeFocused: `'${elementDescription}' has focus (should not be focused).`,
-    toBeEditable: `'${elementDescription}' is editable (should be read-only).`,
-    toBeEmpty: `'${elementDescription}' is empty (should have content).`,
-    toBeAttached: `'${elementDescription}' is attached to DOM (should be detached)`,
-    toHaveAttribute: `'${elementDescription}' has the attribute (should not have it).`,
-    toHaveAttributeValue: `'${elementDescription}' has matching attribute value (should have different value).`,
-    toHaveText: `'${elementDescription}' has matching text (should have different text).`,
-    toContainText: `'${elementDescription}' contains the text (should not contain it).`,
-    toHaveValue: `'${elementDescription}' has matching value (should have different value).`,
-    toHaveValues: `'${elementDescription}' has matching values (should have different values).`,
-    selectHasValue: `'${elementDescription}' has matching selection (should have different selection).`,
-    toMatchAriaSnapshot: `'${elementDescription}' matches ARIA structure (should have different structure).`,
-    toMatchAriaSnapshotOptions: `'${elementDescription}' matches ARIA structure with options (should have different structure).`,
-    toContainClass: `'${elementDescription}' has the class (should not have it).`,
-    toHaveClass: `'${elementDescription}' has matching classes (should have different classes).`,
-    toHaveCount: `'${elementDescription}' has matching count (should have different count).`,
-    toHaveCSS: `'${elementDescription}' has matching CSS property value (should have different value).`,
-    toHaveId: `'${elementDescription}' has matching id (should have different id).`,
-    toHaveJSProperty: `'${elementDescription}' has matching JS property value (should have different value).`,
-    toHaveRole: `'${elementDescription}' has matching role (should have different role).`,
-    toHaveScreenshot: `'${elementDescription}' matches screenshot (should look different).`,
-    toHaveScreenshotOptions: `'${elementDescription}' matches screenshot with options (should look different).`,
-    toHaveAccessibleDescription: `'${elementDescription}' has accessible description (should not have it).`,
-    toHaveAccessibleErrorMessage: `'${elementDescription}' has accessible error message (should not have it).`,
-    toHaveAccessibleName: `'${elementDescription}' has accessible name (should not have it).`,
-  };
-
-  const messages = negate ? negativeMessages : positiveMessages;
-  return messages[assertionType] || `${elementDescription} assertion ${negate ? 'should not' : 'should'} failed`;
-};
-
-// Function to generate evidence for assertions
-const getAssertionEvidence = (
-  assertionType: string,
-  negate: boolean,
-  timeout: number,
-  locatorString: string,
-  elementDescription: string,
-  mainArgs?: any,
-  options?: any,
-): string => {
-  const timeoutStr = timeout ? ` (timeout: ${timeout}ms)` : '';
-  const negateStr = negate ? 'not ' : '';
-  
-  // Messages for passed assertions
-  const passedEvidenceMessages: Record<string, (args?: any, opts?: any) => string> = {
-    toBeEnabled: (args, opts) => {
-      // Check if options.enabled is explicitly set to false
-      const enabledValue = opts?.enabled;
-      if (enabledValue === false) {
-        // If enabled: false, we're checking that element is disabled
-        return `'${elementDescription}' is ${negate ? 'enabled' : 'disabled'} `;
-      } else {
-        // Default: checking that element is enabled
-        return `'${elementDescription}' is ${negate ? 'disabled' : 'enabled'} `;
-      }
-    },
-    toBeDisabled: () => `'${elementDescription}' is ${negate ? 'enabled' : 'disabled'} `,
-    toBeVisible: (args, opts) => {
-      // Check if options.visible is explicitly set to false
-      const visibleValue = opts?.visible;
-      if (visibleValue === false) {
-        // If visible: false, we're checking that element is hidden
-        return `'${elementDescription}' is ${negate ? 'visible' : 'hidden'} `;
-      } else {
-        // Default: checking that element is visible
-        return `'${elementDescription}' is ${negate ? 'hidden' : 'visible'} `;
-      }
-    },
-    toBeHidden: () => `'${elementDescription}' is ${negate ? 'visible' : 'hidden'} `,
-    toBeInViewport: () => `'${elementDescription}' is ${negate ? 'outside viewport' : 'in viewport'} `,
-    toBeChecked: (args, opts) => {
-      // Check if options.checked is explicitly set to false
-      const checkedValue = opts?.checked;
-      if (checkedValue === false) {
-        // If checked: false, we're checking that element is unchecked
-        return `'${elementDescription}' is ${negate ? 'checked' : 'unchecked'} `;
-      } else {
-        // Default: checking that element is checked
-        return `'${elementDescription}' is ${negate ? 'unchecked' : 'checked'} `;
-      }
-    },
-    toBeFocused: () => `'${elementDescription}' is ${negate ? 'not focused' : 'focused'} `,
-    toBeEditable: (args, opts) => {
-      // Check if options.editable is explicitly set to false
-      const editableValue = opts?.editable;
-      if (editableValue === false) {
-        // If editable: false, we're checking that element is read-only
-        return `'${elementDescription}' is ${negate ? 'editable' : 'read-only'} `;
-      } else {
-        // Default: checking that element is editable
-        return `'${elementDescription}' is ${negate ? 'read-only' : 'editable'} `;
-      }
-    },
-    toBeEmpty: () => `'${elementDescription}' is ${negate ? 'not empty' : 'empty'} `,
-    toBeAttached: (args, opts) => {
-      // Check if options.attached is explicitly set to false
-      const attachedValue = opts?.attached;
-      if (attachedValue === false) {
-        // If attached: false, we're checking that element is detached
-        return `'${elementDescription}' is ${negate ? 'attached to' : 'detached from'} DOM `;
-      } else {
-        // Default: checking that element is attached
-        return `'${elementDescription}' is ${negate ? 'detached from' : 'attached to'} DOM `;
-      }
-    },
-    toHaveAttribute: (args) => {
-      const attrName = args?.name || 'attribute';
-      return `'${elementDescription}' ${negate ? 'does not have' : 'has'} attribute "${attrName}" `;
-    },
-    toHaveAttributeValue: (args) => {
-      const attrName = args?.name || 'attribute';
-      const attrValue = args?.value || 'value';
-      return `'${elementDescription}' attribute "${attrName}" ${negate ? 'does not equal' : 'equals'} "${attrValue}" `;
-    },
-    toHaveText: (args) => {
-      const expected = args?.expected || 'text';
-      const expectedStr = Array.isArray(expected) ? expected.join(', ') : expected;
-      return `'${elementDescription}' text ${negate ? 'does not match' : 'matches'} "${expectedStr}" `;
-    },
-    toContainText: (args) => {
-      const expected = args?.expected || 'text';
-      const expectedStr = Array.isArray(expected) ? expected.join(', ') : expected;
-      return `'${elementDescription}' ${negate ? 'does not contain' : 'contains'} text "${expectedStr}" `;
-    },
-    toHaveValue: (args) => {
-      const value = args?.value !== undefined ? args.value : 'value';
-      return `'${elementDescription}' value ${negate ? 'does not equal' : 'equals'} "${value}" `;
-    },
-    toHaveValues: (args) => {
-      const values = args?.values || [];
-      const valuesStr = Array.isArray(values) ? values.join(', ') : String(values);
-      return `'${elementDescription}' values ${negate ? 'do not match' : 'match'} [${valuesStr}] `;
-    },
-    selectHasValue: (args) => {
-      const value = args?.value || 'value';
-      return `'${elementDescription}' selected value ${negate ? 'does not equal' : 'equals'} "${value}" `;
-    },
-    toMatchAriaSnapshot: (args) => {
-      const expected = args?.expected || 'snapshot';
-      return `'${elementDescription}' ARIA structure ${negate ? 'does not match' : 'matches'} "${expected}" `;
-    },
-    toMatchAriaSnapshotOptions: () => `'${elementDescription}' ARIA structure ${negate ? 'does not match' : 'matches'} snapshot with options `,
-    toContainClass: (args) => {
-      const expected = args?.expected || 'class';
-      const expectedStr = Array.isArray(expected) ? expected.join(' ') : expected;
-      return `'${elementDescription}' ${negate ? 'does not contain' : 'contains'} class "${expectedStr}" `;
-    },
-    toHaveClass: (args) => {
-      const expected = args?.expected || 'class';
-      const expectedStr = Array.isArray(expected) ? expected.join(' ') : expected;
-      return `'${elementDescription}' classes ${negate ? 'do not match' : 'match'} "${expectedStr}" `;
-    },
-    toHaveCount: (args) => {
-      const count = args?.count !== undefined ? args.count : 'count';
-      return `'${elementDescription}' count ${negate ? 'does not equal' : 'equals'} ${count} `;
-    },
-    toHaveCSS: (args) => {
-      const cssName = args?.name || 'property';
-      const cssValue = args?.value || 'value';
-      return `'${elementDescription}' CSS "${cssName}" ${negate ? 'does not equal' : 'equals'} "${cssValue}" `;
-    },
-    toHaveId: (args) => {
-      const id = args?.id || 'id';
-      return `'${elementDescription}' id ${negate ? 'does not equal' : 'equals'} "${id}" `;
-    },
-    toHaveJSProperty: (args) => {
-      const propName = args?.name || 'property';
-      const propValue = args?.value !== undefined ? JSON.stringify(args.value) : 'value';
-      return `'${elementDescription}' JS property "${propName}" ${negate ? 'does not equal' : 'equals'} ${propValue} `;
-    },
-    toHaveRole: (args) => {
-      const role = args?.role || 'role';
-      return `'${elementDescription}' role ${negate ? 'does not equal' : 'equals'} "${role}" `;
-    },
-    toHaveScreenshot: (args) => {
-      const name = args?.name || 'screenshot';
-      const nameStr = Array.isArray(name) ? name.join(', ') : name;
-      return `'${elementDescription}' screenshot ${negate ? 'does not match' : 'matches'} "${nameStr}" `;
-    },
-    toHaveScreenshotOptions: () => `'${elementDescription}' screenshot ${negate ? 'does not match' : 'matches'} with options `,
-    toHaveAccessibleDescription: (args) => {
-      const description = args?.description || 'description';
-      return `'${elementDescription}' accessible description ${negate ? 'does not equal' : 'equals'} "${description}" `;
-    },
-    toHaveAccessibleErrorMessage: (args) => {
-      const errorMessage = args?.errorMessage || 'error message';
-      return `'${elementDescription}' accessible error message ${negate ? 'does not equal' : 'equals'} "${errorMessage}" `;
-    },
-    toHaveAccessibleName: (args) => {
-      const name = args?.name || 'name';
-      return `'${elementDescription}' accessible name ${negate ? 'does not equal' : 'equals'} "${name}" `;
-    },
-  };
-
-  const evidenceFn = passedEvidenceMessages[assertionType];
-  if (evidenceFn) {
-    return evidenceFn(mainArgs, options);
-  }
-  //fallback to default evidence message
-  return `'${elementDescription}' assertion ${negate ? 'should not' : 'should'} passed.`
-    
-};
 
 const validate_dom_assertions = defineTabTool({
   capability: 'core',
@@ -1345,33 +1073,34 @@ const validate_dom_assertions = defineTabTool({
               if (!args || args.assertionType !== 'toHaveAttribute') {
                 throw new Error('toHaveAttribute requires proper arguments structure');
               }
-              const { name: attrName } = mainArgs;
+              const { name: attrName, value: attrValue } = mainArgs;
               if (!attrName) {
                 throw new Error('toHaveAttribute requires "name" argument (string)');
               }
-              assertionResult = await assertion.toHaveAttribute(attrName, finalOptions);
-              result.actual = `attribute "${attrName}" exists`;
+              // If value is provided, check attribute with value; otherwise, just check existence
+              // ignoreCase option is only applicable when checking value, so exclude it when value is not provided
+              let attributeOptions = finalOptions;
+              if (attrValue === undefined && finalOptions.ignoreCase !== undefined) {
+                const { ignoreCase, ...optionsWithoutIgnoreCase } = finalOptions;
+                attributeOptions = optionsWithoutIgnoreCase;
+              }
+              if (attrValue !== undefined) {
+                assertionResult = await assertion.toHaveAttribute(attrName, attrValue, attributeOptions);
+                result.actual = `attribute "${attrName}"="${attrValue}"`;
+              } else {
+                assertionResult = await assertion.toHaveAttribute(attrName, attributeOptions);
+                result.actual = `attribute "${attrName}" exists`;
+              }
               locatorString = await generateLocatorString(ref, locator);
               result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs);
-              result.evidence.command = createEvidenceCommand(locatorString);
-              break;
-
-            case 'toHaveAttributeValue':
-              if (!args || args.assertionType !== 'toHaveAttributeValue') {
-                throw new Error('toHaveAttributeValue requires proper arguments structure');
-              }
-              const { name: attrValueName, value: attrValueValue } = mainArgs;
-              if (!attrValueName) {
-                throw new Error('toHaveAttributeValue requires "name" argument (string)');
-              }
-              if (!attrValueValue) {
-                throw new Error('toHaveAttributeValue requires "value" argument (string or RegExp)');
-              }
-              assertionResult = await assertion.toHaveAttribute(attrValueName, attrValueValue, finalOptions);
-              result.actual = `attribute "${attrValueName}"="${attrValueValue}"`;
-              locatorString = await generateLocatorString(ref, locator);
-              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs);
-              result.evidence.command = createEvidenceCommand(locatorString);
+              // Use attributeOptions (which excludes ignoreCase when value is not provided) for evidence
+              result.evidence.command = JSON.stringify({
+                description: "Evidence showing how validation was performed",
+                assertion: name,
+                locator: locatorString,
+                arguments: Object.keys(mainArgs).length > 1 ? mainArgs : {},
+                options: Object.keys(attributeOptions).length > 0 ? attributeOptions : {}
+              });
               break;
 
             case 'toHaveText':
@@ -1640,22 +1369,14 @@ const validate_dom_assertions = defineTabTool({
                 throw new Error('toHaveScreenshot requires proper arguments structure');
               }
               const { name: screenshotName } = mainArgs;
-              if (!screenshotName) {
-                throw new Error('toHaveScreenshot requires "name" argument (snapshot name)');
+              // If name is provided, check screenshot with name; otherwise, check with options only
+              if (screenshotName !== undefined) {
+                assertionResult = await assertion.toHaveScreenshot(screenshotName, finalOptions);
+                result.actual = `screenshot "${Array.isArray(screenshotName) ? screenshotName.join(', ') : screenshotName}"`;
+              } else {
+                assertionResult = await assertion.toHaveScreenshot(finalOptions);
+                result.actual = 'screenshot (with options)';
               }
-              assertionResult = await assertion.toHaveScreenshot(screenshotName, finalOptions);
-              result.actual = `screenshot "${Array.isArray(screenshotName) ? screenshotName.join(', ') : screenshotName}"`;
-              locatorString = await generateLocatorString(ref, locator);
-              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs);
-              result.evidence.command = createEvidenceCommand(locatorString);
-              break;
-
-            case 'toHaveScreenshotOptions':
-              if (!args || args.assertionType !== 'toHaveScreenshotOptions') {
-                throw new Error('toHaveScreenshotOptions requires proper arguments structure');
-              }
-              assertionResult = await assertion.toHaveScreenshot(finalOptions);
-              result.actual = 'screenshot (with options)';
               locatorString = await generateLocatorString(ref, locator);
               result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs);
               result.evidence.command = createEvidenceCommand(locatorString);
@@ -1724,7 +1445,7 @@ const validate_dom_assertions = defineTabTool({
           // Check if error indicates element not found
           const elementNotFoundMessage = getElementNotFoundMessage(error, element);
           const evidenceMessage = elementNotFoundMessage || getAssertionMessage(name, element, negate);
-          
+          locatorString = await generateLocatorString(ref, locator);
           result.evidence = {message: evidenceMessage, command: createEvidenceCommand(locatorString)};
          
         }
@@ -1933,7 +1654,7 @@ const default_validation = defineTabTool({
       try {
         // Get element locator
         const locator = await tab.refLocator({ ref, element });
-
+        
         // Generate locator string
         const locatorString = await generateLocatorString(ref, locator);
 
