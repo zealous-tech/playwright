@@ -945,14 +945,11 @@ export function getAssertionMessage(assertionType: string, elementDescription: s
 export function getAssertionEvidence(
   assertionType: string,
   negate: boolean,
-  timeout: number,
   locatorString: string,
   elementDescription: string,
   mainArgs?: any,
   options?: any,
 ): string {
-  const timeoutStr = timeout ? ` (timeout: ${timeout}ms)` : '';
-  const negateStr = negate ? 'not ' : '';
   
   // Messages for passed assertions
   const passedEvidenceMessages: Record<string, (args?: any, opts?: any) => string> = {

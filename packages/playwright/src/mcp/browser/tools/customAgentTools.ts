@@ -656,7 +656,6 @@ const baseDomInputSchema = z.object({
 const toBeAttachedArgsSchema = z.object({
   options: z.object({
     attached: z.boolean().optional().describe('Whether the element should be attached to Document or ShadowRoot'),
-    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
   }).optional(),
 });
 
@@ -664,66 +663,56 @@ const toBeCheckedArgsSchema = z.object({
   options: z.object({
     checked: z.boolean().optional().describe('Provides state to assert for. Asserts for input to be checked by default. This option can\'t be used when indeterminate is set to true.'),
     indeterminate: z.boolean().optional().describe('Asserts that the element is in the indeterminate (mixed) state. Only supported for checkboxes and radio buttons. This option can\'t be true when checked is provided.'),
-    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
   }).optional(),
 });
 
 const toBeDisabledArgsSchema = z.object({
   options: z.object({
-    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
   }).optional(),
 });
 
 const toBeEditableArgsSchema = z.object({
   options: z.object({
     editable: z.boolean().optional().describe('Whether the element should be editable'),
-    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
   }).optional(),
 });
 
 const toBeEmptyArgsSchema = z.object({
   options: z.object({
-    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
   }).optional(),
 });
 
 const toBeEnabledArgsSchema = z.object({
   options: z.object({
     enabled: z.boolean().optional().describe('Whether the element should be enabled'),
-    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
   }).optional(),
 });
 
 const toBeFocusedArgsSchema = z.object({
   options: z.object({
-    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
   }).optional(),
 });
 
 const toBeHiddenArgsSchema = z.object({
   options: z.object({
-    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
   }).optional(),
 });
 
 const toBeInViewportArgsSchema = z.object({
   options: z.object({
     ratio: z.number().optional().describe('The minimal ratio of the element to intersect viewport. If equals to 0, then element should intersect viewport at any positive ratio. Defaults to 0'),
-    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
   }).optional(),
 });
 
 const toBeVisibleArgsSchema = z.object({
   options: z.object({
     visible: z.boolean().optional().describe('Whether the element should be visible'),
-    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
   }).optional(),
 });
 
 const toContainClassArgsSchema = z.object({
   expected: z.union([z.string(), z.array(z.string())]).describe('A string containing expected class names, separated by spaces, or a list of such strings to assert multiple elements'),
   options: z.object({
-    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
   }).optional(),
 });
 
@@ -731,7 +720,6 @@ const toContainTextArgsSchema = z.object({
   expected: z.union([z.string(), z.instanceof(RegExp), z.array(z.union([z.string(), z.instanceof(RegExp)]))]).describe('Expected substring or RegExp or a list of those'),
   options: z.object({
     ignoreCase: z.boolean().optional().describe('Whether to perform case-insensitive match. ignoreCase option takes precedence over the corresponding regular expression flag if specified'),
-    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
     useInnerText: z.boolean().optional().describe('Whether to use element.innerText instead of element.textContent when retrieving DOM node text'),
   }).optional(),
 });
@@ -740,7 +728,6 @@ const toHaveAccessibleDescriptionArgsSchema = z.object({
   description: z.union([z.string(), z.instanceof(RegExp)]).describe('Expected accessible description'),
   options: z.object({
     ignoreCase: z.boolean().optional().describe('Whether to perform case-insensitive match. ignoreCase option takes precedence over the corresponding regular expression flag if specified'),
-    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
   }).optional(),
 });
 
@@ -748,7 +735,6 @@ const toHaveAccessibleErrorMessageArgsSchema = z.object({
   errorMessage: z.union([z.string(), z.instanceof(RegExp)]).describe('Expected accessible error message'),
   options: z.object({
     ignoreCase: z.boolean().optional().describe('Whether to perform case-insensitive match. ignoreCase option takes precedence over the corresponding regular expression flag if specified'),
-    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
   }).optional(),
 });
 
@@ -756,7 +742,6 @@ const toHaveAccessibleNameArgsSchema = z.object({
   name: z.union([z.string(), z.instanceof(RegExp)]).describe('Expected accessible name'),
   options: z.object({
     ignoreCase: z.boolean().optional().describe('Whether to perform case-insensitive match. ignoreCase option takes precedence over the corresponding regular expression flag if specified'),
-    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
   }).optional(),
 });
 
@@ -765,21 +750,18 @@ const toHaveAttributeArgsSchema = z.object({
   value: z.union([z.string(), z.instanceof(RegExp)]).optional().describe('Expected attribute value. If not provided, only checks that attribute exists'),
   options: z.object({
     ignoreCase: z.boolean().optional().describe('Whether to perform case-insensitive match when checking attribute value. Only applicable when "value" is provided. Ignored if "value" is not specified. ignoreCase option takes precedence over the corresponding regular expression flag if specified'),
-    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
   }).optional(),
 });
 
 const toHaveClassArgsSchema = z.object({
   expected: z.union([z.string(), z.instanceof(RegExp), z.array(z.union([z.string(), z.instanceof(RegExp)]))]).describe('Expected class or RegExp or a list of those'),
   options: z.object({
-    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
   }).optional(),
 });
 
 const toHaveCountArgsSchema = z.object({
   count: z.number().describe('Expected count'),
   options: z.object({
-    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
   }).optional(),
 });
 
@@ -787,14 +769,12 @@ const toHaveCSSArgsSchema = z.object({
   name: z.string().describe('CSS property name'),
   value: z.union([z.string(), z.instanceof(RegExp)]).describe('CSS property value'),
   options: z.object({
-    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
   }).optional(),
 });
 
 const toHaveIdArgsSchema = z.object({
   id: z.union([z.string(), z.instanceof(RegExp)]).describe('Element id'),
   options: z.object({
-    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
   }).optional(),
 });
 
@@ -802,14 +782,12 @@ const toHaveJSPropertyArgsSchema = z.object({
   name: z.string().describe('Property name'),
   value: z.any().describe('Property value'),
   options: z.object({
-    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
   }).optional(),
 });
 
 const toHaveRoleArgsSchema = z.object({
   role: z.enum(['alert', 'alertdialog', 'application', 'article', 'banner', 'blockquote', 'button', 'caption', 'cell', 'checkbox', 'code', 'columnheader', 'combobox', 'complementary', 'contentinfo', 'definition', 'deletion', 'dialog', 'directory', 'document', 'emphasis', 'feed', 'figure', 'form', 'generic', 'grid', 'gridcell', 'group', 'heading', 'img', 'insertion', 'link', 'list', 'listbox', 'listitem', 'log', 'main', 'marquee', 'math', 'meter', 'menu', 'menubar', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'navigation', 'none', 'note', 'option', 'paragraph', 'presentation', 'progressbar', 'radio', 'radiogroup', 'region', 'row', 'rowgroup', 'rowheader', 'scrollbar', 'search', 'searchbox', 'separator', 'slider', 'spinbutton', 'status', 'strong', 'subscript', 'superscript', 'switch', 'tab', 'table', 'tablist', 'tabpanel', 'term', 'textbox', 'time', 'timer', 'toolbar', 'tooltip', 'tree', 'treegrid', 'treeitem']).describe('Required aria role'),
   options: z.object({
-    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
   }).optional(),
 });
 
@@ -826,7 +804,6 @@ const toHaveScreenshotArgsSchema = z.object({
     scale: z.enum(['css', 'device']).optional().describe('When set to "css", screenshot will have a single pixel per each css pixel on the page'),
     stylePath: z.union([z.string(), z.array(z.string())]).optional().describe('File name containing the stylesheet to apply while making the screenshot'),
     threshold: z.number().min(0).max(1).optional().describe('An acceptable perceived color difference in the YIQ color space between the same pixel in compared images, between zero (strict) and one (lax)'),
-    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
   }).optional(),
 });
 
@@ -835,7 +812,6 @@ const toHaveTextArgsSchema = z.object({
   expected: z.union([z.string(), z.instanceof(RegExp), z.array(z.union([z.string(), z.instanceof(RegExp)]))]).describe('Expected string or RegExp or a list of those'),
   options: z.object({
     ignoreCase: z.boolean().optional().describe('Whether to perform case-insensitive match. ignoreCase option takes precedence over the corresponding regular expression flag if specified'),
-    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
     useInnerText: z.boolean().optional().describe('Whether to use element.innerText instead of element.textContent when retrieving DOM node text'),
   }).optional(),
 });
@@ -844,35 +820,30 @@ const toHaveTextArgsSchema = z.object({
 const toHaveValueArgsSchema = z.object({
   value: z.union([z.string(), z.instanceof(RegExp)]).describe('Expected value'),
   options: z.object({
-    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
   }).optional(),
 });
 
 const toHaveValuesArgsSchema = z.object({
   values: z.array(z.union([z.string(), z.instanceof(RegExp)])).describe('Expected options currently selected'),
   options: z.object({
-    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
   }).optional(),
 });
 
 const selectHasValueArgsSchema = z.object({
   value: z.string().describe('Expected value (case and space insensitive)'),
   options: z.object({
-    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
   }).optional(),
 });
 
 const toMatchAriaSnapshotArgsSchema = z.object({
   expected: z.string().describe('Expected accessibility snapshot'),
   options: z.object({
-    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
   }).optional(),
 });
 
 const toMatchAriaSnapshotOptionsArgsSchema = z.object({
   options: z.object({
     name: z.string().optional().describe('Name of the snapshot to store in the snapshot folder corresponding to this test. Generates sequential names if not specified'),
-    timeout: z.number().optional().describe('Time to retry the assertion for in milliseconds'),
   }).optional(),
 });
 
@@ -915,7 +886,6 @@ const assertionArgumentsSchema = z.discriminatedUnion('assertionType', [
 // Schema for DOM assertions using Playwright expect assertions
 const domAssertionCheckSchema = z.object({
   negate: z.boolean().optional().default(false).describe('Whether to negate the assertion (use .not)'),
-  timeout: z.number().optional().describe('Timeout in milliseconds for the assertion'),
   assertion: assertionArgumentsSchema.describe('Assertion type and its specific arguments'),
 });
 
@@ -943,7 +913,7 @@ const validate_dom_assertions = defineTabTool({
       const results = [];
 
       for (const check of checks) {
-        const { negate, timeout = 15000, assertion: args } = check;
+        const { negate, assertion: args } = check;
         if (!args || !args.assertionType) {
           throw new Error('Each check must have assertion with assertionType');
         }
@@ -955,7 +925,7 @@ const validate_dom_assertions = defineTabTool({
         const message : string = getAssertionMessage(name, element, negate);
         // Prepare final args - separate main arguments from options
         const { options, ...mainArgs } = convertedArgs;
-        const finalOptions = { ...options, ...(timeout && { timeout }) };
+        const finalOptions = { ...options, timeout: ELEMENT_ATTACHED_TIMEOUT };
         
         let result = {
           assertion: name,
@@ -995,7 +965,7 @@ const validate_dom_assertions = defineTabTool({
               result.actual = 'enabled';
               
               locatorString = await generateLocatorString(ref, locator);
-              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs, options);
+              result.evidence.message = getAssertionEvidence(name, negate, locatorString, element, mainArgs, options);
               result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
@@ -1006,7 +976,7 @@ const validate_dom_assertions = defineTabTool({
               assertionResult = await assertion.toBeDisabled(finalOptions);
               result.actual = 'disabled';
               locatorString = await generateLocatorString(ref, locator);
-              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs, );
+              result.evidence.message = getAssertionEvidence(name, negate, locatorString, element, mainArgs);
               result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
@@ -1017,7 +987,7 @@ const validate_dom_assertions = defineTabTool({
               assertionResult = await assertion.toBeVisible(finalOptions);
               result.actual = 'visible';
               locatorString = await generateLocatorString(ref, locator);
-              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs, options);
+              result.evidence.message = getAssertionEvidence(name, negate, locatorString, element, mainArgs, options);
               result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
@@ -1028,7 +998,7 @@ const validate_dom_assertions = defineTabTool({
               assertionResult = await assertion.toBeHidden(finalOptions);
               result.actual = 'hidden';
               locatorString = await generateLocatorString(ref, locator);
-              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs);
+              result.evidence.message = getAssertionEvidence(name, negate, locatorString, element, mainArgs);
               result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
@@ -1039,7 +1009,7 @@ const validate_dom_assertions = defineTabTool({
               assertionResult = await assertion.toBeInViewport(finalOptions);
               result.actual = 'in viewport';
               locatorString = await generateLocatorString(ref, locator);
-              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs);
+              result.evidence.message = getAssertionEvidence(name, negate, locatorString, element, mainArgs);
               result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
@@ -1050,7 +1020,7 @@ const validate_dom_assertions = defineTabTool({
               assertionResult = await assertion.toBeChecked(finalOptions);
               result.actual = 'checked';
               locatorString = await generateLocatorString(ref, locator);
-              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs, options);
+              result.evidence.message = getAssertionEvidence(name, negate, locatorString, element, mainArgs, options);
               result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
@@ -1062,7 +1032,7 @@ const validate_dom_assertions = defineTabTool({
               assertionResult = await assertion.toBeFocused(finalOptions);
               result.actual = 'focused';
               locatorString = await generateLocatorString(ref, locator);
-              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs);
+              result.evidence.message = getAssertionEvidence(name, negate, locatorString, element, mainArgs);
               result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
@@ -1073,7 +1043,7 @@ const validate_dom_assertions = defineTabTool({
               assertionResult = await assertion.toBeEditable(finalOptions);
               result.actual = 'editable';
               locatorString = await generateLocatorString(ref, locator);
-              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs, options);
+              result.evidence.message = getAssertionEvidence(name, negate, locatorString, element, mainArgs, options);
               result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
@@ -1084,7 +1054,7 @@ const validate_dom_assertions = defineTabTool({
               assertionResult = await assertion.toBeEmpty(finalOptions);
               result.actual = 'empty';
               locatorString = await generateLocatorString(ref, locator);
-              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs);
+              result.evidence.message = getAssertionEvidence(name, negate, locatorString, element, mainArgs);
               result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
@@ -1095,7 +1065,7 @@ const validate_dom_assertions = defineTabTool({
               assertionResult = await assertion.toBeAttached(finalOptions);
               result.actual = 'attached';
               locatorString = await generateLocatorString(ref, locator);
-              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs, options);
+              result.evidence.message = getAssertionEvidence(name, negate, locatorString, element, mainArgs, options);
               result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
@@ -1122,7 +1092,7 @@ const validate_dom_assertions = defineTabTool({
                 result.actual = `attribute "${attrName}" exists`;
               }
               locatorString = await generateLocatorString(ref, locator);
-              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs);
+              result.evidence.message = getAssertionEvidence(name, negate, locatorString, element, mainArgs);
               // Use attributeOptions (which excludes ignoreCase when value is not provided) for evidence
               result.evidence.command = JSON.stringify({
                 description: "Evidence showing how validation was performed",
@@ -1144,7 +1114,7 @@ const validate_dom_assertions = defineTabTool({
               assertionResult = await assertion.toHaveText(textExpected, finalOptions);
               result.actual = `text "${Array.isArray(textExpected) ? textExpected.join(', ') : textExpected}"`;
               locatorString = await generateLocatorString(ref, locator);
-              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs);
+              result.evidence.message = getAssertionEvidence(name, negate, locatorString, element, mainArgs);
               result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
@@ -1159,7 +1129,7 @@ const validate_dom_assertions = defineTabTool({
               assertionResult = await assertion.toContainText(containExpected, finalOptions);
               result.actual = `contains text "${Array.isArray(containExpected) ? containExpected.join(', ') : containExpected}"`;
               locatorString = await generateLocatorString(ref, locator);
-              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs);
+              result.evidence.message = getAssertionEvidence(name, negate, locatorString, element, mainArgs);
               result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
@@ -1174,7 +1144,7 @@ const validate_dom_assertions = defineTabTool({
               assertionResult = await assertion.toHaveValue(valueExpected, finalOptions);
               result.actual = `value "${valueExpected}"`;
               locatorString = await generateLocatorString(ref, locator);
-              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs);
+              result.evidence.message = getAssertionEvidence(name, negate, locatorString, element, mainArgs);
               result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
@@ -1189,7 +1159,7 @@ const validate_dom_assertions = defineTabTool({
               assertionResult = await assertion.toHaveValues(valuesExpected, finalOptions);
               result.actual = `values [${valuesExpected.join(', ')}]`;
               locatorString = await generateLocatorString(ref, locator);
-              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs);
+              result.evidence.message = getAssertionEvidence(name, negate, locatorString, element, mainArgs);
               result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
@@ -1210,7 +1180,7 @@ const validate_dom_assertions = defineTabTool({
                 return { actualValue, normalizedActual };
               };
 
-              const selectTimeout = finalOptions?.timeout || timeout;
+              const selectTimeout = finalOptions?.timeout || ELEMENT_ATTACHED_TIMEOUT;
               const startTime = Date.now();
               let lastError: Error | null = null;
               let lastActualValue = '';
@@ -1259,7 +1229,7 @@ const validate_dom_assertions = defineTabTool({
               assertionResult = await assertion.toBeAttached(finalOptions);
               result.actual = `value "${lastActualValue}" (normalized: "${lastNormalizedActual}")`;
               locatorString = await generateLocatorString(ref, locator);
-              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs);
+              result.evidence.message = getAssertionEvidence(name, negate, locatorString, element, mainArgs);
               result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
@@ -1274,7 +1244,7 @@ const validate_dom_assertions = defineTabTool({
               assertionResult = await assertion.toMatchAriaSnapshot(ariaSnapshotExpected, finalOptions);
               result.actual = `aria snapshot "${ariaSnapshotExpected}"`;
               locatorString = await generateLocatorString(ref, locator);
-              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs);
+              result.evidence.message = getAssertionEvidence(name, negate, locatorString, element, mainArgs);
               result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
@@ -1285,7 +1255,7 @@ const validate_dom_assertions = defineTabTool({
               assertionResult = await assertion.toMatchAriaSnapshot(finalOptions);
               result.actual = 'aria snapshot (with options)';
               locatorString = await generateLocatorString(ref, locator);
-              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs);
+              result.evidence.message = getAssertionEvidence(name, negate, locatorString, element, mainArgs);
               result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
@@ -1300,7 +1270,7 @@ const validate_dom_assertions = defineTabTool({
               assertionResult = await assertion.toContainClass(containClassExpected, finalOptions);
               result.actual = `contains class "${Array.isArray(containClassExpected) ? containClassExpected.join(' ') : containClassExpected}"`;
               locatorString = await generateLocatorString(ref, locator);
-              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs);
+              result.evidence.message = getAssertionEvidence(name, negate, locatorString, element, mainArgs);
               result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
@@ -1315,7 +1285,7 @@ const validate_dom_assertions = defineTabTool({
               assertionResult = await assertion.toHaveClass(classExpected, finalOptions);
               result.actual = `class "${Array.isArray(classExpected) ? classExpected.join(' ') : classExpected}"`;
               locatorString = await generateLocatorString(ref, locator);
-              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs);
+              result.evidence.message = getAssertionEvidence(name, negate, locatorString, element, mainArgs);
               result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
@@ -1330,7 +1300,7 @@ const validate_dom_assertions = defineTabTool({
               assertionResult = await assertion.toHaveCount(count, finalOptions);
               result.actual = `count ${count}`;
               locatorString = await generateLocatorString(ref, locator);
-              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs);
+              result.evidence.message = getAssertionEvidence(name, negate, locatorString, element, mainArgs);
               result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
@@ -1345,7 +1315,7 @@ const validate_dom_assertions = defineTabTool({
               assertionResult = await assertion.toHaveCSS(cssName, cssValue, finalOptions);
               result.actual = `CSS ${cssName}="${cssValue}"`;
               locatorString = await generateLocatorString(ref, locator);
-              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs);
+              result.evidence.message = getAssertionEvidence(name, negate, locatorString, element, mainArgs);
               result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
@@ -1360,7 +1330,7 @@ const validate_dom_assertions = defineTabTool({
               assertionResult = await assertion.toHaveId(id, finalOptions);
               result.actual = `id "${id}"`;
               locatorString = await generateLocatorString(ref, locator);
-              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs);
+              result.evidence.message = getAssertionEvidence(name, negate, locatorString, element, mainArgs);
               result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
@@ -1375,7 +1345,7 @@ const validate_dom_assertions = defineTabTool({
               assertionResult = await assertion.toHaveJSProperty(jsPropertyName, jsPropertyValue, finalOptions);
               result.actual = `JS property ${jsPropertyName}="${JSON.stringify(jsPropertyValue)}"`;
               locatorString = await generateLocatorString(ref, locator);
-              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs);
+              result.evidence.message = getAssertionEvidence(name, negate, locatorString, element, mainArgs);
               result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
@@ -1390,7 +1360,7 @@ const validate_dom_assertions = defineTabTool({
               assertionResult = await assertion.toHaveRole(role, finalOptions);
               result.actual = `role "${role}"`;
               locatorString = await generateLocatorString(ref, locator);
-              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs);
+              result.evidence.message = getAssertionEvidence(name, negate, locatorString, element, mainArgs);
               result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
@@ -1408,7 +1378,7 @@ const validate_dom_assertions = defineTabTool({
                 result.actual = 'screenshot (with options)';
               }
               locatorString = await generateLocatorString(ref, locator);
-              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs);
+              result.evidence.message = getAssertionEvidence(name, negate, locatorString, element, mainArgs);
               result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
@@ -1424,7 +1394,7 @@ const validate_dom_assertions = defineTabTool({
               assertionResult = await assertion.toHaveAccessibleDescription(description, finalOptions);
               result.actual = `accessible description "${description}"`;
               locatorString = await generateLocatorString(ref, locator);
-              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs);
+              result.evidence.message = getAssertionEvidence(name, negate, locatorString, element, mainArgs);
               result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
@@ -1439,7 +1409,7 @@ const validate_dom_assertions = defineTabTool({
               assertionResult = await assertion.toHaveAccessibleErrorMessage(errorMessage, finalOptions);
               result.actual = `accessible error message "${errorMessage}"`;
               locatorString = await generateLocatorString(ref, locator);
-              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs);
+              result.evidence.message = getAssertionEvidence(name, negate, locatorString, element, mainArgs);
               result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
@@ -1454,7 +1424,7 @@ const validate_dom_assertions = defineTabTool({
               assertionResult = await assertion.toHaveAccessibleName(accessibleName, finalOptions);
               result.actual = `accessible name "${accessibleName}"`;
               locatorString = await generateLocatorString(ref, locator);
-              result.evidence.message = getAssertionEvidence(name, negate, timeout, locatorString, element, mainArgs);
+              result.evidence.message = getAssertionEvidence(name, negate, locatorString, element, mainArgs);
               result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
