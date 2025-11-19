@@ -3128,14 +3128,14 @@ const validate_element_position = defineTabTool({
           const locator1 = await tab.refLocator({ ref: ref1, element: element1 });
           locatorString1 = await generateLocatorString(ref1, locator1);
         } catch {
-          locatorString1 = '';
+          locatorString1 = 'The UI Element not found';
         }
 
         try {
           const locator2 = await tab.refLocator({ ref: ref2, element: element2 });
           locatorString2 = await generateLocatorString(ref2, locator2);
         } catch {
-          locatorString2 = '';
+          locatorString2 = 'The UI Element not found';
         }
       }
 
