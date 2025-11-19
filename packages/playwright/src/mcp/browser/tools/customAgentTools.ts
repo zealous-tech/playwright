@@ -20,6 +20,9 @@ import { generateLocator } from './utils.js';
 import { expect } from '@zealous-tech/playwright/test';
 import type * as playwright from '@zealous-tech/playwright';
 
+// Global timeout for element attachment validation (in milliseconds)
+const ELEMENT_ATTACHED_TIMEOUT = 15000;
+
 // Helper function to convert string to RegExp if it looks like a regex
 function stringToRegExp(str: string): string | RegExp {
   // Check if string looks like a regex pattern (starts and ends with /)
@@ -488,12 +491,11 @@ const validate_computed_styles = defineTabTool({
     const { ref, element, checks } = validateStylesSchema.parse(rawParams);
 
     await tab.waitForCompletion(async () => {
-      // Get locator and generate locator string
+      // Get locator
       const locator = await tab.refLocator({ ref, element });
-      const locatorString = await generateLocatorString(ref, locator);
 
       // Helper function to create evidence command
-      const createEvidenceCommand = (property: string, operator: string, expected?: any) => JSON.stringify({
+      const createEvidenceCommand = (locatorString: string, property: string, operator: string, expected?: any) => JSON.stringify({
         description: "Evidence showing how validation was performed",
         toolName: 'validate_computed_styles',
         locator: locatorString,
@@ -504,26 +506,59 @@ const validate_computed_styles = defineTabTool({
         }
       });
 
-      // 1) Get all computed styles directly
-      let allStyles: any;
-      let elementNotFound = false;
+      // Check if element is attached to DOM with timeout
       try {
-        allStyles = await getAllComputedStylesDirect(tab, ref, element);
+        await expect(locator).toBeAttached({ timeout: ELEMENT_ATTACHED_TIMEOUT });
       } catch (error) {
-        elementNotFound = true;
-        allStyles = {};
-      }
-      //console.log("All Computed Styles:", allStyles);
-      // 2) Validate rules
-      const results = elementNotFound
-        ? checks.map(c => ({
+        // If element not found, generate payload with error and return early
+        // Generate locator string for evidence (even if element not found, try to get locator string)
+        let locatorString = '';
+        
+        locatorString = await generateLocatorString(ref, locator);
+
+        const evidence = checks.map(check => ({
+          command: createEvidenceCommand(locatorString, check.name, check.operator, check.expected),
+          message: `CSS Property "${check.name}" validation failed: UI element not found`
+        }));
+
+        const payload = {
+          ref,
+          element,
+          summary: {
+            total: checks.length,
+            passed: 0,
+            failed: checks.length,
+            status: 'fail' as const,
+            evidence,
+          },
+          checks: checks.map(c => ({
             style: c.name,
             operator: c.operator,
             expected: c.expected,
             actual: undefined,
             result: 'fail' as const,
-          }))
-        : checks.map(c => {
+          })),
+        };
+
+        console.log('Validate Computed Styles (element not found):', payload);
+        response.addResult(JSON.stringify(payload, null, 2));
+        return;
+      }
+
+      // Generate locator string after element is confirmed to be attached
+      const locatorString = await generateLocatorString(ref, locator);
+
+      // 1) Get all computed styles directly
+      let allStyles: any;
+      try {
+        allStyles = await getAllComputedStylesDirect(tab, ref, element);
+      } catch (error) {
+        // If getting styles fails, use empty object (element is confirmed to exist from toBeAttached check)
+        allStyles = {};
+      }
+      //console.log("All Computed Styles:", allStyles);
+      // 2) Validate rules
+      const results = checks.map(c => {
             const actual = pickActualValue(allStyles, c.name);
 
             let passed: boolean;
@@ -579,19 +614,14 @@ const validate_computed_styles = defineTabTool({
       const passedCount = results.filter(r => r.result === 'pass').length;
 
       // Generate evidence as array of objects
-      const evidence = elementNotFound
-        ? checks.map(check => ({
-            command: createEvidenceCommand(check.name, check.operator, check.expected),
-            message: `CSS Property "${check.name}" validation failed: UI element not found`
-          }))
-        : results.map(result => {
+      const evidence = results.map(result => {
             const expectedValue = typeof result.expected === 'object' ? JSON.stringify(result.expected) : result.expected;
             const message = result.result === 'pass'
               ? `CSS Property "${result.style}" validation passed: actual value "${result.actual}" ${result.operator === 'isEqual' ? 'equals' : result.operator === 'notEqual' ? 'does not equal' : 'is in range'} expected "${expectedValue}"`
               : `CSS Property "${result.style}" validation failed: actual value "${result.actual}" ${result.operator === 'isEqual' ? 'does not equal' : result.operator === 'notEqual' ? 'equals' : 'is not in range'} expected "${expectedValue}"`;
             
             return {
-              command: createEvidenceCommand(result.style, result.operator, result.expected),
+              command: createEvidenceCommand(locatorString, result.style, result.operator, result.expected),
               message
             };
           });
@@ -1655,12 +1685,13 @@ const default_validation = defineTabTool({
         // Get element locator
         const locator = await tab.refLocator({ ref, element });
 
-        // Generate locator string
-        const locatorString = await generateLocatorString(ref, locator);
+        // Check if element is attached to DOM with timeout
+        try {
+          await expect(locator).toBeAttached({ timeout: ELEMENT_ATTACHED_TIMEOUT });
+        } catch (error) {
+          // Element not found, generate payload and return early
+          let locatorString = await generateLocatorString(ref, locator);
 
-        // Check if generateLocator returned 'UI Element not found'
-        if (locatorString === 'UI Element not found') {
-          // Generate evidence with UI element not found message
           const evidence = [{
             command: JSON.stringify({
               toolName: 'default_validation',
@@ -1700,6 +1731,9 @@ const default_validation = defineTabTool({
           response.addResult(JSON.stringify(payload, null, 2));
           return;
         }
+
+        // Generate locator string after element is confirmed to be attached
+        const locatorString = await generateLocatorString(ref, locator);
         
         // Execute the JavaScript code on the element
         const result = await locator.evaluate((element: Element, code: string) => {
@@ -2960,23 +2994,29 @@ const validate_element_position = defineTabTool({
         const locator1 = await tab.refLocator({ ref: ref1, element: element1 });
         const locator2 = await tab.refLocator({ ref: ref2, element: element2 });
 
-        // Generate locator strings for both elements
-        locatorString1 = await generateLocatorString(ref1, locator1);
-        locatorString2 = await generateLocatorString(ref2, locator2);
-
-        // Check if generateLocator returned 'UI Element not found' for either element
-        if (locatorString1 === 'UI Element not found' || locatorString2 === 'UI Element not found') {
-          const missingElement = locatorString1 === 'UI Element not found' ? element1 : element2;
+        // Helper function to generate payload when element is not found
+        const generateElementNotFoundPayload = async (
+          missingElement: string,
+          missingRef: string,
+          missingLocator: any,
+          otherElement: string,
+          otherRef: string,
+          otherLocator: any
+        ) => {
+          // Generate locator strings for both elements
+          const locatorString1 = await generateLocatorString(missingRef, missingLocator);
+          const locatorString2 = await generateLocatorString(otherRef, otherLocator);
+         
           const evidenceArray = [{
             command: JSON.stringify({
               toolName: 'validate_element_position',
               locators: [
                 {
-                  element: element1,
+                  element: missingElement,
                   locatorString: locatorString1
                 },
                 {
-                  element: element2,
+                  element: otherElement,
                   locatorString: locatorString2
                 }
               ],
@@ -2987,7 +3027,7 @@ const validate_element_position = defineTabTool({
             message: `The UI Element "${missingElement}" not found`
           }];
 
-          const payload = {
+          return {
             element1,
             ref1,
             element2,
@@ -3010,11 +3050,32 @@ const validate_element_position = defineTabTool({
             scope: 'two-elements',
             comparisonMethod: 'bounding-box-centers',
           };
+        };
 
+        // Check if both elements are attached to DOM with timeout
+        try {
+          await expect(locator1).toBeAttached({ timeout: ELEMENT_ATTACHED_TIMEOUT });
+        } catch (error) {
+          // Element1 not found, generate payload and return early
+          const payload = await generateElementNotFoundPayload(element1, ref1, locator1, element2, ref2, locator2);
           console.log('Validate element position - UI element not found:', payload);
           response.addResult(JSON.stringify(payload, null, 2));
           return;
         }
+
+        try {
+          await expect(locator2).toBeAttached({ timeout: ELEMENT_ATTACHED_TIMEOUT });
+        } catch (error) {
+          // Element2 not found, generate payload and return early
+          const payload = await generateElementNotFoundPayload(element2, ref2, locator2, element1, ref1, locator1);
+          console.log('Validate element position - UI element not found:', payload);
+          response.addResult(JSON.stringify(payload, null, 2));
+          return;
+        }
+
+        // Generate locator strings after both elements are confirmed to be attached
+        locatorString1 = await generateLocatorString(ref1, locator1);
+        locatorString2 = await generateLocatorString(ref2, locator2);
 
         // Get bounding boxes for both elements
         const box1 = await locator1.boundingBox();
@@ -3091,16 +3152,22 @@ const validate_element_position = defineTabTool({
         evidence = `Failed to validate element position: ${errorMessage}`;
 
         console.error(`Failed to validate element position for "${element1}" and "${element2}". Error: ${errorMessage}`);
+
+        // Generate locator strings for error case (try to generate even if execution failed)
+        try {
+          const locator1 = await tab.refLocator({ ref: ref1, element: element1 });
+          locatorString1 = await generateLocatorString(ref1, locator1);
+        } catch {
+          locatorString1 = '';
+        }
+
+        try {
+          const locator2 = await tab.refLocator({ ref: ref2, element: element2 });
+          locatorString2 = await generateLocatorString(ref2, locator2);
+        } catch {
+          locatorString2 = '';
+        }
       }
-
-      // Generate locator strings for error case (try to generate even if execution failed)
-      
-        
-        const locator1 = await tab.refLocator({ ref: ref1, element: element1 });
-        locatorString1 = await generateLocatorString(ref1, locator1);
-
-        const locator2 = await tab.refLocator({ ref: ref2, element: element2 });
-        locatorString2 = await generateLocatorString(ref2, locator2);
 
       // Generate evidence as array of objects with command and message
       const evidenceArray = [{
@@ -3189,19 +3256,82 @@ const validate_element_order = defineTabTool({
           throw new Error('At least 2 elements are required to validate order');
         }
 
-        // Get bounding boxes for all elements and generate locator strings
-        const boxes: Array<{ element: string; ref: string; box: { x: number; y: number; width: number; height: number } | null }> = [];
-        
+        // Helper function to generate payload when element is not found
+        const generateElementNotFoundPayload = async (missingElement: string) => {
+          // Generate locator strings for all elements
+          const allLocators: Array<{ element: string; locatorString: string }> = [];
+          for (const { element, ref } of elements) {
+            try {
+              const locator = await tab.refLocator({ ref, element });
+              const locatorString = await generateLocatorString(ref, locator);
+              allLocators.push({ element, locatorString });
+            } catch {
+              allLocators.push({ element, locatorString: 'The UI Element not found' });
+            }
+          }
+
+          const evidence = [{
+            command: JSON.stringify({
+              toolName: 'validate_element_order',
+              arguments: {
+                elements: elements.map(e => ({ element: e.element, ref: e.ref }))
+              },
+              locators: allLocators
+            }),
+            message: `The UI Element "${missingElement}" not found`
+          }];
+
+          return {
+            elements: elements.map(e => ({ element: e.element, ref: e.ref })),
+            summary: {
+              total: elements.length,
+              passed: 0,
+              failed: elements.length,
+              status: 'fail' as const,
+              evidence,
+            },
+            checks: [],
+            elementCenters: [],
+            scope: 'multiple-elements',
+            comparisonMethod: 'reading-order',
+          };
+        };
+
+        // Get locators for all elements and check if they are attached
+        const elementLocators: Array<{ element: string; ref: string; locator: any }> = [];
         for (const { element, ref } of elements) {
           const locator = await tab.refLocator({ ref, element });
+          elementLocators.push({ element, ref, locator });
+        }
+
+        // Check if all elements are attached to DOM with timeout
+        for (const { element, ref, locator } of elementLocators) {
+          try {
+            await expect(locator).toBeAttached({ timeout: ELEMENT_ATTACHED_TIMEOUT });
+          } catch (error) {
+            // Element not found, generate payload and return early
+            const payload = await generateElementNotFoundPayload(element);
+            console.log('Validate element order - UI element not found:', payload);
+            response.addResult(JSON.stringify(payload, null, 2));
+            return;
+          }
+        }
+
+        // Generate locator strings after all elements are confirmed to be attached
+        for (const { element, ref, locator } of elementLocators) {
+          const locatorString = await generateLocatorString(ref, locator);
+          locators.push({ element, locatorString });
+        }
+
+        // Get bounding boxes for all elements
+        const boxes: Array<{ element: string; ref: string; box: { x: number; y: number; width: number; height: number } | null }> = [];
+        for (const { element, ref, locator } of elementLocators) {
           const box = await locator.boundingBox();
           boxes.push({ element, ref, box });
           
           if (!box) {
             throw new Error(`Could not get bounding box for element: "${element}"`);
           }
-          const locatorString = await generateLocatorString(ref, locator);
-          locators.push({ element, locatorString });
         }
 
         // Calculate center points for all elements
