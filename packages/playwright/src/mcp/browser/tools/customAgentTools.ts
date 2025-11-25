@@ -15,9 +15,10 @@
  */
 import { z } from 'zod';
 import { defineTabTool } from './tool.js';
-import { getAllComputedStylesDirect, pickActualValue, parseRGBColor, isColorInRange,runCommandClean, getValueByJsonPath, compareValues, checkElementVisibilityUnique, checkTextVisibilityInAllFrames, getElementNotFoundMessage, generateLocatorString, getAssertionMessage, getAssertionEvidence } from './helperFunctions.js';
+import { getAllComputedStylesDirect, pickActualValue, parseRGBColor, isColorInRange,runCommandClean, getValueByJsonPath, compareValues, checkElementVisibilityUnique, checkTextVisibilityInAllFrames, getElementErrorMessage, generateLocatorString, getAssertionMessage, getAssertionEvidence, getXPathCode } from './helperFunctions.js';
 import { generateLocator } from './utils.js';
 import { expect } from '@zealous-tech/playwright/test';
+import { asLocator } from 'playwright-core/lib/utils';
 import type * as playwright from '@zealous-tech/playwright';
 
 // Global timeout for element attachment validation (in milliseconds)
@@ -1436,15 +1437,15 @@ const validate_dom_assertions = defineTabTool({
           console.log(`validate_dom_assertions: ${name}${negate ? ' (negated)' : ''} passed for element "${element}"`);
 
         } catch (error) {
-          console.log('error in validate_dom_assertions', error);
+          console.error('error in validate_dom_assertions', error);
           
           // Handle assertion errors - set result and evidence
           result.result = 'fail';
           result.error = error instanceof Error ? error.message : String(error);
           
-          // Check if error indicates element not found
-          const elementNotFoundMessage = getElementNotFoundMessage(error, element);
-          const evidenceMessage = elementNotFoundMessage || getAssertionMessage(name, element, negate);
+          // Check if error indicates specific element issues (not found, multiple elements, etc.)
+          const elementErrorMessage = getElementErrorMessage(error, element);
+          const evidenceMessage = elementErrorMessage || getAssertionMessage(name, element, negate);
           locatorString = await generateLocatorString(ref, locator);
           result.evidence = {message: evidenceMessage, command: createEvidenceCommand(locatorString)};
          
@@ -2134,10 +2135,30 @@ const generate_locator = defineTabTool({
     try {
       await tab.waitForCompletion(async () => {
         // Get locator from ref
-        const locator = await tab.refLocator({ ref, element });
+        // If ref starts with ###checkTextLocator, remove the prefix before passing to refLocator
+        const refForLocator = ref.startsWith('###checkTextLocator') 
+          ? ref.substring('###checkTextLocator'.length) 
+          : ref;
+        const locator = await tab.refLocator({ ref: refForLocator, element });
 
-        // Generate stable locator using Playwright's generateLocator function
-        const generatedLocator = await generateLocator(locator);
+        // Always generate locator first
+        let generatedLocator = await generateLocator(locator);
+        let locatorType = 'playwright-generated';
+
+        // If generated locator starts with getByText and ref has ###checkTextLocator prefix, use xpath instead
+        if (ref.startsWith('###checkTextLocator') && generatedLocator.startsWith('getByText')) {
+          // Get xpath from element using getXPathCode from helperFunctions
+          const xpathCode = getXPathCode();
+          // Use evaluate with code from helperFunctions
+          const xpath = await locator.evaluate((el: Element, code: string) => {
+            const func = new Function('element', code);
+            return func(el);
+          }, xpathCode);
+          // Return XPath in Playwright locator format: locator('xpath=...')
+          const xpathSelector = `xpath=${xpath}`;
+          generatedLocator = asLocator('javascript', xpathSelector);
+          locatorType = 'xpath';
+        }
 
         const payload = {
           ref,
@@ -2145,8 +2166,8 @@ const generate_locator = defineTabTool({
           generatedLocator,
           summary: {
             status: 'success',
-            message: `Successfully generated Playwright locator for element "${element}" with ref "${ref}"`,
-            locatorType: 'playwright-generated',
+            message: `Successfully generated ${locatorType} locator for element "${element}" with ref "${ref}"`,
+            locatorType,
             isStable: true,
             canBeReused: true,
           },
