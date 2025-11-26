@@ -2135,9 +2135,9 @@ const generate_locator = defineTabTool({
     try {
       await tab.waitForCompletion(async () => {
         // Get locator from ref
-        // If ref starts with ###checkTextLocator, remove the prefix before passing to refLocator
-        const refForLocator = ref.startsWith('###checkTextLocator') 
-          ? ref.substring('###checkTextLocator'.length) 
+        // If ref starts with ###checkLocator, remove the prefix before passing to refLocator
+        const refForLocator = ref.startsWith('###checkLocator') 
+          ? ref.substring('###checkLocator'.length) 
           : ref;
         const locator = await tab.refLocator({ ref: refForLocator, element });
 
@@ -2146,7 +2146,7 @@ const generate_locator = defineTabTool({
         let locatorType = 'playwright-generated';
 
         // If generated locator starts with getByText and ref has ###checkTextLocator prefix, use xpath instead
-        if (ref.startsWith('###checkTextLocator') && generatedLocator.startsWith('getByText')) {
+        if (ref.startsWith('###checkLocator')) {
           // Get xpath from element using getXPathCode from helperFunctions
           const xpathCode = getXPathCode();
           // Use evaluate with code from helperFunctions
