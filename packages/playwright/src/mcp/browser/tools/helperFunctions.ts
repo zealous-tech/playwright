@@ -831,11 +831,7 @@ async function generateLocatorString(ref: string, locator: any): Promise<string>
   return await generateLocator(locator);
 }
 
-/**
- * Helper function to check if error indicates element not found
- * Returns a formatted message if element not found, null otherwise
- */
-function getElementNotFoundMessage(err: any, elementDescription: string): string | null {
+function getElementErrorMessage(err: any, elementDescription: string): string | null {
   if (!err) return null;
   
   // Get error message from multiple possible locations
@@ -850,7 +846,7 @@ function getElementNotFoundMessage(err: any, elementDescription: string): string
   
   const errorMessageLower = errorMessage.toLowerCase();
   
-  // Check for common "element not found" patterns
+  // Check for "element not found" patterns
   const notFoundPatterns = [
     'element(s) not found',
     'element not found',
@@ -866,6 +862,12 @@ function getElementNotFoundMessage(err: any, elementDescription: string): string
   
   if (notFoundPatterns.some(pattern => errorMessageLower.includes(pattern))) {
     return `The UI Element "${elementDescription}" not found`;
+  }
+  
+  // Check for "strict mode violation" - multiple elements found
+  if (errorMessageLower.includes('strict mode violation') && 
+      /resolved to \d+ elements?/i.test(errorMessage)) {
+    return `Multiple UI elements were found for this locator`;
   }
   
   return null;
@@ -1114,4 +1116,34 @@ export function getAssertionEvidence(
     
 }
 
-export { pickActualValue, parseRGBColor, isColorInRange, getAllComputedStylesDirect, hasAlertDialog, getAlertDialogText, performRegexCheck, performRegexExtract, performRegexMatch, compareValues,convertToValidJson, getValueByJsonPath, checkElementVisibilityUnique, checkTextVisibilityInAllFrames, getElementNotFoundMessage, generateLocatorString };
+/**
+ * Get XPath code as string for use in evaluate()
+ * Returns a string that can be evaluated in browser context
+ */
+export function getXPathCode(): string {
+  return `
+    function getXPath(element) {
+      if (element.id !== '') {
+        return '//*[@id="' + element.id + '"]';
+      }
+      if (element === document.body) {
+        return '/html/body';
+      }
+      let ix = 0;
+      const siblings = element.parentNode ? Array.from(element.parentNode.children) : [];
+      for (let i = 0; i < siblings.length; i++) {
+        const sibling = siblings[i];
+        if (sibling === element) {
+          return getXPath(element.parentNode) + '/' + element.tagName.toLowerCase() + '[' + (ix + 1) + ']';
+        }
+        if (sibling.nodeType === 1 && sibling.tagName === element.tagName) {
+          ix++;
+        }
+      }
+      return '';
+    }
+    return getXPath(element);
+  `.trim();
+}
+
+export { pickActualValue, parseRGBColor, isColorInRange, getAllComputedStylesDirect, hasAlertDialog, getAlertDialogText, performRegexCheck, performRegexExtract, performRegexMatch, compareValues,convertToValidJson, getValueByJsonPath, checkElementVisibilityUnique, checkTextVisibilityInAllFrames, getElementErrorMessage, generateLocatorString };

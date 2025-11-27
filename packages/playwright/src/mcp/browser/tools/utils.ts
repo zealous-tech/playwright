@@ -77,24 +77,6 @@ export async function waitForCompletion<R>(tab: Tab, callback: () => Promise<R>)
 }
 
 export async function generateLocator(locator: playwright.Locator): Promise<string> {
-  // Get caller function name from stack trace
-  const stack = new Error().stack;
-  let callerInfo = 'unknown';
-  if (stack) { //ZEALOUS UPDATE - adding this to get the caller function name
-    const stackLines = stack.split('\n');
-    // Skip first line (Error), second line (generateLocator), third line should be the caller
-    if (stackLines.length > 2) {
-      const callerLine = stackLines[2].trim();
-      // Try to extract function name: could be "at functionName" or "at Object.functionName" or "at ClassName.methodName"
-      const match = callerLine.match(/at\s+(?:new\s+)?(?:Object\.)?(\w+)(?:\.(\w+))?/);
-      if (match) {
-        callerInfo = match[2] ? `${match[1]}.${match[2]}` : match[1];
-      } else {
-        callerInfo = callerLine;
-      }
-    }
-  }
-  console.log(`[generateLocator] Called from function: ${callerInfo}`);
   try {
     const { resolvedSelector } = await (locator as any)._resolveSelector();
     return asLocator('javascript', resolvedSelector);
