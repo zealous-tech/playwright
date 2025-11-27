@@ -1,21 +1,55 @@
 name: Publish
 on:
-  push:
-    branches: ['main']
-    tags: ['v*']
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  packages: write
+
 jobs:
   publish-npm:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       packages: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - uses: actions/setup-node@v4
         with:
           node-version: 18
           registry-url: https://npm.pkg.github.com/
           scope: '@zealous-tech'
+      - name: Read version and compute tag
+        id: ver
+        run: |
+          VERSION=$(jq -r '.version' package.json)
+          TAG="v$VERSION"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Detected version: $VERSION"
+          echo "Tag to create: $TAG"
+
+      - name: Fail if tag already exists
+        run: |
+          TAG="${{ steps.ver.outputs.tag }}"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists."
+            echo "Update package.json version and run again."
+            exit 1
+          fi
+
+      - name: Create and push tag
+        run: |
+          TAG="${{ steps.ver.outputs.tag }}"
+
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+
+          git tag "$TAG"
+          git push origin "$TAG"
       - name: Install playwright package dependencies
         working-directory: ./
         run: npm i
