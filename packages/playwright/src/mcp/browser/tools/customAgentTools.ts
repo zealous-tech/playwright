@@ -2930,11 +2930,11 @@ const wait = defineTabTool({
 });
 
 const validateElementPositionSchema = z.object({
-  element1: z.string().describe('Human-readable description of the first element used to obtain permission to interact with the element'),
-  ref1: z.string().describe('Exact target element reference from the page snapshot for the first element'),
-  element2: z.string().describe('Human-readable description of the second element used to obtain permission to interact with the element'),
-  ref2: z.string().describe('Exact target element reference from the page snapshot for the second element'),
-  relationship: z.enum(['left', 'right', 'up', 'down']).describe('Expected positional relationship: "left" means element1 is to the left of element2, "right" means element1 is to the right of element2, "up" means element1 is above element2, "down" means element1 is below element2'),
+  elements: z.array(z.object({
+    element: z.string().describe('Human-readable description of the element used to obtain permission to interact with the element'),
+    ref: z.string().describe('Exact target element reference from the page snapshot'),
+  })).min(2).max(2).describe('Array of exactly two elements to compare position. First element is element1, second is element2'),
+  relationship: z.enum(['left', 'right', 'up', 'down']).describe('Expected positional relationship: "left" means elements[0] is to the left of elements[1], "right" means elements[0] is to the right of elements[1], "up" means elements[0] is above elements[1], "down" means elements[0] is below elements[1]'),
 });
 
 const validate_element_position = defineTabTool({
@@ -2947,7 +2947,11 @@ const validate_element_position = defineTabTool({
     type: 'readOnly',
   },
   handle: async (tab, params, response) => {
-    const { element1, ref1, element2, ref2, relationship } = validateElementPositionSchema.parse(params);
+    const { elements, relationship } = validateElementPositionSchema.parse(params);
+    const element1 = elements[0].element;
+    const ref1 = elements[0].ref;
+    const element2 = elements[1].element;
+    const ref2 = elements[1].ref;
 
     await tab.waitForCompletion(async () => {
       let passed = false;
