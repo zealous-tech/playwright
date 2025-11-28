@@ -896,7 +896,7 @@ export function getAssertionMessage(assertionType: string, elementDescription: s
     toMatchAriaSnapshotOptions: `'${elementDescription}' has different ARIA structure (should match snapshot with options).`,
     toContainClass: `'${elementDescription}' is missing class (class should be present).`,
     toHaveClass: `'${elementDescription}' has different classes (exact class match required).`,
-    toHaveCount: `'${elementDescription}' has different count (specific count required).`,
+    toHaveCount: `The number of '${elementDescription}' does not equal the expected value.`,
     toHaveCSS: `'${elementDescription}' has different CSS property value (specific value required).`,
     toHaveId: `'${elementDescription}' has different id (specific id required).`,
     toHaveJSProperty: `'${elementDescription}' has different JS property value (specific value required).`,
@@ -928,7 +928,7 @@ export function getAssertionMessage(assertionType: string, elementDescription: s
     toMatchAriaSnapshotOptions: `'${elementDescription}' matches ARIA structure with options (should have different structure).`,
     toContainClass: `'${elementDescription}' has the class (should not have it).`,
     toHaveClass: `'${elementDescription}' has matching classes (should have different classes).`,
-    toHaveCount: `'${elementDescription}' has matching count (should have different count).`,
+    toHaveCount: `The number of '${elementDescription}' equals the expected value, but it should be different.`,
     toHaveCSS: `'${elementDescription}' has matching CSS property value (should have different value).`,
     toHaveId: `'${elementDescription}' has matching id (should have different id).`,
     toHaveJSProperty: `'${elementDescription}' has matching JS property value (should have different value).`,
@@ -1064,7 +1064,7 @@ export function getAssertionEvidence(
     },
     toHaveCount: (args) => {
       const count = args?.count !== undefined ? args.count : 'count';
-      return `'${elementDescription}' count ${negate ? 'does not equal' : 'equals'} ${count} `;
+      return `'${elementDescription}' count ${negate ? 'does not equal' : 'equals'} ${count} as expected`;
     },
     toHaveCSS: (args) => {
       const cssName = args?.name || 'property';
