@@ -1181,12 +1181,37 @@ const validate_dom_assertions = defineTabTool({
                 return { actualValue, normalizedActual };
               };
 
+              const pollFnDeep = async () => {
+                return await locator.evaluate((el: Element) => {
+                  // <select> element
+                  if (el instanceof HTMLSelectElement) {
+                    const selected = el.selectedOptions[0];
+                    return {
+                      rawValue: el.value,
+                      displayText: selected?.textContent ?? '',
+                    };
+                  }
+                  // <input> (MUI / headless UI combobox)
+                  if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+                    return {
+                      rawValue: el.value,
+                      displayText: el.value,
+                    };
+                  }
+                  // Fallback: try text content
+                  return {
+                    rawValue: (el as HTMLElement).innerText || (el as HTMLElement).textContent || '',
+                    displayText: (el as HTMLElement).innerText || (el as HTMLElement).textContent || '',
+                  };
+                });
+              };
+
               const selectTimeout = finalOptions?.timeout || ELEMENT_ATTACHED_TIMEOUT;
               const startTime = Date.now();
               let lastError: Error | null = null;
               let lastActualValue = '';
               let lastNormalizedActual = '';
-
+              let found = false;
               while (Date.now() - startTime < selectTimeout) {
                 try {
                   const { actualValue, normalizedActual } = await pollFn();
@@ -1204,6 +1229,7 @@ const validate_dom_assertions = defineTabTool({
                     // For normal assertions, values should match
                     if (normalizedExpected === normalizedActual) {
                       // Values match, assertion passes
+                      found = true;
                       break;
                     }
                     // Values don't match yet, will retry
@@ -1211,6 +1237,19 @@ const validate_dom_assertions = defineTabTool({
                   }
                 } catch (error) {
                   lastError = error instanceof Error ? error : new Error(String(error));
+                  try {
+                    // workground for hot fix to check select value in deep
+                    const { rawValue, displayText } = await pollFnDeep();
+                    let normalizedRawValue = normalizeValue(rawValue);
+                    let normalizedDisplayText = normalizeValue(displayText);
+                    if (normalizedExpected === normalizedRawValue || normalizedExpected === normalizedDisplayText) {
+                      found = true;
+                      break;
+                    }
+                  } catch (error) {
+                    // not sure how log here, but just ignore
+                  }
+
                   // If timeout hasn't expired, wait a bit and retry
                   if (Date.now() - startTime < selectTimeout) {
                     await new Promise(resolve => setTimeout(resolve, 100));
@@ -1219,6 +1258,10 @@ const validate_dom_assertions = defineTabTool({
                   // Timeout expired, throw the last error
                   throw lastError;
                 }
+              }
+
+              if (!found) {
+                throw lastError;
               }
 
               // If we get here and it's a negated assertion that didn't throw, it means values matched when they shouldn't
