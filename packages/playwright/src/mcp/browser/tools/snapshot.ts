@@ -45,7 +45,7 @@ const clickSchema = elementSchema.extend({
   button: z.enum(['left', 'right', 'middle']).optional().describe('Button to click, defaults to left'),
   modifiers: z.array(z.enum(['Alt', 'Control', 'ControlOrMeta', 'Meta', 'Shift'])).optional().describe('Modifier keys to press'),
 });
-//@ZEALOUS UPDATE 
+//@ZEALOUS UPDATE
 const click = defineTabTool({
   capability: 'core',
   schema: {
@@ -71,6 +71,31 @@ const click = defineTabTool({
     }
 
     await tab.waitForCompletion(async () => {
+      // Pre-detect checkbox/radio inputs to avoid double scrolling
+      const inputInfo = await locator.evaluate((el: Element) => {
+        const tag = (el as any).tagName?.toLowerCase?.();
+        const type = (el as any).getAttribute?.('type');
+        const id = (el as any).getAttribute?.('id');
+        return {
+          isCheckboxOrRadio: tag === 'input' && (type === 'checkbox' || type === 'radio'),
+          id: id || null,
+        };
+      });
+
+      // If it's a checkbox/radio with an ID, try clicking the associated label first
+      if (inputInfo.isCheckboxOrRadio && inputInfo.id) {
+        const label = tab.page.locator(`label[for="${inputInfo.id}"]`);
+        const labelCount = await label.count();
+        if (labelCount > 0) {
+          try {
+            await label.click({ button });
+            return;
+          } catch (e: any) {
+            // If label click fails, fall through to regular click handling
+          }
+        }
+      }
+
       try {
         if (params.doubleClick)
           await locator.dblclick({ button });
@@ -91,27 +116,10 @@ const click = defineTabTool({
         }
 
         if (isIntercept) {
-          // Detect checkbox input
-          const isCheckbox = await locator.evaluate((el: Element) => {
-            const tag = (el as any).tagName?.toLowerCase?.();
-            const type = (el as any).getAttribute?.('type');
-            return tag === 'input' && type === 'checkbox';
-          });
-
-          if (isCheckbox) {
-            // Prefer clicking the associated label
-            const id = await locator.getAttribute('id');
-            if (id) {
-              const label = tab.page.locator(`label[for="${id}"]`);
-              await label.click({ button });
-              return;
-            }
-            // Fallback: force-check the checkbox
+          if (inputInfo.isCheckboxOrRadio) {
             await locator.check({ force: true });
             return;
           }
-
-          // Non-checkbox: force the click as a last resort
           await locator.click({ button, force: true });
           return;
         }
