@@ -2022,7 +2022,6 @@ const validate_response = defineTabTool({
     try {
       // Parse JSON string to object
       const parsedResponseData = JSON.parse(responseData);
-      console.dir(parsedResponseData, { depth: null });
       // Perform all checks
       const results = checks.map(check => {
         try {
@@ -2912,63 +2911,49 @@ const data_extraction = defineTabTool({
   handle: async (tab, params, response) => {
     const { name, data, jsonPath } = dataExtractionSchema.parse(params);
 
-    try {
-      let extractedValue;
-      let parsedResponseData;
+    let extractedValue;
+    let parsedResponseData;
 
-      if (jsonPath) {
-        // If jsonPath is provided, parse as JSON and extract using path
+    if (jsonPath) {
+      // If jsonPath is provided, parse as JSON and extract using path
+      try {
         parsedResponseData = JSON.parse(data);
-        try {
-          const normalizedPath = jsonPath.startsWith('$') ? jsonPath : `$.${jsonPath}`;
-          const queryResult = jp.query(parsedResponseData, normalizedPath);
-          extractedValue = queryResult.length === 1 ? queryResult[0] : queryResult;
-        } catch (error) {
-          response.addResult(JSON.stringify({
-            success: false,
-            error: `Failed to extract value using JSON path "${jsonPath}": ${error.message}`,
-            extractedData: null
-          }, null, 2));
-          return;
-        }
-      } else {
-        // If jsonPath is not provided, return data as is
-        extractedValue = data;
-        parsedResponseData = data;
+      } catch (error) {
+        response.addResult(JSON.stringify({
+          success: false,
+          error: `Failed to parse data as JSON: ${error.message}`,
+          extractedData: null
+        }, null, 2));
+        return;
       }
 
-      // Create object with $$ prefix
-      const result = {
-        [`\$\{${name}\}`]: extractedValue
-      };
-
-      const toolResult = {
-        success: true,
-        result: result,
-        extractedData: {
-          value: extractedValue,
-          variableName: `\$\{${name}\}`,
-        },
-        data: parsedResponseData,
-      };
-
-      console.log('Data extraction:', toolResult);
-      response.addResult(JSON.stringify(toolResult, null, 2));
-
-    } catch (error) {
-      const errorResult = {
-        success: false,
-        result: null,
-        error: error instanceof Error ? error.message : String(error),
-        extractedData: {
-          value: null,
-          variableName: `\$\{${name}\}`
-        }
-      };
-
-      console.error('Data extraction error:', errorResult);
-      response.addResult(JSON.stringify(errorResult, null, 2));
+      try {
+        const normalizedPath = jsonPath.startsWith('$') ? jsonPath : `$.${jsonPath}`;
+        const queryResult = jp.query(parsedResponseData, normalizedPath);
+        extractedValue = queryResult.length === 0 ? null : queryResult.length === 1 ? queryResult[0] : queryResult;
+      } catch (error) {
+        response.addResult(JSON.stringify({
+          success: false,
+          error: `Failed to extract value using JSON path "${jsonPath}": ${error.message}`,
+          extractedData: null
+        }, null, 2));
+        return;
+      }
+    } else {
+      // If jsonPath is not provided, return data as is
+      extractedValue = data;
+      parsedResponseData = data;
     }
+
+    const toolResult = {
+      success: true,
+      extractedData: {
+        value: extractedValue,
+        variableName: `\$\{${name}\}`,
+      },
+      data: parsedResponseData,
+    };
+    response.addResult(JSON.stringify(toolResult, null, 2));
   },
 });
 
