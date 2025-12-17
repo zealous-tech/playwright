@@ -14,8 +14,10 @@
  * limitations under the License.
  */
 import { z } from 'zod';
+//@ZEALOUS UPDATE
+import * as jp from 'jsonpath';
 import { defineTabTool } from './tool.js';
-import { getAllComputedStylesDirect, pickActualValue, parseRGBColor, isColorInRange,runCommandClean, getValueByJsonPath, compareValues, checkElementVisibilityUnique, checkTextVisibilityInAllFrames, getElementErrorMessage, generateLocatorString, getAssertionMessage, getAssertionEvidence, getXPathCode } from './helperFunctions.js';
+import { getAllComputedStylesDirect, pickActualValue, parseRGBColor, isColorInRange,runCommandClean, compareValues, checkElementVisibilityUnique, checkTextVisibilityInAllFrames, getElementErrorMessage, generateLocatorString, getAssertionMessage, getAssertionEvidence, getXPathCode } from './helperFunctions.js';
 import { generateLocator } from './utils.js';
 import { expect } from '@zealous-tech/playwright/test';
 import { asLocator } from 'playwright-core/lib/utils';
@@ -2007,7 +2009,7 @@ const validate_response = defineTabTool({
       responseData: z.string().describe('Response data as JSON string'),
       checks: z.array(z.object({
         name: z.string().describe('Name/description of the check for logging purposes'),
-        jsonPath: z.string().describe('JSONPath syntax: Properties (data.token), Array indices (data.books[0].title), Filters (data.books[?(@.price>30)].title), Operators (==, !=, >, <, >=, <=), Boolean values (data.users[?(@.active==true)])'),
+        jsonPath: z.string().describe('JSONPath expression. Examples: $.store.book[0].title (specific element), $..author (recursive descent), $.store.book[*].author (wildcard), $.store.book[?(@.price<10)] (filter), $.store.book[(@.length-1)] (script). Use $ as root, dot notation or brackets for properties.'),
         expected: z.any().optional().describe('Expected value for comparison'),
         operator: z.enum(['equals', 'not_equals', 'greater_than', 'less_than', 'hasValue']).optional().default('equals').describe('Comparison operator. hasValue checks if value exists at jsonPath (expected should be true/false)')
       })).min(1).describe('Array of validation checks to perform'),
@@ -2025,7 +2027,9 @@ const validate_response = defineTabTool({
       const results = checks.map(check => {
         try {
           // Extract value using JSON path
-          const actualValue = getValueByJsonPath(parsedResponseData, check.jsonPath);
+          const normalizedPath = check.jsonPath.startsWith('$') ? check.jsonPath : `$.${check.jsonPath}`;
+          const queryResult = jp.query(parsedResponseData, normalizedPath);
+          const actualValue = queryResult.length === 1 ? queryResult[0] : queryResult;
 
           // Compare values if expected is provided
           let passed = true;
@@ -2521,7 +2525,7 @@ const validateElementInWholePageSchema = z.object({
 const dataExtractionSchema = z.object({
   name: z.string().describe('Variable name (will be prefixed with $$)'),
   data: z.string().describe('Data to extract from. If jsonPath is provided, should be JSON string. If jsonPath is not provided, can be any string data'),
-  jsonPath: z.string().optional().describe('JSONPath syntax: Properties (data.token), Array indices (data.books[0].title), Filters (data.books[?(@.price>30)].title), Operators (==, !=, >, <, >=, <=), Boolean values (data.users[?(@.active==true)]).'),
+  jsonPath: z.string().optional().describe('JSONPath expression. Examples: $.store.book[0].title (specific element), $..author (recursive descent), $.store.book[*].author (wildcard), $.store.book[?(@.price<10)] (filter), $.store.book[(@.length-1)] (script). Use $ as root, dot notation or brackets for properties.'),
 });
 
 const validate_text_in_whole_page = defineTabTool({
@@ -2916,7 +2920,9 @@ const data_extraction = defineTabTool({
         // If jsonPath is provided, parse as JSON and extract using path
         parsedResponseData = JSON.parse(data);
         try {
-          extractedValue = getValueByJsonPath(parsedResponseData, jsonPath);
+          const normalizedPath = jsonPath.startsWith('$') ? jsonPath : `$.${jsonPath}`;
+          const queryResult = jp.query(parsedResponseData, normalizedPath);
+          extractedValue = queryResult.length === 1 ? queryResult[0] : queryResult;
         } catch (error) {
           response.addResult(JSON.stringify({
             success: false,
