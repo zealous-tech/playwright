@@ -2019,118 +2019,17 @@ const validate_response = defineTabTool({
   handle: async (tab, params, response) => {
     const { responseData, checks } = params;
 
+    // Parse JSON string to object
+    let parsedResponseData;
     try {
-      // Parse JSON string to object
-      const parsedResponseData = JSON.parse(responseData);
-      // Perform all checks
-      const results = checks.map(check => {
-        try {
-          // Extract value using JSON path
-          const normalizedPath = check.jsonPath.startsWith('$') ? check.jsonPath : `$.${check.jsonPath}`;
-          const queryResult = jp.query(parsedResponseData, normalizedPath);
-          const actualValue = queryResult.length === 1 ? queryResult[0] : queryResult;
-
-          // Compare values if expected is provided
-          let passed = true;
-          if (check.expected !== undefined) {
-            const comparisonResult = compareValues(actualValue, check.expected, check.operator);
-            passed = comparisonResult.passed;
-          }
-
-          return {
-            name: check.name,
-            jsonPath: check.jsonPath,
-            expected: check.expected,
-            operator: check.operator,
-            actual: actualValue,
-            result: passed ? 'pass' : 'fail',
-          };
-        } catch (error) {
-          // Handle case when value is not found at JSON path
-          return {
-            name: check.name,
-            jsonPath: check.jsonPath,
-            expected: check.expected,
-            operator: check.operator,
-            actual: `ERROR: ${error.message}`,
-            result: 'fail',
-          };
-        }
-      });
-
-      const passedCount = results.filter(r => r.result === 'pass').length;
-      const status = passedCount === results.length ? 'pass' : 'fail';
-
-      // Generate evidence message
-      let evidenceMessage = '';
-      if (status === 'pass') {
-        evidenceMessage = `All ${results.length} JSON path validation checks passed successfully`;
-      } else {
-        const failedChecks = results.filter(r => r.result === 'fail');
-        const failedDetails = failedChecks.map(c =>
-          `${c.name} (path: ${c.jsonPath}, expected: ${c.expected}, got: ${c.actual})`
-        ).join(', ');
-        evidenceMessage = `${passedCount}/${results.length} checks passed. Failed: ${failedDetails}`;
-      }
-
-      // Generate evidence as array of objects with command and message
-      const evidenceArray = [{
-        command: JSON.stringify({
-          toolName: 'validate_response',
-          arguments: {
-            responseData: typeof parsedResponseData === 'object' ?
-              (JSON.stringify(parsedResponseData).length > 500 ?
-                JSON.stringify(parsedResponseData).slice(0, 500) + '...' :
-                parsedResponseData) :
-              (parsedResponseData.length > 500 ? parsedResponseData.slice(0, 500) + '...' : parsedResponseData),
-            checks: checks
-          }
-        }),
-        message: evidenceMessage
-      }];
-
-      const payload = {
-        responseData: typeof parsedResponseData === 'object' ?
-          (JSON.stringify(parsedResponseData).length > 500 ?
-            JSON.stringify(parsedResponseData).slice(0, 500) + '...' :
-            parsedResponseData) :
-          (parsedResponseData.length > 500 ? parsedResponseData.slice(0, 500) + '...' : parsedResponseData),
-        summary: {
-          total: results.length,
-          passed: passedCount,
-          failed: results.length - passedCount,
-          status,
-          evidence: evidenceArray,
-        },
-        checks: results,
-      };
-
-      console.log('Validate response JSON path:', payload);
-      response.addResult(JSON.stringify(payload, null, 2));
-
+      parsedResponseData = JSON.parse(responseData);
     } catch (error) {
-      // Try to parse responseData for error display, fallback to original string if parsing fails
-      let displayResponseData;
-      try {
-        const parsedForDisplay = JSON.parse(responseData);
-        displayResponseData = typeof parsedForDisplay === 'object' ?
-          (JSON.stringify(parsedForDisplay).length > 500 ?
-            JSON.stringify(parsedForDisplay).slice(0, 500) + '...' :
-            parsedForDisplay) :
-          (parsedForDisplay.length > 500 ? parsedForDisplay.slice(0, 500) + '...' : parsedForDisplay);
-      } catch {
-        displayResponseData = responseData.length > 500 ? responseData.slice(0, 500) + '...' : responseData;
-      }
-
-      // Generate error evidence as array of objects with command and message
-      const errorMessage = `Failed to validate response with JSON path.`;
-      console.log(`Failed to validate response with JSON path. Error: ${error instanceof Error ? error.message : String(error)}`);
+      const errorMessage = `Failed to parse responseData as JSON: ${error instanceof Error ? error.message : String(error)}`;
 
       const errorEvidence = [{
         command: JSON.stringify({
           toolName: 'validate_response',
           arguments: {
-            responseData: displayResponseData,
             checks: checks
           }
         }),
@@ -2138,7 +2037,6 @@ const validate_response = defineTabTool({
       }];
 
       const errorPayload = {
-        responseData: displayResponseData,
         summary: {
           total: checks.length,
           passed: 0,
@@ -2154,12 +2052,89 @@ const validate_response = defineTabTool({
           actual: 'error',
           result: 'fail',
         })),
-        error: error instanceof Error ? error.message : String(error),
+        error: errorMessage,
       };
 
-      console.error('Validate response JSON path error:', errorPayload);
+      console.error('Validate response JSON parse error:', errorPayload);
       response.addResult(JSON.stringify(errorPayload, null, 2));
+      return;
     }
+
+    // Perform all checks
+    const results = checks.map(check => {
+      try {
+        // Extract value using JSON path
+        const normalizedPath = check.jsonPath.startsWith('$') ? check.jsonPath : `$.${check.jsonPath}`;
+        const queryResult = jp.query(parsedResponseData, normalizedPath);
+        const actualValue = queryResult.length === 1 ? queryResult[0] : queryResult;
+
+        // Compare values if expected is provided
+        let passed = true;
+        if (check.expected !== undefined) {
+          const comparisonResult = compareValues(actualValue, check.expected, check.operator);
+          passed = comparisonResult.passed;
+        }
+
+        return {
+          name: check.name,
+          jsonPath: check.jsonPath,
+          expected: check.expected,
+          operator: check.operator,
+          actual: actualValue,
+          result: passed ? 'pass' : 'fail',
+        };
+      } catch (error) {
+        // Handle case when value is not found at JSON path
+        return {
+          name: check.name,
+          jsonPath: check.jsonPath,
+          expected: check.expected,
+          operator: check.operator,
+          actual: `ERROR: ${error.message}`,
+          result: 'fail',
+        };
+      }
+    });
+
+    const passedCount = results.filter(r => r.result === 'pass').length;
+    const status = passedCount === results.length ? 'pass' : 'fail';
+
+    // Generate evidence message
+    let evidenceMessage = '';
+    if (status === 'pass') {
+      evidenceMessage = `All ${results.length} JSON path validation checks passed successfully`;
+    } else {
+      const failedChecks = results.filter(r => r.result === 'fail');
+      const failedDetails = failedChecks.map(c =>
+        `${c.name} (path: ${c.jsonPath}, expected: ${c.expected}, got: ${c.actual})`
+      ).join(', ');
+      evidenceMessage = `${passedCount}/${results.length} checks passed. Failed: ${failedDetails}`;
+    }
+
+    // Generate evidence as array of objects with command and message
+    const evidenceArray = [{
+      command: JSON.stringify({
+        toolName: 'validate_response',
+        arguments: {
+          checks: checks
+        }
+      }),
+      message: evidenceMessage
+    }];
+
+    const payload = {
+      summary: {
+        total: results.length,
+        passed: passedCount,
+        failed: results.length - passedCount,
+        status,
+        evidence: evidenceArray,
+      },
+      checks: results,
+    };
+
+    console.log('Validate response JSON path:', payload);
+    response.addResult(JSON.stringify(payload, null, 2));
   },
 });
 
