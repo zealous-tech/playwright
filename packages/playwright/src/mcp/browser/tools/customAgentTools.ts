@@ -14,8 +14,10 @@
  * limitations under the License.
  */
 import { z } from 'zod';
+//@ZEALOUS UPDATE
+import * as jp from 'jsonpath';
 import { defineTabTool } from './tool.js';
-import { getAllComputedStylesDirect, pickActualValue, parseRGBColor, isColorInRange,runCommandClean, getValueByJsonPath, compareValues, checkElementVisibilityUnique, checkTextVisibilityInAllFrames, getElementErrorMessage, generateLocatorString, getAssertionMessage, getAssertionEvidence, getXPathCode } from './helperFunctions.js';
+import { getAllComputedStylesDirect, pickActualValue, parseRGBColor, isColorInRange,runCommandClean, compareValues, checkElementVisibilityUnique, checkTextVisibilityInAllFrames, getElementErrorMessage, generateLocatorString, getAssertionMessage, getAssertionEvidence, getXPathCode } from './helperFunctions.js';
 import { generateLocator } from './utils.js';
 import { expect } from '@zealous-tech/playwright/test';
 import { asLocator } from 'playwright-core/lib/utils';
@@ -2007,7 +2009,7 @@ const validate_response = defineTabTool({
       responseData: z.string().describe('Response data as JSON string'),
       checks: z.array(z.object({
         name: z.string().describe('Name/description of the check for logging purposes'),
-        jsonPath: z.string().describe('JSONPath syntax: Properties (data.token), Array indices (data.books[0].title), Filters (data.books[?(@.price>30)].title), Operators (==, !=, >, <, >=, <=), Boolean values (data.users[?(@.active==true)])'),
+        jsonPath: z.string().describe('JSONPath expression. Examples: $.store.book[0].title (specific element), $..author (recursive descent), $.store.book[*].author (wildcard), $.store.book[?(@.price<10)] (filter), $.store.book[(@.length-1)] (script). Use $ as root, dot notation or brackets for properties.'),
         expected: z.any().optional().describe('Expected value for comparison'),
         operator: z.enum(['equals', 'not_equals', 'greater_than', 'less_than', 'hasValue']).optional().default('equals').describe('Comparison operator. hasValue checks if value exists at jsonPath (expected should be true/false)')
       })).min(1).describe('Array of validation checks to perform'),
@@ -2017,117 +2019,17 @@ const validate_response = defineTabTool({
   handle: async (tab, params, response) => {
     const { responseData, checks } = params;
 
+    // Parse JSON string to object
+    let parsedResponseData;
     try {
-      // Parse JSON string to object
-      const parsedResponseData = JSON.parse(responseData);
-      console.dir(parsedResponseData, { depth: null });
-      // Perform all checks
-      const results = checks.map(check => {
-        try {
-          // Extract value using JSON path
-          const actualValue = getValueByJsonPath(parsedResponseData, check.jsonPath);
-
-          // Compare values if expected is provided
-          let passed = true;
-          if (check.expected !== undefined) {
-            const comparisonResult = compareValues(actualValue, check.expected, check.operator);
-            passed = comparisonResult.passed;
-          }
-
-          return {
-            name: check.name,
-            jsonPath: check.jsonPath,
-            expected: check.expected,
-            operator: check.operator,
-            actual: actualValue,
-            result: passed ? 'pass' : 'fail',
-          };
-        } catch (error) {
-          // Handle case when value is not found at JSON path
-          return {
-            name: check.name,
-            jsonPath: check.jsonPath,
-            expected: check.expected,
-            operator: check.operator,
-            actual: `ERROR: ${error.message}`,
-            result: 'fail',
-          };
-        }
-      });
-
-      const passedCount = results.filter(r => r.result === 'pass').length;
-      const status = passedCount === results.length ? 'pass' : 'fail';
-
-      // Generate evidence message
-      let evidenceMessage = '';
-      if (status === 'pass') {
-        evidenceMessage = `All ${results.length} JSON path validation checks passed successfully`;
-      } else {
-        const failedChecks = results.filter(r => r.result === 'fail');
-        const failedDetails = failedChecks.map(c =>
-          `${c.name} (path: ${c.jsonPath}, expected: ${c.expected}, got: ${c.actual})`
-        ).join(', ');
-        evidenceMessage = `${passedCount}/${results.length} checks passed. Failed: ${failedDetails}`;
-      }
-
-      // Generate evidence as array of objects with command and message
-      const evidenceArray = [{
-        command: JSON.stringify({
-          toolName: 'validate_response',
-          arguments: {
-            responseData: typeof parsedResponseData === 'object' ?
-              (JSON.stringify(parsedResponseData).length > 500 ?
-                JSON.stringify(parsedResponseData).slice(0, 500) + '...' :
-                parsedResponseData) :
-              (parsedResponseData.length > 500 ? parsedResponseData.slice(0, 500) + '...' : parsedResponseData),
-            checks: checks
-          }
-        }),
-        message: evidenceMessage
-      }];
-
-      const payload = {
-        responseData: typeof parsedResponseData === 'object' ?
-          (JSON.stringify(parsedResponseData).length > 500 ?
-            JSON.stringify(parsedResponseData).slice(0, 500) + '...' :
-            parsedResponseData) :
-          (parsedResponseData.length > 500 ? parsedResponseData.slice(0, 500) + '...' : parsedResponseData),
-        summary: {
-          total: results.length,
-          passed: passedCount,
-          failed: results.length - passedCount,
-          status,
-          evidence: evidenceArray,
-        },
-        checks: results,
-      };
-
-      console.log('Validate response JSON path:', payload);
-      response.addResult(JSON.stringify(payload, null, 2));
-
+      parsedResponseData = JSON.parse(responseData);
     } catch (error) {
-      // Try to parse responseData for error display, fallback to original string if parsing fails
-      let displayResponseData;
-      try {
-        const parsedForDisplay = JSON.parse(responseData);
-        displayResponseData = typeof parsedForDisplay === 'object' ?
-          (JSON.stringify(parsedForDisplay).length > 500 ?
-            JSON.stringify(parsedForDisplay).slice(0, 500) + '...' :
-            parsedForDisplay) :
-          (parsedForDisplay.length > 500 ? parsedForDisplay.slice(0, 500) + '...' : parsedForDisplay);
-      } catch {
-        displayResponseData = responseData.length > 500 ? responseData.slice(0, 500) + '...' : responseData;
-      }
-
-      // Generate error evidence as array of objects with command and message
-      const errorMessage = `Failed to validate response with JSON path.`;
-      console.log(`Failed to validate response with JSON path. Error: ${error instanceof Error ? error.message : String(error)}`);
+      const errorMessage = `Failed to parse responseData as JSON: ${error instanceof Error ? error.message : String(error)}`;
 
       const errorEvidence = [{
         command: JSON.stringify({
           toolName: 'validate_response',
           arguments: {
-            responseData: displayResponseData,
             checks: checks
           }
         }),
@@ -2135,7 +2037,6 @@ const validate_response = defineTabTool({
       }];
 
       const errorPayload = {
-        responseData: displayResponseData,
         summary: {
           total: checks.length,
           passed: 0,
@@ -2151,12 +2052,89 @@ const validate_response = defineTabTool({
           actual: 'error',
           result: 'fail',
         })),
-        error: error instanceof Error ? error.message : String(error),
+        error: errorMessage,
       };
 
-      console.error('Validate response JSON path error:', errorPayload);
+      console.error('Validate response JSON parse error:', errorPayload);
       response.addResult(JSON.stringify(errorPayload, null, 2));
+      return;
     }
+
+    // Perform all checks
+    const results = checks.map(check => {
+      try {
+        // Extract value using JSON path
+        const normalizedPath = check.jsonPath.startsWith('$') ? check.jsonPath : `$.${check.jsonPath}`;
+        const queryResult = jp.query(parsedResponseData, normalizedPath);
+        const actualValue = queryResult.length === 1 ? queryResult[0] : queryResult;
+
+        // Compare values if expected is provided
+        let passed = true;
+        if (check.expected !== undefined) {
+          const comparisonResult = compareValues(actualValue, check.expected, check.operator);
+          passed = comparisonResult.passed;
+        }
+
+        return {
+          name: check.name,
+          jsonPath: check.jsonPath,
+          expected: check.expected,
+          operator: check.operator,
+          actual: actualValue,
+          result: passed ? 'pass' : 'fail',
+        };
+      } catch (error) {
+        // Handle case when value is not found at JSON path
+        return {
+          name: check.name,
+          jsonPath: check.jsonPath,
+          expected: check.expected,
+          operator: check.operator,
+          actual: `ERROR: ${error.message}`,
+          result: 'fail',
+        };
+      }
+    });
+
+    const passedCount = results.filter(r => r.result === 'pass').length;
+    const status = passedCount === results.length ? 'pass' : 'fail';
+
+    // Generate evidence message
+    let evidenceMessage = '';
+    if (status === 'pass') {
+      evidenceMessage = `All ${results.length} JSON path validation checks passed successfully`;
+    } else {
+      const failedChecks = results.filter(r => r.result === 'fail');
+      const failedDetails = failedChecks.map(c =>
+        `${c.name} (path: ${c.jsonPath}, expected: ${c.expected}, got: ${c.actual})`
+      ).join(', ');
+      evidenceMessage = `${passedCount}/${results.length} checks passed. Failed: ${failedDetails}`;
+    }
+
+    // Generate evidence as array of objects with command and message
+    const evidenceArray = [{
+      command: JSON.stringify({
+        toolName: 'validate_response',
+        arguments: {
+          checks: checks
+        }
+      }),
+      message: evidenceMessage
+    }];
+
+    const payload = {
+      summary: {
+        total: results.length,
+        passed: passedCount,
+        failed: results.length - passedCount,
+        status,
+        evidence: evidenceArray,
+      },
+      checks: results,
+    };
+
+    console.log('Validate response JSON path:', payload);
+    response.addResult(JSON.stringify(payload, null, 2));
   },
 });
 
@@ -2521,7 +2499,7 @@ const validateElementInWholePageSchema = z.object({
 const dataExtractionSchema = z.object({
   name: z.string().describe('Variable name (will be prefixed with $$)'),
   data: z.string().describe('Data to extract from. If jsonPath is provided, should be JSON string. If jsonPath is not provided, can be any string data'),
-  jsonPath: z.string().optional().describe('JSONPath syntax: Properties (data.token), Array indices (data.books[0].title), Filters (data.books[?(@.price>30)].title), Operators (==, !=, >, <, >=, <=), Boolean values (data.users[?(@.active==true)]).'),
+  jsonPath: z.string().optional().describe('JSONPath expression. Examples: $.store.book[0].title (specific element), $..author (recursive descent), $.store.book[*].author (wildcard), $.store.book[?(@.price<10)] (filter), $.store.book[(@.length-1)] (script). Use $ as root, dot notation or brackets for properties.'),
 });
 
 const validate_text_in_whole_page = defineTabTool({
@@ -2908,61 +2886,49 @@ const data_extraction = defineTabTool({
   handle: async (tab, params, response) => {
     const { name, data, jsonPath } = dataExtractionSchema.parse(params);
 
-    try {
-      let extractedValue;
-      let parsedResponseData;
+    let extractedValue;
+    let parsedResponseData;
 
-      if (jsonPath) {
-        // If jsonPath is provided, parse as JSON and extract using path
+    if (jsonPath) {
+      // If jsonPath is provided, parse as JSON and extract using path
+      try {
         parsedResponseData = JSON.parse(data);
-        try {
-          extractedValue = getValueByJsonPath(parsedResponseData, jsonPath);
-        } catch (error) {
-          response.addResult(JSON.stringify({
-            success: false,
-            error: `Failed to extract value using JSON path "${jsonPath}": ${error.message}`,
-            extractedData: null
-          }, null, 2));
-          return;
-        }
-      } else {
-        // If jsonPath is not provided, return data as is
-        extractedValue = data;
-        parsedResponseData = data;
+      } catch (error) {
+        response.addResult(JSON.stringify({
+          success: false,
+          error: `Failed to parse data as JSON: ${error.message}`,
+          extractedData: null
+        }, null, 2));
+        return;
       }
 
-      // Create object with $$ prefix
-      const result = {
-        [`\$\{${name}\}`]: extractedValue
-      };
-
-      const toolResult = {
-        success: true,
-        result: result,
-        extractedData: {
-          value: extractedValue,
-          variableName: `\$\{${name}\}`,
-        },
-        data: parsedResponseData,
-      };
-
-      console.log('Data extraction:', toolResult);
-      response.addResult(JSON.stringify(toolResult, null, 2));
-
-    } catch (error) {
-      const errorResult = {
-        success: false,
-        result: null,
-        error: error instanceof Error ? error.message : String(error),
-        extractedData: {
-          value: null,
-          variableName: `\$\{${name}\}`
-        }
-      };
-
-      console.error('Data extraction error:', errorResult);
-      response.addResult(JSON.stringify(errorResult, null, 2));
+      try {
+        const normalizedPath = jsonPath.startsWith('$') ? jsonPath : `$.${jsonPath}`;
+        const queryResult = jp.query(parsedResponseData, normalizedPath);
+        extractedValue = queryResult.length === 0 ? null : queryResult.length === 1 ? queryResult[0] : queryResult;
+      } catch (error) {
+        response.addResult(JSON.stringify({
+          success: false,
+          error: `Failed to extract value using JSON path "${jsonPath}": ${error.message}`,
+          extractedData: null
+        }, null, 2));
+        return;
+      }
+    } else {
+      // If jsonPath is not provided, return data as is
+      extractedValue = data;
+      parsedResponseData = data;
     }
+
+    const toolResult = {
+      success: true,
+      extractedData: {
+        value: extractedValue,
+        variableName: `\$\{${name}\}`,
+      },
+      data: parsedResponseData,
+    };
+    response.addResult(JSON.stringify(toolResult, null, 2));
   },
 });
 

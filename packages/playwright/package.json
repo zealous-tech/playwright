@@ -1,6 +1,6 @@
 {
   "name": "@zealous-tech/playwright",
-  "version": "1.56.1-32",
+  "version": "1.56.1-33",
   "description": "A high-level API to automate web browsers",
   "repository": {
     "type": "git",
@@ -64,9 +64,13 @@
   },
   "license": "Apache-2.0",
   "dependencies": {
+    "jsonpath": "^1.1.1",
     "playwright-core": "1.56.1"
   },
   "optionalDependencies": {
     "fsevents": "2.3.2"
+  },
+  "devDependencies": {
+    "@types/jsonpath": "^0.2.4"
   }
 }
