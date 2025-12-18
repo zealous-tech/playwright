@@ -25,7 +25,7 @@ jobs:
       - name: Read version and compute tag
         id: ver
         run: |
-          VERSION=$(jq -r '.version' package.json)
+          VERSION=$(jq -r '.version' ./packages/playwright/package.json)
           TAG="v$VERSION"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "tag=$TAG" >> $GITHUB_OUTPUT
