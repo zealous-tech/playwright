@@ -16,7 +16,7 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import type * as playwright from 'playwright';
-import { expect } from '@zealous-tech/playwright/test';
+import { expect } from 'playwright/test';
 import { generateLocator } from './utils.js';
 const camelToKebab = (prop: string) =>
   prop.replace(/[A-Z]/g, m => `-${m.toLowerCase()}`);

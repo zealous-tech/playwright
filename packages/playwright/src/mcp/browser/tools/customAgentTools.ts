@@ -19,9 +19,9 @@ import * as jp from 'jsonpath';
 import { defineTabTool } from './tool.js';
 import { getAllComputedStylesDirect, pickActualValue, parseRGBColor, isColorInRange,runCommandClean, compareValues, checkElementVisibilityUnique, checkTextVisibilityInAllFrames, getElementErrorMessage, generateLocatorString, getAssertionMessage, getAssertionEvidence, getXPathCode } from './helperFunctions.js';
 import { generateLocator } from './utils.js';
-import { expect } from '@zealous-tech/playwright/test';
+import { expect } from 'playwright/test';
 import { asLocator } from 'playwright-core/lib/utils';
-import type * as playwright from '@zealous-tech/playwright';
+import type * as playwright from 'playwright';
 
 // Global timeout for element attachment validation (in milliseconds)
 const ELEMENT_ATTACHED_TIMEOUT = 15000;
