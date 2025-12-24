@@ -21,7 +21,7 @@ import { getAllComputedStylesDirect, pickActualValue, parseRGBColor, isColorInRa
 import { generateLocator } from './utils.js';
 import { expect } from '@zealous-tech/playwright/test';
 import { asLocator } from 'playwright-core/lib/utils';
-import type * as playwright from '@zealous-tech/playwright';
+import type * as playwright from 'playwright';
 
 // Global timeout for element attachment validation (in milliseconds)
 const ELEMENT_ATTACHED_TIMEOUT = 15000;

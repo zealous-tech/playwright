@@ -17,8 +17,8 @@
 import { z } from '../../sdk/bundle';
 import { defineTabTool } from './tool';
 import * as javascript from '../codegen';
-import { generateLocator } from './utils';
 
+import type { Tab } from '../tab';
 import type * as playwright from 'playwright-core';
 
 const evaluateSchema = z.object({
@@ -43,15 +43,56 @@ const evaluate = defineTabTool({
     let locator: playwright.Locator | undefined;
     if (params.ref && params.element) {
       locator = await tab.refLocator({ ref: params.ref, element: params.element });
-      response.addCode(`await page.${await generateLocator(locator)}.evaluate(${javascript.quote(params.function)});`);
+      // Generate locator string for code display
+      try {
+        const { resolvedSelector } = await (locator as any)._resolveSelector();
+        const locatorCode = `locator('${resolvedSelector}')`;
+        response.addCode(`await page.${locatorCode}.evaluate(${javascript.quote(params.function)});`);
+      } catch (e) {
+        response.addCode(`await page.locator('aria-ref=${params.ref}').evaluate(${javascript.quote(params.function)});`);
+      }
     } else {
       response.addCode(`await page.evaluate(${javascript.quote(params.function)});`);
     }
 
     await tab.waitForCompletion(async () => {
-      const receiver = locator ?? tab.page as any;
-      const result = await receiver._evaluateFunction(params.function);
-      response.addResult(JSON.stringify(result, null, 2) || 'undefined');
+      // Evaluate the function - use eval to convert string to actual function
+      let result;
+      try {
+        if (locator) {
+          // For element evaluation, create a function that takes element as parameter
+          // The function string should be like "(element) => { ... }"
+          const evalFunc = eval(`(${params.function})`);
+          result = await locator.evaluate(evalFunc);
+        } else {
+          // For page evaluation, create a function with no parameters
+          // The function string should be like "() => { ... }"
+          const evalFunc = eval(`(${params.function})`);
+          result = await tab.page.evaluate(evalFunc);
+        }
+      } catch (error) {
+        response.addError(`Evaluation failed: ${error instanceof Error ? error.message : String(error)}`);
+        return;
+      }
+      
+      // Check if result is already a JSON string (some functions return JSON.stringify'd values)
+      let finalResult;
+      if (typeof result === 'string') {
+        try {
+          // Try to parse it - if it's valid JSON, use as is
+          JSON.parse(result);
+          finalResult = result;
+        } catch (e) {
+          // Not valid JSON, stringify it
+          finalResult = JSON.stringify(result);
+        }
+      } else {
+        // Result is an object/value, stringify it
+        finalResult = JSON.stringify(result);
+      }
+      
+      // Return wrapped in quotes for proper parsing by parseToolResult
+      response.addResult(`"${finalResult.replace(/"/g, '\\"')}"`);
     });
   },
 });

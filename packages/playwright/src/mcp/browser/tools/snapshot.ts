@@ -31,7 +31,7 @@ const snapshot = defineTool({
 
   handle: async (context, params, response) => {
     await context.ensureTab();
-    response.setIncludeSnapshot();
+    response.setIncludeSnapshot('full');
   },
 });
 
@@ -45,7 +45,7 @@ const clickSchema = elementSchema.extend({
   button: z.enum(['left', 'right', 'middle']).optional().describe('Button to click, defaults to left'),
   modifiers: z.array(z.enum(['Alt', 'Control', 'ControlOrMeta', 'Meta', 'Shift'])).optional().describe('Modifier keys to press'),
 });
-//@ZEALOUS UPDATE
+
 const click = defineTabTool({
   capability: 'core',
   schema: {
@@ -149,16 +149,16 @@ const drag = defineTabTool({
   handle: async (tab, params, response) => {
     response.setIncludeSnapshot();
 
-    const [startLocator, endLocator] = await tab.refLocators([
+    const [start, end] = await tab.refLocators([
       { ref: params.startRef, element: params.startElement },
       { ref: params.endRef, element: params.endElement },
     ]);
 
     await tab.waitForCompletion(async () => {
-      await startLocator.dragTo(endLocator);
+      await start.locator.dragTo(end.locator);
     });
 
-    response.addCode(`await page.${await generateLocator(startLocator)}.dragTo(page.${await generateLocator(endLocator)});`);
+    response.addCode(`await page.${start.resolved}.dragTo(page.${end.resolved});`);
   },
 });
 
@@ -175,8 +175,8 @@ const hover = defineTabTool({
   handle: async (tab, params, response) => {
     response.setIncludeSnapshot();
 
-    const locator = await tab.refLocator(params);
-    response.addCode(`await page.${await generateLocator(locator)}.hover();`);
+    const { locator, resolved } = await tab.refLocator(params);
+    response.addCode(`await page.${resolved}.hover();`);
 
     await tab.waitForCompletion(async () => {
       await locator.hover();
@@ -201,8 +201,8 @@ const selectOption = defineTabTool({
   handle: async (tab, params, response) => {
     response.setIncludeSnapshot();
 
-    const locator = await tab.refLocator(params);
-    response.addCode(`await page.${await generateLocator(locator)}.selectOption(${javascript.formatObject(params.values)});`);
+    const { locator, resolved } = await tab.refLocator(params);
+    response.addCode(`await page.${resolved}.selectOption(${javascript.formatObject(params.values)});`);
 
     await tab.waitForCompletion(async () => {
       await locator.selectOption(params.values);
@@ -221,8 +221,8 @@ const pickLocator = defineTabTool({
   },
 
   handle: async (tab, params, response) => {
-    const locator = await tab.refLocator(params);
-    response.addResult(await generateLocator(locator));
+    const { resolved } = await tab.refLocator(params);
+    response.addResult(resolved);
   },
 });
 
