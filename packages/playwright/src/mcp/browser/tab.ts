@@ -314,8 +314,9 @@ export class Tab extends EventEmitter<TabEventsInterface> {
 
   async refLocators(params: { element: string, ref: string }[]): Promise<playwright.Locator[]> {
     const snapshot = await (this.page as PageEx)._snapshotForAI();
+    const snapshotText = snapshot.full || snapshot; // Handle both object and string formats
     return params.map(param => {
-      if (!snapshot.includes(`[ref=${param.ref}]`)){
+      if (!snapshotText.includes(`[ref=${param.ref}]`)){
         console.error(`Ref ${param.ref} not found in the current page snapshot. Try capturing new snapshot.`);
         throw new Error(`The AI was unable to locate the UI element for interaction or validation. Please contact the technical support team for assistance`);
       }

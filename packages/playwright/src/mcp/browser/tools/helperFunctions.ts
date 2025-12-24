@@ -16,7 +16,7 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import type * as playwright from 'playwright';
-import { expect } from 'playwright/test';
+import { expect } from '@zealous-tech/playwright/test';
 import { generateLocator } from './utils.js';
 const camelToKebab = (prop: string) =>
   prop.replace(/[A-Z]/g, m => `-${m.toLowerCase()}`);
@@ -671,7 +671,7 @@ function applyArrayFilter(arr: any[], filter: string): any {
 
   const [, field, operator, value] = match;
   let cleanValue: any = value.replace(/^['"]|['"]$/g, ''); // Remove quotes
-  
+
   // Handle boolean values
   if (cleanValue === 'true') cleanValue = true;
   else if (cleanValue === 'false') cleanValue = false;
@@ -718,17 +718,17 @@ function applyArrayFilter(arr: any[], filter: string): any {
 async function checkElementVisibilityUnique(page: any, role: string, accessibleName: string) {
 
   const searchPromises = [];
-  
+
   // Add search in main frame
   searchPromises.push(
     expect(page.getByRole(role, { name: accessibleName })).toBeVisible()
       .then(() => ({ found: true, frame: 'main', level: 0 }))
       .catch(() => ({ found: false, frame: 'main', level: 0 }))
   );
-  
+
   // Recursively collect all iframes at all levels
   const allFrames = await collectAllFrames(page, 0);
-  
+
   // Create promises for all frames
   for (const frameInfo of allFrames) {
     searchPromises.push(
@@ -737,10 +737,10 @@ async function checkElementVisibilityUnique(page: any, role: string, accessibleN
         .catch(() => ({ found: false, frame: frameInfo.name, level: frameInfo.level }))
     );
   }
-  
+
   // Wait for all search results in parallel
   const results = await Promise.all(searchPromises);
-  
+
   return results;
 }
 
@@ -750,7 +750,7 @@ async function checkElementVisibilityUnique(page: any, role: string, accessibleN
  */
 async function checkTextVisibilityInAllFrames(page: any, text: string, matchType: 'exact' | 'contains' | 'not-contains' = 'contains') {
   const searchPromises = [];
-  
+
   // Add search in main frame
   let mainLocator;
   if (matchType === 'exact') {
@@ -758,16 +758,16 @@ async function checkTextVisibilityInAllFrames(page: any, text: string, matchType
   } else {
     mainLocator = page.getByText(text);
   }
-  
+
   searchPromises.push(
     expect(mainLocator).toBeVisible()
       .then(() => ({ found: true, frame: 'main', level: 0 }))
       .catch(() => ({ found: false, frame: 'main', level: 0 }))
   );
-  
+
   // Recursively collect all iframes at all levels
   const allFrames = await collectAllFrames(page, 0);
-  
+
   // Create promises for all frames
   for (const frameInfo of allFrames) {
     let frameLocator;
@@ -776,17 +776,17 @@ async function checkTextVisibilityInAllFrames(page: any, text: string, matchType
     } else {
       frameLocator = frameInfo.frame.getByText(text);
     }
-    
+
     searchPromises.push(
       expect(frameLocator).toBeVisible({timeout:2000})
         .then(() => ({ found: true, frame: frameInfo.name, level: frameInfo.level }))
         .catch(() => ({ found: false, frame: frameInfo.name, level: frameInfo.level }))
     );
   }
-  
+
   // Wait for all search results in parallel
   const results = await Promise.all(searchPromises);
-  
+
   return results;
 }
 
@@ -797,13 +797,13 @@ async function collectAllFrames(page: any, level: number): Promise<Array<{frame:
   const frames = [];
   const iframes = page.locator('iframe');
   const iframeCount = await iframes.count();
-  
+
   for (let i = 0; i < iframeCount; i++) {
     const iframe = page.frameLocator(`iframe >> nth=${i}`);
     const frameName = `iframe-${level}-${i}`;
-    
+
     frames.push({ frame: iframe, name: frameName, level });
-    
+
     // Recursively collect nested iframes
     try {
       const nestedFrames = await collectAllFrames(iframe, level + 1);
@@ -813,7 +813,7 @@ async function collectAllFrames(page: any, level: number): Promise<Array<{frame:
       continue;
     }
   }
-  
+
   return frames;
 }
 
@@ -833,7 +833,7 @@ async function generateLocatorString(ref: string, locator: any): Promise<string>
 
 function getElementErrorMessage(err: any, elementDescription: string): string | null {
   if (!err) return null;
-  
+
   // Get error message from multiple possible locations
   let errorMessage = '';
   if (err.message) {
@@ -843,9 +843,9 @@ function getElementErrorMessage(err: any, elementDescription: string): string | 
   } else {
     errorMessage = String(err);
   }
-  
+
   const errorMessageLower = errorMessage.toLowerCase();
-  
+
   // Check for "element not found" patterns
   const notFoundPatterns = [
     'element(s) not found',
@@ -859,17 +859,17 @@ function getElementErrorMessage(err: any, elementDescription: string): string | 
     'page closed',
     'navigation failed'
   ];
-  
+
   if (notFoundPatterns.some(pattern => errorMessageLower.includes(pattern))) {
     return `The UI Element "${elementDescription}" not found`;
   }
-  
+
   // Check for "strict mode violation" - multiple elements found
-  if (errorMessageLower.includes('strict mode violation') && 
+  if (errorMessageLower.includes('strict mode violation') &&
       /resolved to \d+ elements?/i.test(errorMessage)) {
     return `Multiple UI elements were found for this locator`;
   }
-  
+
   return null;
 }
 
@@ -906,7 +906,7 @@ export function getAssertionMessage(assertionType: string, elementDescription: s
     toHaveAccessibleErrorMessage: `'${elementDescription}' is missing accessible error message or differs (message required).`,
     toHaveAccessibleName: `'${elementDescription}' is missing accessible name or differs (name required).`,
   };
- 
+
   const negativeMessages: Record<string, string> = {
     toBeEnabled: `'${elementDescription}' is enabled (should be disabled).`,
     toBeDisabled: `'${elementDescription}' is disabled (should be enabled).`,
@@ -952,7 +952,7 @@ export function getAssertionEvidence(
   mainArgs?: any,
   options?: any,
 ): string {
-  
+
   // Messages for passed assertions
   const passedEvidenceMessages: Record<string, (args?: any, opts?: any) => string> = {
     toBeEnabled: (args, opts) => {
@@ -1113,7 +1113,7 @@ export function getAssertionEvidence(
   }
   //fallback to default evidence message
   return `'${elementDescription}' assertion ${negate ? 'should not' : 'should'} passed.`
-    
+
 }
 
 /**

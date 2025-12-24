@@ -16,6 +16,7 @@
 
 import type * as playwright from 'playwright-core';
 import type { Tab } from '../tab';
+import { asLocator } from 'playwright-core/lib/utils';
 
 export async function waitForCompletion<R>(tab: Tab, callback: () => Promise<R>): Promise<R> {
   const requests = new Set<playwright.Request>();
@@ -81,4 +82,14 @@ export async function callOnPageNoTrace<T>(page: playwright.Page, callback: (pag
 export function dateAsFileName(extension: string): string {
   const date = new Date();
   return `page-${date.toISOString().replace(/[:.]/g, '-')}.${extension}`;
+}
+
+export async function generateLocator(locator: playwright.Locator): Promise<string> {
+  try {
+    const { resolvedSelector } = await (locator as any)._resolveSelector();
+    return asLocator('javascript', resolvedSelector);
+  } catch (e) {
+    console.error('Ref not found, likely because element was removed. Use browser_snapshot to see what elements are currently on the page.', e);
+    return "UI Element not found";
+  }
 }
