@@ -32,21 +32,44 @@ const install = defineTool({
 
   handle: async (context, params, response) => {
     const channel = context.config.browser?.launchOptions?.channel ?? context.config.browser?.browserName ?? 'chrome';
+
+    // Log intended path from Environment Variables
+    const targetPath = process.env.PLAYWRIGHT_BROWSERS_PATH || 'Default OS Cache';
+    console.log(`[INFO] Attempting to install "${channel}" into: ${targetPath}`);
+
     const cliPath = path.join(require.resolve('@zealous-tech/playwright/package.json'), '../cli.js');
+
+    // Use DEBUG=pw:install to get verbose installation logs from Playwright
     const child = fork(cliPath, ['install', channel], {
       stdio: 'pipe',
+      env: {
+        ...process.env,
+        DEBUG: 'pw:install' // This tells Playwright to log exactly where it's putting things
+      }
     });
+
     const output: string[] = [];
-    child.stdout?.on('data', data => output.push(data.toString()));
-    child.stderr?.on('data', data => output.push(data.toString()));
+    child.stdout?.on('data', data => {
+      console.log(`[STDOUT]: ${data}`);
+      output.push(data.toString());
+    });
+
+    child.stderr?.on('data', data => {
+      console.error(`[STDERR]: ${data}`); // Playwright usually logs installation paths to stderr
+      output.push(data.toString());
+    });
+
     await new Promise<void>((resolve, reject) => {
       child.on('close', code => {
-        if (code === 0)
+        if (code === 0) {
+          console.log(`[SUCCESS] Browser installed. Verified Path: ${targetPath}`);
           resolve();
-        else
+        } else {
           reject(new Error(`Failed to install browser: ${output.join('')}`));
+        }
       });
     });
+
     response.setIncludeTabs();
   },
 });
