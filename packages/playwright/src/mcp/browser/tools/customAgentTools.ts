@@ -16,8 +16,8 @@
 import { z } from 'zod';
 //@ZEALOUS UPDATE
 import * as jp from 'jsonpath';
-import { defineTabTool } from './tool.js';
-import { getAllComputedStylesDirect, pickActualValue, parseRGBColor, isColorInRange,runCommandClean, compareValues, checkElementVisibilityUnique, checkTextVisibilityInAllFrames, getElementErrorMessage, generateLocatorString, getAssertionMessage, getAssertionEvidence, getXPathCode } from './helperFunctions.js';
+import { defineTabTool, defineTool } from './tool.js';
+import { getAllComputedStylesDirect, pickActualValue, parseRGBColor, isColorInRange,runCommandClean, compareValues, checkElementVisibilityUnique, checkTextVisibilityInAllFrames, getElementErrorMessage, generateLocatorString, getAssertionMessage, getAssertionEvidence, getXPathCode, collectAllFrames } from './helperFunctions.js';
 import { generateLocator } from './utils.js';
 import { expect } from '@zealous-tech/playwright/test';
 import { asLocator } from 'playwright-core/lib/utils';
@@ -2609,7 +2609,7 @@ const validate_text_in_whole_page = defineTabTool({
     });
   },
 });
-
+//
 const validate_element_in_whole_page = defineTabTool({
   capability: 'core',
   schema: {
@@ -3525,6 +3525,70 @@ const dynamic_switch = defineTabTool({
   },
 });
 
+const custom_wait = defineTool({
+  capability: 'core',
+
+  schema: {
+    name: 'custom_browser_wait_for',
+    title: 'Wait for',
+    description: 'Wait for text to appear or disappear with optional maximum timeout',
+    inputSchema: z.object({
+      time: z.number().optional().describe('Maximum time to wait in seconds for text to appear/disappear. If not provided, default actionTimeout is used'),
+      text: z.string().optional().describe('The text to wait for'),
+      textGone: z.string().optional().describe('The text to wait for to disappear'),
+    }),
+    type: 'assertion',
+  },
+
+  handle: async (context, params, response) => {
+    if (!params.text && !params.textGone && !params.time)
+      throw new Error('Either time, text or textGone must be provided');
+
+    const tab = context.currentTabOrDie();
+    const actionTimeout = params.time ? params.time * 1000 : context.config.timeouts.action;
+
+    // Helper function to wait for text in all frames asynchronously
+    const waitForTextInFrames = async (text: string, state: 'visible' | 'hidden') => {
+      // Collect all iframes
+      const allFrames = await collectAllFrames(tab.page, 0);
+
+      // Create promise for main frame
+      const mainLocator = tab.page.getByText(text).first();
+      const mainPromise = mainLocator.waitFor({ state, timeout: actionTimeout })
+        .then(() => ({ found: true, frame: 'main' }));
+
+      // Create promises for all iframes with explicit timeout
+      const iframePromises = allFrames.map(frameInfo => {
+        const frameLocator = frameInfo.frame.getByText(text).first();
+        return frameLocator.waitFor({ state, timeout: actionTimeout })
+          .then(() => ({ found: true, frame: frameInfo.name }));
+      });
+
+      // Wait for first successful result using Promise.race
+      const result = await Promise.race([mainPromise, ...iframePromises]);
+      return result;
+    };
+
+    let foundFrame: string | null = null;
+
+    if (params.textGone) {
+      response.addCode(`await page.getByText(${JSON.stringify(params.textGone)}).first().waitFor({ state: 'hidden' });`);
+      const result = await waitForTextInFrames(params.textGone, 'hidden');
+      foundFrame = result.frame;
+    }
+
+    if (params.text) {
+      response.addCode(`await page.getByText(${JSON.stringify(params.text)}).first().waitFor({ state: 'visible' });`);
+      const result = await waitForTextInFrames(params.text, 'visible');
+      foundFrame = result.frame;
+    }
+
+    const frameInfo = foundFrame && foundFrame !== 'main' ? ` (found in ${foundFrame})` : '';
+    response.addResult(`Waited for ${params.text || params.textGone || params.time}${frameInfo}`);
+    response.setIncludeSnapshot();
+  },
+});
+
 
 export default [
   extract_svg_from_element,
@@ -3544,5 +3608,6 @@ export default [
   make_request,
   data_extraction,
   wait,
-  dynamic_switch
+  dynamic_switch,
+  custom_wait
 ];

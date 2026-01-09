@@ -329,7 +329,7 @@ function parseCurlStderr(stderr: string): Partial<CurlResponse> {
   if (contentLengthMatch)
     result.contentLength = parseInt(contentLengthMatch[1], 10);
 
-
+  
   const serverMatch = stderr.match(/< Server: ([^\r\n]+)/);
   if (serverMatch)
     result.server = serverMatch[1].trim();
@@ -1146,4 +1146,4 @@ export function getXPathCode(): string {
   `.trim();
 }
 
-export { pickActualValue, parseRGBColor, isColorInRange, getAllComputedStylesDirect, hasAlertDialog, getAlertDialogText, performRegexCheck, performRegexExtract, performRegexMatch, compareValues,convertToValidJson, getValueByJsonPath, checkElementVisibilityUnique, checkTextVisibilityInAllFrames, getElementErrorMessage, generateLocatorString };
+export { pickActualValue, parseRGBColor, isColorInRange, getAllComputedStylesDirect, hasAlertDialog, getAlertDialogText, performRegexCheck, performRegexExtract, performRegexMatch, compareValues,convertToValidJson, getValueByJsonPath, checkElementVisibilityUnique, checkTextVisibilityInAllFrames, getElementErrorMessage, generateLocatorString, collectAllFrames };
