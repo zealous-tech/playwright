@@ -3529,7 +3529,7 @@ const custom_wait = defineTool({
   capability: 'core',
 
   schema: {
-    name: 'custom_browser_wait_for',
+    name: 'browser_wait_for_text',
     title: 'Wait for',
     description: 'Wait for text to appear or disappear with optional maximum timeout',
     inputSchema: z.object({
