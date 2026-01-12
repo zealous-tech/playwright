@@ -3458,6 +3458,18 @@ const validate_element_order = defineTabTool({
 });
 
 // Dynamic switch tool: choose a tool based on flag value
+const validateIconSchema = z.object({
+  element: z.string().describe('Human-readable element description used to obtain permission to interact with the element'),
+  ref: z.string().describe('Exact target element reference from the page snapshot'),
+  expectedIcon: z.object({
+    iconType: z.enum(['svg', 'img', 'background', 'font', 'datauri', 'unknown']).describe('Type of icon'),
+    iconData: z.string().describe('Icon data: SVG markup, image URL, font character, or data URI'),
+    colors: z.array(z.string()).optional().describe('Array of colors used in the icon (hex, rgb, or named colors)'),
+    hash: z.string().optional().describe('Content hash for quick comparison'),
+  }).optional().describe('Expected icon data to validate against. If not provided, tool will extract and return current icon data for analysis. If provided, tool will validate current icon matches expected icon.'),
+  ignoreColors: z.boolean().optional().default(false).describe('Whether to ignore color differences in validation'),
+});
+
 const dynamicSwitchSchema = z.object({
   flagName: z.string().describe('Flag value to match against cases (agent will replace this with actual value)'),
   cases: z.array(z.object({
@@ -3471,6 +3483,618 @@ const dynamicSwitchSchema = z.object({
     params: z.any().optional(),
     readyForCaching: z.boolean().optional().default(false).describe('Set to true if all tools and parameters are successfully obtained for this default case - the model clearly knows which parameters to use for this case and tool. Set to false if this case is missing required information for parameters, e.g. an action needs a ref that is not available in the snapshot')
   }).optional().describe('Fallback if no case matches. If it is not specified what needs to be done for defaultCase, then it should be left empty (not provided)'),
+});
+
+const validate_icon = defineTabTool({
+  capability: 'core',
+  schema: {
+    name: 'validate_icon',
+    title: 'Validate Icon',
+    description: 'Extract and/or validate icon data. If expectedIcon is not provided, extracts current icon data for LLM analysis. If expectedIcon is provided, validates current icon matches expected icon (compares type, data, and colors; size differences are ignored).',
+    inputSchema: validateIconSchema,
+    type: 'readOnly',
+  },
+  handle: async (tab, params, response) => {
+    const { ref, element, expectedIcon, ignoreColors } = validateIconSchema.parse(params);
+
+    await tab.waitForCompletion(async () => {
+      try {
+        const locator = await tab.refLocator({ ref, element });
+
+        // Check if element is attached to DOM with timeout
+        try {
+          await expect(locator).toBeAttached({ timeout: ELEMENT_ATTACHED_TIMEOUT });
+        } catch (error) {
+          const locatorString = await generateLocatorString(ref, locator);
+          const evidence = [{
+            command: JSON.stringify({
+              toolName: 'validate_icon',
+              locator: locatorString,
+              arguments: {
+                expectedIcon: expectedIcon
+              }
+            }),
+            message: `UI element "${element}" not found`
+          }];
+
+          const errorPayload = {
+            ref,
+            element,
+            expectedIcon,
+            actualIcon: null,
+            summary: {
+              total: 1,
+              passed: 0,
+              failed: 1,
+              status: 'fail',
+              evidence,
+            },
+            checks: [{
+              property: 'icon-validation',
+              operator: 'equals',
+              expected: expectedIcon,
+              actual: null,
+              result: 'fail',
+            }],
+          };
+          console.log('Validate icon - element not found:', errorPayload);
+          response.addResult(JSON.stringify(errorPayload, null, 2));
+          return;
+        }
+
+        // Generate locator string after element is confirmed to be attached
+        const locatorString = await generateLocatorString(ref, locator);
+
+        // Use the same extraction function as extract_icon
+        const extractIconFunction = async (element: Element, options: { includeColors: boolean }) => {
+          const simpleHash = (str: string): string => {
+            let hash = 0;
+            for (let i = 0; i < str.length; i++) {
+              const char = str.charCodeAt(i);
+              hash = ((hash << 5) - hash) + char;
+              hash = hash & hash;
+            }
+            return Math.abs(hash).toString(36);
+          };
+
+          // Verify image is loaded and accessible
+          const verifyImageLoaded = (imgElement: HTMLImageElement): boolean => {
+            // Check if image is fully loaded and has valid dimensions
+            // This works for both same-origin and cross-origin images (no CORS issue)
+            return imgElement.complete && imgElement.naturalWidth > 0 && imgElement.naturalHeight > 0;
+          };
+
+          // Calculate perceptual hash for SVG content or images (for change detection)
+          const calculatePerceptualHash = async (iconType: string, element: Element): Promise<string | null> => {
+            // For SVG, use content hash
+            if (iconType === 'svg') {
+              return null; // Will use simple hash of SVG markup instead
+            }
+            
+            // For images, try to calculate perceptual hash from pixels
+            if (element.tagName.toLowerCase() === 'img') {
+              const imgElement = element as HTMLImageElement;
+              
+              try {
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                if (!ctx) return null;
+
+                // Resize to 9x8 for dHash (8x8 comparison grid)
+                const width = 9;
+                const height = 8;
+                canvas.width = width;
+                canvas.height = height;
+
+                // Draw image scaled down
+                ctx.drawImage(imgElement, 0, 0, width, height);
+
+                // Get pixel data
+                const imageData = ctx.getImageData(0, 0, width, height);
+                const pixels = imageData.data;
+
+                // Convert to grayscale and calculate dHash
+                const grayscale: number[] = [];
+                for (let i = 0; i < pixels.length; i += 4) {
+                  const r = pixels[i];
+                  const g = pixels[i + 1];
+                  const b = pixels[i + 2];
+                  grayscale.push(Math.round(0.299 * r + 0.587 * g + 0.114 * b));
+                }
+
+                // Calculate difference hash (compare adjacent pixels horizontally)
+                let hash = '';
+                for (let row = 0; row < height; row++) {
+                  for (let col = 0; col < width - 1; col++) {
+                    const idx = row * width + col;
+                    hash += grayscale[idx] < grayscale[idx + 1] ? '1' : '0';
+                  }
+                }
+
+                // Convert binary to hex
+                let hexHash = '';
+                for (let i = 0; i < hash.length; i += 4) {
+                  hexHash += parseInt(hash.substr(i, 4), 2).toString(16);
+                }
+
+                return hexHash;
+              } catch (e) {
+                console.warn('Failed to calculate perceptual hash (CORS may prevent this):', e);
+                return null;
+              }
+            }
+            
+            return null;
+          };
+
+          const extractColors = (el: Element): string[] => {
+            const colors = new Set<string>();
+            const computedStyle = window.getComputedStyle(el);
+            
+            ['color', 'fill', 'stroke', 'background-color'].forEach(prop => {
+              const value = computedStyle.getPropertyValue(prop);
+              if (value && value !== 'none' && value !== 'transparent' && !value.includes('rgba(0, 0, 0, 0)')) {
+                colors.add(value);
+              }
+            });
+
+            if (el.tagName.toLowerCase() === 'svg') {
+              el.querySelectorAll('*').forEach(child => {
+                const childStyle = window.getComputedStyle(child);
+                ['fill', 'stroke'].forEach(prop => {
+                  const value = childStyle.getPropertyValue(prop);
+                  if (value && value !== 'none' && value !== 'transparent') {
+                    colors.add(value);
+                  }
+                });
+              });
+            }
+
+            return Array.from(colors);
+          };
+
+          const normalizeSVG = (svgString: string): string => {
+            let normalized = svgString
+              .replace(/\s+/g, ' ')
+              .replace(/width="[^"]*"/gi, '')
+              .replace(/height="[^"]*"/gi, '')
+              .trim();
+            return normalized;
+          };
+
+          let iconType: 'svg' | 'img' | 'background' | 'font' | 'datauri' | 'unknown' = 'unknown';
+          let iconData = '';
+          let colors: string[] = [];
+          let hash = '';
+          let imageLoaded = false;  // Track if image exists and is loaded
+          let visualData: string | null = null;  // Only for SVG icons (send SVG markup to LLM)
+
+          if (element.tagName.toLowerCase() === 'svg') {
+            iconType = 'svg';
+            iconData = normalizeSVG(element.outerHTML);
+            if (options.includeColors) {
+              colors = extractColors(element);
+            }
+            hash = simpleHash(iconData);
+            imageLoaded = true;
+            visualData = iconData;  // Send SVG markup to LLM for analysis
+          }
+          else if (element.querySelector('svg')) {
+            const svgElement = element.querySelector('svg');
+            if (svgElement) {
+              iconType = 'svg';
+              iconData = normalizeSVG(svgElement.outerHTML);
+              if (options.includeColors) {
+                colors = extractColors(svgElement);
+              }
+              hash = simpleHash(iconData);
+              imageLoaded = true;
+              visualData = iconData;  // Send SVG markup to LLM for analysis
+            }
+          }
+          else if (element.tagName.toLowerCase() === 'img') {
+            const imgElement = element as HTMLImageElement;
+            const src = imgElement.src;
+            
+            // Verify image is loaded
+            imageLoaded = verifyImageLoaded(imgElement);
+            
+            if (src.startsWith('data:')) {
+              iconType = 'datauri';
+              iconData = src;
+              hash = simpleHash(src);
+            } else {
+              iconType = 'img';
+              iconData = src;  // Just the URL
+              
+              // Try perceptual hash for content-based comparison (may fail due to CORS)
+              const perceptualHash = await calculatePerceptualHash('img', element);
+              hash = perceptualHash || simpleHash(src);
+            }
+            
+            // For images: DO NOT send visual data, only URL
+            // LLM will analyze based on URL/filename only
+            visualData = null;
+          }
+          else {
+            const computedStyle = window.getComputedStyle(element);
+            const backgroundImage = computedStyle.backgroundImage;
+
+            if (backgroundImage && backgroundImage !== 'none') {
+              const urlMatch = backgroundImage.match(/url\(['"]?([^'"]*?)['"]?\)/);
+              if (urlMatch && urlMatch[1]) {
+                const bgUrl = urlMatch[1];
+                if (bgUrl.startsWith('data:')) {
+                  iconType = 'datauri';
+                  iconData = bgUrl;
+                } else {
+                  iconType = 'background';
+                  iconData = bgUrl;
+                }
+                hash = simpleHash(iconData);
+                imageLoaded = true;  // Assume background images are loaded
+                if (options.includeColors) {
+                  colors = extractColors(element);
+                }
+              }
+            }
+            else {
+              const classList = Array.from(element.classList);
+              const iconFontPatterns = [
+                /^fa-/, /^fas-/, /^far-/, /^fal-/, /^fab-/,
+                /^material-icons/, /^mi-/,
+                /^icon-/, /^glyphicon-/,
+              ];
+
+              const hasIconFont = classList.some(cls => 
+                iconFontPatterns.some(pattern => pattern.test(cls))
+              );
+
+              if (hasIconFont) {
+                iconType = 'font';
+                const content = window.getComputedStyle(element, '::before').content ||
+                               window.getComputedStyle(element).content ||
+                               element.textContent || '';
+                iconData = `${classList.join(' ')}:${content}`;
+                hash = simpleHash(iconData);
+                imageLoaded = true;  // Font icons are considered "loaded"
+                if (options.includeColors) {
+                  colors = extractColors(element);
+                }
+              }
+              else if (element.textContent && element.textContent.trim()) {
+                const text = element.textContent.trim();
+                if (text.length <= 2 || /[\u{1F300}-\u{1F9FF}]/u.test(text)) {
+                  iconType = 'font';
+                  iconData = text;
+                  hash = simpleHash(text);
+                  imageLoaded = true;
+                  if (options.includeColors) {
+                    colors = extractColors(element);
+                  }
+                }
+              }
+            }
+          }
+
+          return {
+            iconType,
+            iconData,
+            colors: options.includeColors ? colors : [],
+            hash,
+            imageLoaded,  // NEW: indicates if image exists and loaded
+            visualData,   // Only populated for SVG (SVG markup for LLM analysis)
+          };
+        };
+
+        const actualIcon = await locator.evaluate(extractIconFunction, { includeColors: !ignoreColors });
+        
+        console.log('Actual Icon:', actualIcon);
+        console.log('Expected Icon:', expectedIcon);
+
+        // MODE 1: Extraction only (no expectedIcon provided)
+        // Return extracted icon data for LLM to analyze in a follow-up call
+        if (!expectedIcon) {
+          // Check if image loaded successfully
+          if (!actualIcon.imageLoaded) {
+            const failureEvidence = [{
+              command: JSON.stringify({
+                toolName: 'validate_icon',
+                mode: 'extraction',
+                locator: locatorString,
+                arguments: { ref, element }
+              }),
+              message: `Failed to extract icon from element "${element}": Image not loaded or broken image detected.`
+            }];
+
+            const failurePayload = {
+              ref,
+              element,
+              summary: {
+                total: 1,
+                passed: 0,
+                failed: 1,
+                status: 'fail',
+                evidence: failureEvidence,
+              },
+            };
+            
+            console.log('Icon extraction failed - image not loaded:', failurePayload);
+            response.addResult(JSON.stringify(failurePayload, null, 2));
+            return;
+          }
+
+          // Create the expectedIcon object for the LLM to use
+          const expectedIconForLLM = {
+            iconType: actualIcon.iconType,
+            iconData: actualIcon.iconData,
+            colors: actualIcon.colors,
+            hash: actualIcon.hash,
+          };
+
+          // Build message based on icon type
+          let extractionMessage = '';
+          
+          if (actualIcon.iconType === 'svg') {
+            // For SVG: Send SVG markup to LLM for visual analysis
+            extractionMessage = `Successfully extracted SVG icon from element "${element}".\n\n`;
+            extractionMessage += `**Icon Type:** SVG\n`;
+            extractionMessage += `**SVG Markup:** ${actualIcon.iconData.substring(0, 500)}${actualIcon.iconData.length > 500 ? '...' : ''}\n\n`;
+            extractionMessage += `**Extracted Metadata:** ${JSON.stringify(expectedIconForLLM)}\n\n`;
+            extractionMessage += `Please analyze the SVG markup to determine if it matches the validation requirement. If it matches, call validate_icon again with this data as expectedIcon to cache it.`;
+          } else if (actualIcon.iconType === 'img') {
+            // For images: Send only URL for LLM to analyze filename/path
+            extractionMessage = `Successfully extracted image icon from element "${element}".\n\n`;
+            extractionMessage += `**Icon Type:** Image\n`;
+            extractionMessage += `**Image URL:** ${actualIcon.iconData}\n`;
+            extractionMessage += `**Image Status:** ✓ Loaded and accessible\n\n`;
+            extractionMessage += `**Extracted Metadata:** ${JSON.stringify(expectedIconForLLM)}\n\n`;
+            extractionMessage += `Please analyze the URL/filename to determine if it matches the validation requirement. If it matches, call validate_icon again with this data as expectedIcon to cache it.`;
+          } else {
+            // For other types (font, background, datauri)
+            extractionMessage = `Successfully extracted ${actualIcon.iconType} icon from element "${element}".\n\n`;
+            extractionMessage += `**Icon Type:** ${actualIcon.iconType}\n`;
+            extractionMessage += `**Icon Data:** ${JSON.stringify(expectedIconForLLM)}\n\n`;
+            extractionMessage += `Please analyze the extracted data to determine if it matches the validation requirement. If it matches, call validate_icon again with this data as expectedIcon to cache it.`;
+          }
+
+          const evidence = [{
+            command: JSON.stringify({
+              toolName: 'validate_icon',
+              mode: 'extraction',
+              locator: locatorString,
+              arguments: { ref, element }
+            }),
+            message: extractionMessage,
+            visualData: actualIcon.visualData  // Only populated for SVG icons
+          }];
+
+          const payload = {
+            ref,
+            element,
+            extractedIcon: expectedIconForLLM,
+            summary: {
+              total: 1,
+              passed: 1,
+              failed: 0,
+              status: 'pass',
+              evidence,
+              extractionMode: true,
+              requiresFollowUp: true,
+            },
+          };
+          
+          console.log('Icon extraction (requires follow-up LLM call):', payload);
+          response.addResult(JSON.stringify(payload, null, 2));
+          return;
+        }
+
+        // MODE 2: Validation (expectedIcon provided)
+        // Compare current icon with expected icon
+        
+        // First, check if image is loaded (for img types)
+        if (actualIcon.iconType === 'img' && !actualIcon.imageLoaded) {
+          const failureEvidence = [{
+            command: JSON.stringify({
+              toolName: 'validate_icon',
+              locator: locatorString,
+              arguments: {
+                expectedIcon: expectedIcon,
+                ignoreColors: ignoreColors
+              }
+            }),
+            message: `Icon validation failed: Image not loaded or broken image at URL "${actualIcon.iconData}"`
+          }];
+
+          const failurePayload = {
+            ref,
+            element,
+            expectedIcon,
+            actualIcon: {
+              iconType: actualIcon.iconType,
+              iconData: actualIcon.iconData,
+              imageLoaded: actualIcon.imageLoaded,
+            },
+            summary: {
+              total: 1,
+              passed: 0,
+              failed: 1,
+              status: 'fail',
+              evidence: failureEvidence,
+            },
+          };
+
+          console.log('Icon validation failed - image not loaded:', failurePayload);
+          response.addResult(JSON.stringify(failurePayload, null, 2));
+          return;
+        }
+
+        let passed = true;
+        const comparisonDetails: string[] = [];
+
+        // Compare icon type
+        if (actualIcon.iconType !== expectedIcon.iconType) {
+          passed = false;
+          comparisonDetails.push(`Icon type mismatch: expected "${expectedIcon.iconType}", got "${actualIcon.iconType}"`);
+        }
+
+        // Compare icon data based on type
+        if (actualIcon.iconType === 'img' || actualIcon.iconType === 'background') {
+          // For images: EXACT URL comparison only
+          if (actualIcon.iconData !== expectedIcon.iconData) {
+            passed = false;
+            comparisonDetails.push(`Image URL mismatch: expected "${expectedIcon.iconData}", got "${actualIcon.iconData}"`);
+          }
+        } else if (actualIcon.iconType === 'svg') {
+          // For SVG: Use hash if available, otherwise direct comparison
+          if (expectedIcon.hash && actualIcon.hash) {
+            if (actualIcon.hash !== expectedIcon.hash) {
+              passed = false;
+              comparisonDetails.push(`SVG content hash mismatch: expected "${expectedIcon.hash}", got "${actualIcon.hash}"`);
+            }
+          } else {
+            if (actualIcon.iconData !== expectedIcon.iconData) {
+              passed = false;
+              comparisonDetails.push(`SVG content mismatch`);
+            }
+          }
+        } else {
+          // For other types (font, datauri): Direct comparison
+          if (actualIcon.iconData !== expectedIcon.iconData) {
+            passed = false;
+            comparisonDetails.push(`Icon data mismatch`);
+          }
+        }
+
+        // Compare colors if not ignoring them
+        if (!ignoreColors && expectedIcon.colors && expectedIcon.colors.length > 0) {
+          const expectedColors = new Set(expectedIcon.colors);
+          const actualColors = new Set(actualIcon.colors);
+          
+          const missingColors = Array.from(expectedColors).filter(c => !actualColors.has(c));
+          const extraColors = Array.from(actualColors).filter(c => !expectedColors.has(c));
+
+          if (missingColors.length > 0 || extraColors.length > 0) {
+            passed = false;
+            if (missingColors.length > 0) {
+              comparisonDetails.push(`Missing colors: ${missingColors.join(', ')}`);
+            }
+            if (extraColors.length > 0) {
+              comparisonDetails.push(`Extra colors: ${extraColors.join(', ')}`);
+            }
+          }
+        }
+
+        // Generate evidence message
+        let evidenceMessage = '';
+        if (passed) {
+          if (actualIcon.iconType === 'img') {
+            evidenceMessage = `Icon validation passed: Image exists at URL and matches cached URL`;
+          } else if (actualIcon.iconType === 'svg') {
+            evidenceMessage = `Icon validation passed: SVG icon matches cached content`;
+          } else {
+            evidenceMessage = `Icon validation passed: ${actualIcon.iconType} icon matches expected icon`;
+          }
+          
+          if (!ignoreColors && expectedIcon.colors && expectedIcon.colors.length > 0) {
+            evidenceMessage += ` with matching colors`;
+          }
+        } else {
+          evidenceMessage = `Icon validation failed: ${comparisonDetails.join('; ')}`;
+        }
+
+        const evidence = [{
+          command: JSON.stringify({
+            toolName: 'validate_icon',
+            locator: locatorString,
+            arguments: {
+              expectedIcon: expectedIcon,
+              ignoreColors: ignoreColors
+            }
+          }),
+          message: evidenceMessage
+        }];
+
+        const payload = {
+          ref,
+          element,
+          expectedIcon,
+          actualIcon: {
+            iconType: actualIcon.iconType,
+            iconData: actualIcon.iconData.length > 200 ? actualIcon.iconData.substring(0, 200) + '...' : actualIcon.iconData,
+            colors: actualIcon.colors,
+            hash: actualIcon.hash,
+            imageLoaded: actualIcon.imageLoaded,
+          },
+          summary: {
+            total: 1,
+            passed: passed ? 1 : 0,
+            failed: passed ? 0 : 1,
+            status: passed ? 'pass' : 'fail',
+            evidence,
+          },
+          checks: [{
+            property: 'icon-validation',
+            operator: 'equals',
+            expected: expectedIcon,
+            actual: actualIcon,
+            result: passed ? 'pass' : 'fail',
+            comparisonDetails: comparisonDetails,
+          }],
+        };
+
+        console.log('Validate icon:', payload);
+        response.addResult(JSON.stringify(payload, null, 2));
+
+      } catch (error) {
+        const errorMessage = `Failed to validate icon for element "${element}". Error: ${error instanceof Error ? error.message : String(error)}`;
+        console.error('Validate icon error:', errorMessage);
+
+        let locatorString = '';
+        try {
+          const locator = await tab.refLocator({ ref, element });
+          locatorString = await generateLocatorString(ref, locator);
+        } catch {
+          locatorString = '';
+        }
+
+        const evidence = [{
+          command: JSON.stringify({
+            toolName: 'validate_icon',
+            locator: locatorString,
+            arguments: {
+              expectedIcon: expectedIcon
+            }
+          }),
+          message: errorMessage
+        }];
+
+        const errorPayload = {
+          ref,
+          element,
+          expectedIcon,
+          actualIcon: null,
+          summary: {
+            total: 1,
+            passed: 0,
+            failed: 1,
+            status: 'fail',
+            evidence,
+          },
+          checks: [{
+            property: 'icon-validation',
+            operator: 'equals',
+            expected: expectedIcon,
+            actual: null,
+            result: 'fail',
+          }],
+          error: error instanceof Error ? error.message : String(error),
+        };
+
+        response.addResult(JSON.stringify(errorPayload, null, 2));
+      }
+    });
+  },
 });
 
 const dynamic_switch = defineTabTool({
@@ -3543,6 +4167,7 @@ export default [
   generate_locator,
   make_request,
   data_extraction,
+  validate_icon,
   wait,
   dynamic_switch
 ];
