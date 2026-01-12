@@ -2609,7 +2609,7 @@ const validate_text_in_whole_page = defineTabTool({
     });
   },
 });
-//
+
 const validate_element_in_whole_page = defineTabTool({
   capability: 'core',
   schema: {
