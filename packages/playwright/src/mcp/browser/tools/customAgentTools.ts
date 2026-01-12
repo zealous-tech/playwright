@@ -3547,38 +3547,77 @@ const custom_wait = defineTool({
     const tab = context.currentTabOrDie();
     const actionTimeout = params.time ? params.time * 1000 : context.config.timeouts.action;
 
-    // Helper function to wait for text in all frames asynchronously
+    // Helper function to wait for text in all frames using waitForFunction
+    // Uses recursive search to find text in main frame and all nested iframes
+    // Automatically handles dynamically appearing iframes
+    // Returns information about which frame the text was found in
     const waitForTextInFrames = async (text: string, state: 'visible' | 'hidden') => {
-      // Collect all iframes
-      const allFrames = await collectAllFrames(tab.page, 0);
-
-      // Create promise for main frame
-      const mainLocator = tab.page.getByText(text).first();
-      const mainPromise = mainLocator.waitFor({ state, timeout: actionTimeout })
-        .then(() => ({ found: true, frame: 'main' }));
-
-      // Create promises for all iframes with explicit timeout
-      const iframePromises = allFrames.map(frameInfo => {
-        const frameLocator = frameInfo.frame.getByText(text).first();
-        return frameLocator.waitFor({ state, timeout: actionTimeout })
-          .then(() => ({ found: true, frame: frameInfo.name }));
-      });
-
-      // Wait for first successful result using Promise.race
-      const result = await Promise.race([mainPromise, ...iframePromises]);
-      return result;
+      const shouldBeVisible = state === 'visible';
+      
+      const result = await tab.page.waitForFunction(
+        ({ searchText, checkVisible }) => {
+          // Recursive function to search in window and all nested frames
+          // Returns frame info if found, null if not found
+          const searchInWindow = (win: Window, path: string): { success: true; frameName: string } | null => {
+            try {
+              // Check current window's document
+              const doc = win.document;
+              const bodyText = doc && doc.body ? doc.body.innerText : '';
+              if (bodyText.includes(searchText)) {
+                // Build frame identifier
+                const frameName = path || 'main';
+                return { success: true, frameName };
+              }
+              
+              // Recursively check all child frames (including dynamically added ones)
+              const frames = win.frames;
+              for (let i = 0; i < frames.length; i++) {
+                try {
+                  const childPath = path ? `${path} > iframe[${i}]` : `iframe[${i}]`;
+                  const childResult = searchInWindow(frames[i], childPath);
+                  if (childResult) {
+                    return childResult;
+                  }
+                } catch {
+                  // Cross-origin iframe - can't access, skip
+                }
+              }
+              
+              return null;
+            } catch {
+              return null;
+            }
+          };
+          
+          const searchResult = searchInWindow(window, '');
+          
+          if (checkVisible) {
+            // For visible: return frame info when text IS found
+            return searchResult;
+          } else {
+            // For hidden: return success when text is NOT found anywhere
+            return searchResult === null ? { success: true, frameName: 'none (text gone)' } : null;
+          }
+        },
+        { searchText: text, checkVisible: shouldBeVisible },
+        { timeout: actionTimeout }
+      );
+      
+      // Extract the result from the JSHandle
+      const frameInfo = await result.jsonValue() as { success: boolean; frameName: string };
+      return { success: true, frame: frameInfo.frameName };
     };
 
     let foundFrame: string | null = null;
 
     if (params.textGone) {
-      response.addCode(`await page.getByText(${JSON.stringify(params.textGone)}).first().waitFor({ state: 'hidden' });`);
+      response.addCode(`await page.waitForFunction(({ text }) => !document.body.innerText.includes(text), { text: ${JSON.stringify(params.textGone)} });`);
       const result = await waitForTextInFrames(params.textGone, 'hidden');
       foundFrame = result.frame;
     }
 
     if (params.text) {
-      response.addCode(`await page.getByText(${JSON.stringify(params.text)}).first().waitFor({ state: 'visible' });`);
+      response.addCode(`await page.waitForFunction(({ text }) => document.body.innerText.includes(text), { text: ${JSON.stringify(params.text)} });`);
       const result = await waitForTextInFrames(params.text, 'visible');
       foundFrame = result.frame;
     }
@@ -3588,7 +3627,6 @@ const custom_wait = defineTool({
     response.setIncludeSnapshot();
   },
 });
-
 
 export default [
   extract_svg_from_element,
