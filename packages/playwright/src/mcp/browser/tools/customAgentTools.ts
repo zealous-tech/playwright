@@ -3564,69 +3564,6 @@ const validate_icon = defineTabTool({
             return imgElement.complete && imgElement.naturalWidth > 0 && imgElement.naturalHeight > 0;
           };
 
-          // Calculate perceptual hash for SVG content or images (for change detection)
-          const calculatePerceptualHash = async (iconType: string, element: Element): Promise<string | null> => {
-            // For SVG, use content hash
-            if (iconType === 'svg') {
-              return null; // Will use simple hash of SVG markup instead
-            }
-            
-            // For images, try to calculate perceptual hash from pixels
-            if (element.tagName.toLowerCase() === 'img') {
-              const imgElement = element as HTMLImageElement;
-              
-              try {
-                const canvas = document.createElement('canvas');
-                const ctx = canvas.getContext('2d');
-                if (!ctx) return null;
-
-                // Resize to 9x8 for dHash (8x8 comparison grid)
-                const width = 9;
-                const height = 8;
-                canvas.width = width;
-                canvas.height = height;
-
-                // Draw image scaled down
-                ctx.drawImage(imgElement, 0, 0, width, height);
-
-                // Get pixel data
-                const imageData = ctx.getImageData(0, 0, width, height);
-                const pixels = imageData.data;
-
-                // Convert to grayscale and calculate dHash
-                const grayscale: number[] = [];
-                for (let i = 0; i < pixels.length; i += 4) {
-                  const r = pixels[i];
-                  const g = pixels[i + 1];
-                  const b = pixels[i + 2];
-                  grayscale.push(Math.round(0.299 * r + 0.587 * g + 0.114 * b));
-                }
-
-                // Calculate difference hash (compare adjacent pixels horizontally)
-                let hash = '';
-                for (let row = 0; row < height; row++) {
-                  for (let col = 0; col < width - 1; col++) {
-                    const idx = row * width + col;
-                    hash += grayscale[idx] < grayscale[idx + 1] ? '1' : '0';
-                  }
-                }
-
-                // Convert binary to hex
-                let hexHash = '';
-                for (let i = 0; i < hash.length; i += 4) {
-                  hexHash += parseInt(hash.substr(i, 4), 2).toString(16);
-                }
-
-                return hexHash;
-              } catch (e) {
-                console.warn('Failed to calculate perceptual hash (CORS may prevent this):', e);
-                return null;
-              }
-            }
-            
-            return null;
-          };
-
           const extractColors = (el: Element): string[] => {
             const colors = new Set<string>();
             const computedStyle = window.getComputedStyle(el);
@@ -3706,10 +3643,7 @@ const validate_icon = defineTabTool({
             } else {
               iconType = 'img';
               iconData = src;  // Just the URL
-              
-              // Try perceptual hash for content-based comparison (may fail due to CORS)
-              const perceptualHash = await calculatePerceptualHash('img', element);
-              hash = perceptualHash || simpleHash(src);
+              hash = simpleHash(src);  // Simple hash of URL (validation uses exact URL comparison anyway)
             }
             
             // For images: DO NOT send visual data, only URL
