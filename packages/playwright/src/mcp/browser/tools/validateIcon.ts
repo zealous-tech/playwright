@@ -1,3 +1,26 @@
+/**
+ * ICON VALIDATION TOOL
+ * 
+ * This tool provides two modes of operation:
+ * 
+ * 1. EXTRACTION MODE (no expectedIcon provided):
+ *    - Extracts current icon data from the page element
+ *    - Returns icon metadata for LLM analysis
+ *    - LLM decides if icon matches requirements and calls again in validation mode
+ * 
+ * 2. VALIDATION MODE (expectedIcon provided):
+ *    - Compares current icon data with expected/cached icon data
+ *    - Returns pass/fail result with comparison details
+ *    - Validates: icon type, icon data (URL/SVG/font), and optionally colors
+ * 
+ * ARCHITECTURE:
+ * - extractIconFunction: Browser-side function that extracts icon data from DOM
+ * - compareIcons: Compares extracted icon with expected icon
+ * - handleExtractionMode: Processes extraction mode flow
+ * - handleValidationMode: Processes validation mode flow
+ * - createEvidence/Payload helpers: Standardize response format
+ */
+
 import { z } from 'zod';
 import { defineTabTool } from './tool.js';
 import { generateLocatorString } from './helperFunctions.js';
@@ -6,7 +29,10 @@ import { expect } from '@zealous-tech/playwright/test';
 // Global timeout for element attachment validation (in milliseconds)
 const ELEMENT_ATTACHED_TIMEOUT = 15000;
 
-// Type definitions
+// ============================================================================
+// TYPE DEFINITIONS
+// ============================================================================
+
 type IconType = 'svg' | 'img' | 'background' | 'font' | 'datauri' | 'unknown';
 
 interface ExtractedIcon {
@@ -22,6 +48,10 @@ interface ExpectedIcon {
     iconData: string;
     colors?: string[];
 }
+
+// ============================================================================
+// BROWSER-SIDE ICON EXTRACTION
+// ============================================================================
 
 /**
  * Extract icon data from an element
@@ -186,6 +216,10 @@ function extractIconFunction(element: Element, options: { includeColors: boolean
     };
 }
 
+// ============================================================================
+// ICON COMPARISON LOGIC
+// ============================================================================
+
 /**
  * Compare two icons and return comparison results
  */
@@ -245,6 +279,10 @@ function compareIcons(
 
     return { passed, comparisonDetails };
 }
+
+// ============================================================================
+// MESSAGE GENERATION
+// ============================================================================
 
 /**
  * Generate evidence message based on icon comparison result
@@ -312,6 +350,10 @@ function generateExtractionMessage(actualIcon: ExtractedIcon, element: string): 
 
     return extractionMessage;
 }
+
+// ============================================================================
+// PAYLOAD CREATION HELPERS
+// ============================================================================
 
 /**
  * Create evidence object with command and message
@@ -442,6 +484,10 @@ function createValidationPayload(params: {
     };
 }
 
+// ============================================================================
+// TOOL SCHEMA AND DEFINITION
+// ============================================================================
+
 const validateIconSchema = z.object({
   element: z.string().describe('Human-readable element description used to obtain permission to interact with the element'),
   ref: z.string().describe('Exact target element reference from the page snapshot'),
@@ -452,6 +498,203 @@ const validateIconSchema = z.object({
   }).optional().describe('Expected icon data to validate against. If not provided, tool will extract and return current icon data for analysis. If provided, tool will validate current icon matches expected icon.'),
   ignoreColors: z.boolean().optional().default(false).describe('Whether to ignore color differences in validation'),
 });
+
+// ============================================================================
+// MODE HANDLERS (Extraction, Validation, Error)
+// ============================================================================
+
+/**
+ * Handle element not found scenario
+ * Returns error payload when element cannot be located or is not attached to DOM
+ */
+async function handleElementNotFound(
+  ref: string,
+  element: string,
+  locatorString: string,
+  expectedIcon: ExpectedIcon | undefined,
+  response: any
+): Promise<void> {
+  const evidence = createEvidence({
+    toolName: 'validate_icon',
+    locator: locatorString,
+    arguments: { expectedIcon },
+    message: `UI element "${element}" not found`,
+  });
+
+  const errorPayload = createErrorPayload({
+    ref,
+    element,
+    expectedIcon,
+    evidence,
+  });
+
+  response.addResult(JSON.stringify(errorPayload, null, 2));
+}
+
+/**
+ * Handle extraction mode (no expectedIcon provided)
+ * Extracts current icon data and returns it for LLM analysis
+ */
+function handleExtractionMode(
+  ref: string,
+  element: string,
+  actualIcon: ExtractedIcon,
+  locatorString: string,
+  response: any
+): void {
+  // Check if image loaded successfully
+  if (!actualIcon.imageLoaded) {
+    const failureEvidence = createEvidence({
+      toolName: 'validate_icon',
+      mode: 'extraction',
+      locator: locatorString,
+      arguments: { ref, element },
+      message: `Failed to extract icon from element "${element}": Image not loaded or broken image detected.`,
+    });
+
+    const failurePayload = createErrorPayload({
+      ref,
+      element,
+      evidence: failureEvidence,
+    });
+
+    response.addResult(JSON.stringify(failurePayload, null, 2));
+    return;
+  }
+
+  // Prepare extracted icon data for LLM
+  const extractedIconData = {
+    iconType: actualIcon.iconType,
+    iconData: actualIcon.iconData,
+    colors: actualIcon.colors,
+  };
+
+  // Generate extraction message with context for LLM
+  const extractionMessage = generateExtractionMessage(actualIcon, element);
+
+  const evidence = createEvidence({
+    toolName: 'validate_icon',
+    mode: 'extraction',
+    locator: locatorString,
+    arguments: { ref, element },
+    message: extractionMessage,
+    visualData: actualIcon.visualData,
+  });
+
+  const payload = createExtractionPayload({
+    ref,
+    element,
+    extractedIcon: extractedIconData,
+    evidence,
+  });
+
+  response.addResult(JSON.stringify(payload, null, 2));
+}
+
+/**
+ * Handle validation mode (expectedIcon provided)
+ * Compares current icon with expected icon and returns validation result
+ */
+function handleValidationMode(
+  ref: string,
+  element: string,
+  actualIcon: ExtractedIcon,
+  expectedIcon: ExpectedIcon,
+  ignoreColors: boolean,
+  locatorString: string,
+  response: any
+): void {
+  // Check if image is loaded (critical for img types)
+  if (actualIcon.iconType === 'img' && !actualIcon.imageLoaded) {
+    const failureEvidence = createEvidence({
+      toolName: 'validate_icon',
+      locator: locatorString,
+      arguments: { expectedIcon, ignoreColors },
+      message: `Icon validation failed: Image not loaded or broken image at URL "${actualIcon.iconData}"`,
+    });
+
+    const failurePayload = createErrorPayload({
+      ref,
+      element,
+      expectedIcon,
+      actualIcon: {
+        iconType: actualIcon.iconType,
+        iconData: actualIcon.iconData,
+        imageLoaded: actualIcon.imageLoaded,
+      },
+      evidence: failureEvidence,
+    });
+
+    response.addResult(JSON.stringify(failurePayload, null, 2));
+    return;
+  }
+
+  // Perform icon comparison
+  const { passed, comparisonDetails } = compareIcons(actualIcon, expectedIcon, ignoreColors);
+
+  // Generate human-readable evidence message
+  const evidenceMessage = generateEvidenceMessage(passed, actualIcon, expectedIcon, ignoreColors, comparisonDetails);
+
+  const evidence = createEvidence({
+    toolName: 'validate_icon',
+    locator: locatorString,
+    arguments: { expectedIcon, ignoreColors },
+    message: evidenceMessage,
+  });
+
+  const payload = createValidationPayload({
+    ref,
+    element,
+    expectedIcon,
+    actualIcon,
+    passed,
+    comparisonDetails,
+    evidence,
+  });
+
+  response.addResult(JSON.stringify(payload, null, 2));
+}
+
+/**
+ * Handle unexpected errors during icon validation
+ * Returns error payload with diagnostic information
+ */
+async function handleValidationError(
+  ref: string,
+  element: string,
+  expectedIcon: ExpectedIcon | undefined,
+  error: unknown,
+  tab: any,
+  response: any
+): Promise<void> {
+  const errorMessage = `Failed to validate icon for element "${element}". Error: ${error instanceof Error ? error.message : String(error)}`;
+
+  // Try to get locator string for better error reporting
+  let locatorString = '';
+  try {
+    const locator = await tab.refLocator({ ref, element });
+    locatorString = await generateLocatorString(ref, locator);
+  } catch {
+    locatorString = '';
+  }
+
+  const evidence = createEvidence({
+    toolName: 'validate_icon',
+    locator: locatorString,
+    arguments: { expectedIcon },
+    message: errorMessage,
+  });
+
+  const errorPayload = createErrorPayload({
+    ref,
+    element,
+    expectedIcon,
+    evidence,
+    error: error instanceof Error ? error.message : String(error),
+  });
+
+  response.addResult(JSON.stringify(errorPayload, null, 2));
+}
 
 const validate_icon = defineTabTool({
   capability: 'core',
@@ -464,181 +707,39 @@ const validate_icon = defineTabTool({
   },
   handle: async (tab, params, response) => {
     const { ref, element, expectedIcon, ignoreColors } = validateIconSchema.parse(params);
+    
     await tab.waitForCompletion(async () => {
       try {
+        // Step 1: Locate the element
         const locator = await tab.refLocator({ ref, element });
 
-        // Check if element is attached to DOM with timeout
+        // Step 2: Verify element is attached to DOM
         try {
           await expect(locator).toBeAttached({ timeout: ELEMENT_ATTACHED_TIMEOUT });
         } catch (error) {
           const locatorString = await generateLocatorString(ref, locator);
-          const evidence = createEvidence({
-            toolName: 'validate_icon',
-            locator: locatorString,
-            arguments: { expectedIcon },
-            message: `UI element "${element}" not found`,
-          });
-
-          const errorPayload = createErrorPayload({
-            ref,
-            element,
-            expectedIcon,
-            evidence,
-          });
-          
-          console.log('Validate icon - element not found:', errorPayload);
-          response.addResult(JSON.stringify(errorPayload, null, 2));
+          await handleElementNotFound(ref, element, locatorString, expectedIcon, response);
           return;
         }
 
-        // Generate locator string after element is confirmed to be attached
+        // Step 3: Generate locator string for evidence
         const locatorString = await generateLocatorString(ref, locator);
 
-        // Extract icon data using helper function
+        // Step 4: Extract current icon data from the page
         const actualIcon = await locator.evaluate(extractIconFunction, { includeColors: !ignoreColors });
-        
-        console.log('Actual Icon:', actualIcon);
-        console.log('Expected Icon:', expectedIcon);
 
-        // MODE 1: Extraction only (no expectedIcon provided)
-        // Return extracted icon data for LLM to analyze in a follow-up call
+        // Step 5: Process based on mode (extraction vs validation)
         if (!expectedIcon) {
-          // Check if image loaded successfully
-          if (!actualIcon.imageLoaded) {
-            const failureEvidence = createEvidence({
-              toolName: 'validate_icon',
-              mode: 'extraction',
-              locator: locatorString,
-              arguments: { ref, element },
-              message: `Failed to extract icon from element "${element}": Image not loaded or broken image detected.`,
-            });
-
-            const failurePayload = createErrorPayload({
-              ref,
-              element,
-              evidence: failureEvidence,
-            });
-            
-            console.log('Icon extraction failed - image not loaded:', failurePayload);
-            response.addResult(JSON.stringify(failurePayload, null, 2));
-            return;
-          }
-
-          // Create the expectedIcon object for the LLM to use
-          const expectedIconForLLM = {
-            iconType: actualIcon.iconType,
-            iconData: actualIcon.iconData,
-            colors: actualIcon.colors,
-          };
-
-          // Build message based on icon type
-          const extractionMessage = generateExtractionMessage(actualIcon, element);
-
-          const evidence = createEvidence({
-            toolName: 'validate_icon',
-            mode: 'extraction',
-            locator: locatorString,
-            arguments: { ref, element },
-            message: extractionMessage,
-            visualData: actualIcon.visualData,
-          });
-
-          const payload = createExtractionPayload({
-            ref,
-            element,
-            extractedIcon: expectedIconForLLM,
-            evidence,
-          });
-          
-          console.log('Icon extraction (requires follow-up LLM call):', payload);
-          response.addResult(JSON.stringify(payload, null, 2));
-          return;
+          // EXTRACTION MODE: Extract icon data for LLM analysis
+          handleExtractionMode(ref, element, actualIcon, locatorString, response);
+        } else {
+          // VALIDATION MODE: Compare current icon with expected icon
+          handleValidationMode(ref, element, actualIcon, expectedIcon, ignoreColors, locatorString, response);
         }
-
-        // MODE 2: Validation (expectedIcon provided)
-        // Compare current icon with expected icon
-        
-        // First, check if image is loaded (for img types)
-        if (actualIcon.iconType === 'img' && !actualIcon.imageLoaded) {
-          const failureEvidence = createEvidence({
-            toolName: 'validate_icon',
-            locator: locatorString,
-            arguments: { expectedIcon, ignoreColors },
-            message: `Icon validation failed: Image not loaded or broken image at URL "${actualIcon.iconData}"`,
-          });
-
-          const failurePayload = createErrorPayload({
-            ref,
-            element,
-            expectedIcon,
-            actualIcon: {
-              iconType: actualIcon.iconType,
-              iconData: actualIcon.iconData,
-              imageLoaded: actualIcon.imageLoaded,
-            },
-            evidence: failureEvidence,
-          });
-
-          console.log('Icon validation failed - image not loaded:', failurePayload);
-          response.addResult(JSON.stringify(failurePayload, null, 2));
-          return;
-        }
-
-        // Compare icons using helper function
-        const { passed, comparisonDetails } = compareIcons(actualIcon, expectedIcon, ignoreColors);
-
-        // Generate evidence message using helper function
-        const evidenceMessage = generateEvidenceMessage(passed, actualIcon, expectedIcon, ignoreColors, comparisonDetails);
-
-        const evidence = createEvidence({
-          toolName: 'validate_icon',
-          locator: locatorString,
-          arguments: { expectedIcon, ignoreColors },
-          message: evidenceMessage,
-        });
-
-        const payload = createValidationPayload({
-          ref,
-          element,
-          expectedIcon,
-          actualIcon,
-          passed,
-          comparisonDetails,
-          evidence,
-        });
-
-        console.log('Validate icon:', payload);
-        response.addResult(JSON.stringify(payload, null, 2));
 
       } catch (error) {
-        const errorMessage = `Failed to validate icon for element "${element}". Error: ${error instanceof Error ? error.message : String(error)}`;
-        console.error('Validate icon error:', errorMessage);
-
-        let locatorString = '';
-        try {
-          const locator = await tab.refLocator({ ref, element });
-          locatorString = await generateLocatorString(ref, locator);
-        } catch {
-          locatorString = '';
-        }
-
-        const evidence = createEvidence({
-          toolName: 'validate_icon',
-          locator: locatorString,
-          arguments: { expectedIcon },
-          message: errorMessage,
-        });
-
-        const errorPayload = createErrorPayload({
-          ref,
-          element,
-          expectedIcon,
-          evidence,
-          error: error instanceof Error ? error.message : String(error),
-        });
-
-        response.addResult(JSON.stringify(errorPayload, null, 2));
+        // Handle any unexpected errors
+        await handleValidationError(ref, element, expectedIcon, error, tab, response);
       }
     });
   },
