@@ -315,7 +315,7 @@ interface ParsedCurlResponse {
 function parseCurlStderr(stderr: string): Partial<CurlResponse> {
   const result: Partial<CurlResponse> = {};
 
-  const statusMatch = stderr.match(/< HTTP\/\d\.\d (\d+)/);
+  const statusMatch = stderr.match(/< HTTP\/\d+(?:\.\d+)?\s+(\d+)/);
   if (statusMatch)
     result.statusCode = parseInt(statusMatch[1], 10);
 
