@@ -313,6 +313,135 @@ function generateExtractionMessage(actualIcon: ExtractedIcon, element: string): 
     return extractionMessage;
 }
 
+/**
+ * Create evidence object with command and message
+ */
+function createEvidence(params: {
+    toolName: string;
+    locator?: string;
+    mode?: string;
+    arguments?: any;
+    message: string;
+    visualData?: string | null;
+}): Array<{ command: string; message: string; visualData?: string | null }> {
+    const evidence: any = {
+        command: JSON.stringify({
+            toolName: params.toolName,
+            ...(params.mode && { mode: params.mode }),
+            ...(params.locator && { locator: params.locator }),
+            ...(params.arguments && { arguments: params.arguments }),
+        }),
+        message: params.message,
+    };
+    
+    if (params.visualData !== undefined) {
+        evidence.visualData = params.visualData;
+    }
+    
+    return [evidence];
+}
+
+/**
+ * Create error payload structure
+ */
+function createErrorPayload(params: {
+    ref: string;
+    element: string;
+    expectedIcon?: ExpectedIcon;
+    actualIcon?: any;
+    evidence: Array<{ command: string; message: string; visualData?: string | null }>;
+    error?: string;
+}) {
+    return {
+        ref: params.ref,
+        element: params.element,
+        ...(params.expectedIcon && { expectedIcon: params.expectedIcon }),
+        actualIcon: params.actualIcon || null,
+        summary: {
+            total: 1,
+            passed: 0,
+            failed: 1,
+            status: 'fail' as const,
+            evidence: params.evidence,
+        },
+        checks: [{
+            property: 'icon-validation',
+            operator: 'equals',
+            expected: params.expectedIcon || null,
+            actual: params.actualIcon || null,
+            result: 'fail' as const,
+        }],
+        ...(params.error && { error: params.error }),
+    };
+}
+
+/**
+ * Create success payload structure for extraction mode
+ */
+function createExtractionPayload(params: {
+    ref: string;
+    element: string;
+    extractedIcon: { iconType: IconType; iconData: string; colors: string[] };
+    evidence: Array<{ command: string; message: string; visualData?: string | null }>;
+}) {
+    return {
+        ref: params.ref,
+        element: params.element,
+        extractedIcon: params.extractedIcon,
+        summary: {
+            total: 1,
+            passed: 1,
+            failed: 0,
+            status: 'pass' as const,
+            evidence: params.evidence,
+            extractionMode: true,
+            requiresFollowUp: true,
+        },
+    };
+}
+
+/**
+ * Create success payload structure for validation mode
+ */
+function createValidationPayload(params: {
+    ref: string;
+    element: string;
+    expectedIcon: ExpectedIcon;
+    actualIcon: ExtractedIcon;
+    passed: boolean;
+    comparisonDetails: string[];
+    evidence: Array<{ command: string; message: string }>;
+}) {
+    return {
+        ref: params.ref,
+        element: params.element,
+        expectedIcon: params.expectedIcon,
+        actualIcon: {
+            iconType: params.actualIcon.iconType,
+            iconData: params.actualIcon.iconData.length > 200 
+                ? params.actualIcon.iconData.substring(0, 200) + '...' 
+                : params.actualIcon.iconData,
+            colors: params.actualIcon.colors,
+            imageLoaded: params.actualIcon.imageLoaded,
+        },
+        summary: {
+            total: 1,
+            passed: params.passed ? 1 : 0,
+            failed: params.passed ? 0 : 1,
+            status: params.passed ? 'pass' as const : 'fail' as const,
+            evidence: params.evidence,
+        },
+        checks: [{
+            property: 'icon-validation',
+            operator: 'equals',
+            expected: params.expectedIcon,
+            actual: params.actualIcon,
+            result: params.passed ? 'pass' as const : 'fail' as const,
+            comparisonDetails: params.comparisonDetails,
+        }],
+    };
+}
+
 const validateIconSchema = z.object({
   element: z.string().describe('Human-readable element description used to obtain permission to interact with the element'),
   ref: z.string().describe('Exact target element reference from the page snapshot'),
@@ -344,37 +473,20 @@ const validate_icon = defineTabTool({
           await expect(locator).toBeAttached({ timeout: ELEMENT_ATTACHED_TIMEOUT });
         } catch (error) {
           const locatorString = await generateLocatorString(ref, locator);
-          const evidence = [{
-            command: JSON.stringify({
-              toolName: 'validate_icon',
-              locator: locatorString,
-              arguments: {
-                expectedIcon: expectedIcon
-              }
-            }),
-            message: `UI element "${element}" not found`
-          }];
+          const evidence = createEvidence({
+            toolName: 'validate_icon',
+            locator: locatorString,
+            arguments: { expectedIcon },
+            message: `UI element "${element}" not found`,
+          });
 
-          const errorPayload = {
+          const errorPayload = createErrorPayload({
             ref,
             element,
             expectedIcon,
-            actualIcon: null,
-            summary: {
-              total: 1,
-              passed: 0,
-              failed: 1,
-              status: 'fail',
-              evidence,
-            },
-            checks: [{
-              property: 'icon-validation',
-              operator: 'equals',
-              expected: expectedIcon,
-              actual: null,
-              result: 'fail',
-            }],
-          };
+            evidence,
+          });
+          
           console.log('Validate icon - element not found:', errorPayload);
           response.addResult(JSON.stringify(errorPayload, null, 2));
           return;
@@ -394,27 +506,19 @@ const validate_icon = defineTabTool({
         if (!expectedIcon) {
           // Check if image loaded successfully
           if (!actualIcon.imageLoaded) {
-            const failureEvidence = [{
-              command: JSON.stringify({
-                toolName: 'validate_icon',
-                mode: 'extraction',
-                locator: locatorString,
-                arguments: { ref, element }
-              }),
-              message: `Failed to extract icon from element "${element}": Image not loaded or broken image detected.`
-            }];
+            const failureEvidence = createEvidence({
+              toolName: 'validate_icon',
+              mode: 'extraction',
+              locator: locatorString,
+              arguments: { ref, element },
+              message: `Failed to extract icon from element "${element}": Image not loaded or broken image detected.`,
+            });
 
-            const failurePayload = {
+            const failurePayload = createErrorPayload({
               ref,
               element,
-              summary: {
-                total: 1,
-                passed: 0,
-                failed: 1,
-                status: 'fail',
-                evidence: failureEvidence,
-              },
-            };
+              evidence: failureEvidence,
+            });
             
             console.log('Icon extraction failed - image not loaded:', failurePayload);
             response.addResult(JSON.stringify(failurePayload, null, 2));
@@ -431,31 +535,21 @@ const validate_icon = defineTabTool({
           // Build message based on icon type
           const extractionMessage = generateExtractionMessage(actualIcon, element);
 
-          const evidence = [{
-            command: JSON.stringify({
-              toolName: 'validate_icon',
-              mode: 'extraction',
-              locator: locatorString,
-              arguments: { ref, element }
-            }),
+          const evidence = createEvidence({
+            toolName: 'validate_icon',
+            mode: 'extraction',
+            locator: locatorString,
+            arguments: { ref, element },
             message: extractionMessage,
-            visualData: actualIcon.visualData  // Only populated for SVG icons
-          }];
+            visualData: actualIcon.visualData,
+          });
 
-          const payload = {
+          const payload = createExtractionPayload({
             ref,
             element,
             extractedIcon: expectedIconForLLM,
-            summary: {
-              total: 1,
-              passed: 1,
-              failed: 0,
-              status: 'pass',
-              evidence,
-              extractionMode: true,
-              requiresFollowUp: true,
-            },
-          };
+            evidence,
+          });
           
           console.log('Icon extraction (requires follow-up LLM call):', payload);
           response.addResult(JSON.stringify(payload, null, 2));
@@ -467,19 +561,14 @@ const validate_icon = defineTabTool({
         
         // First, check if image is loaded (for img types)
         if (actualIcon.iconType === 'img' && !actualIcon.imageLoaded) {
-          const failureEvidence = [{
-            command: JSON.stringify({
-              toolName: 'validate_icon',
-              locator: locatorString,
-              arguments: {
-                expectedIcon: expectedIcon,
-                ignoreColors: ignoreColors
-              }
-            }),
-            message: `Icon validation failed: Image not loaded or broken image at URL "${actualIcon.iconData}"`
-          }];
+          const failureEvidence = createEvidence({
+            toolName: 'validate_icon',
+            locator: locatorString,
+            arguments: { expectedIcon, ignoreColors },
+            message: `Icon validation failed: Image not loaded or broken image at URL "${actualIcon.iconData}"`,
+          });
 
-          const failurePayload = {
+          const failurePayload = createErrorPayload({
             ref,
             element,
             expectedIcon,
@@ -488,14 +577,8 @@ const validate_icon = defineTabTool({
               iconData: actualIcon.iconData,
               imageLoaded: actualIcon.imageLoaded,
             },
-            summary: {
-              total: 1,
-              passed: 0,
-              failed: 1,
-              status: 'fail',
-              evidence: failureEvidence,
-            },
-          };
+            evidence: failureEvidence,
+          });
 
           console.log('Icon validation failed - image not loaded:', failurePayload);
           response.addResult(JSON.stringify(failurePayload, null, 2));
@@ -508,44 +591,22 @@ const validate_icon = defineTabTool({
         // Generate evidence message using helper function
         const evidenceMessage = generateEvidenceMessage(passed, actualIcon, expectedIcon, ignoreColors, comparisonDetails);
 
-        const evidence = [{
-          command: JSON.stringify({
-            toolName: 'validate_icon',
-            locator: locatorString,
-            arguments: {
-              expectedIcon: expectedIcon,
-              ignoreColors: ignoreColors
-            }
-          }),
-          message: evidenceMessage
-        }];
+        const evidence = createEvidence({
+          toolName: 'validate_icon',
+          locator: locatorString,
+          arguments: { expectedIcon, ignoreColors },
+          message: evidenceMessage,
+        });
 
-        const payload = {
+        const payload = createValidationPayload({
           ref,
           element,
           expectedIcon,
-          actualIcon: {
-            iconType: actualIcon.iconType,
-            iconData: actualIcon.iconData.length > 200 ? actualIcon.iconData.substring(0, 200) + '...' : actualIcon.iconData,
-            colors: actualIcon.colors,
-            imageLoaded: actualIcon.imageLoaded,
-          },
-          summary: {
-            total: 1,
-            passed: passed ? 1 : 0,
-            failed: passed ? 0 : 1,
-            status: passed ? 'pass' : 'fail',
-            evidence,
-          },
-          checks: [{
-            property: 'icon-validation',
-            operator: 'equals',
-            expected: expectedIcon,
-            actual: actualIcon,
-            result: passed ? 'pass' : 'fail',
-            comparisonDetails: comparisonDetails,
-          }],
-        };
+          actualIcon,
+          passed,
+          comparisonDetails,
+          evidence,
+        });
 
         console.log('Validate icon:', payload);
         response.addResult(JSON.stringify(payload, null, 2));
@@ -562,38 +623,20 @@ const validate_icon = defineTabTool({
           locatorString = '';
         }
 
-        const evidence = [{
-          command: JSON.stringify({
-            toolName: 'validate_icon',
-            locator: locatorString,
-            arguments: {
-              expectedIcon: expectedIcon
-            }
-          }),
-          message: errorMessage
-        }];
+        const evidence = createEvidence({
+          toolName: 'validate_icon',
+          locator: locatorString,
+          arguments: { expectedIcon },
+          message: errorMessage,
+        });
 
-        const errorPayload = {
+        const errorPayload = createErrorPayload({
           ref,
           element,
           expectedIcon,
-          actualIcon: null,
-          summary: {
-            total: 1,
-            passed: 0,
-            failed: 1,
-            status: 'fail',
-            evidence,
-          },
-          checks: [{
-            property: 'icon-validation',
-            operator: 'equals',
-            expected: expectedIcon,
-            actual: null,
-            result: 'fail',
-          }],
+          evidence,
           error: error instanceof Error ? error.message : String(error),
-        };
+        });
 
         response.addResult(JSON.stringify(errorPayload, null, 2));
       }
