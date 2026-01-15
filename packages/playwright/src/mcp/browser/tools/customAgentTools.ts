@@ -658,13 +658,11 @@ const baseDomInputSchema = z.object({
 // Individual assertion argument schemas
 const toBeAttachedArgsSchema = z.object({
   options: z.object({
-    attached: z.boolean().optional().describe('Whether the element should be attached to Document or ShadowRoot'),
   }).optional(),
 });
 
 const toBeCheckedArgsSchema = z.object({
   options: z.object({
-    checked: z.boolean().optional().describe('Provides state to assert for. Asserts for input to be checked by default. This option can\'t be used when indeterminate is set to true.'),
     indeterminate: z.boolean().optional().describe('Asserts that the element is in the indeterminate (mixed) state. Only supported for checkboxes and radio buttons. This option can\'t be true when checked is provided.'),
   }).optional(),
 });
@@ -676,7 +674,6 @@ const toBeDisabledArgsSchema = z.object({
 
 const toBeEditableArgsSchema = z.object({
   options: z.object({
-    editable: z.boolean().optional().describe('Whether the element should be editable'),
   }).optional(),
 });
 
@@ -687,7 +684,6 @@ const toBeEmptyArgsSchema = z.object({
 
 const toBeEnabledArgsSchema = z.object({
   options: z.object({
-    enabled: z.boolean().optional().describe('Whether the element should be enabled'),
   }).optional(),
 });
 
@@ -709,7 +705,6 @@ const toBeInViewportArgsSchema = z.object({
 
 const toBeVisibleArgsSchema = z.object({
   options: z.object({
-    visible: z.boolean().optional().describe('Whether the element should be visible'),
   }).optional(),
 });
 
