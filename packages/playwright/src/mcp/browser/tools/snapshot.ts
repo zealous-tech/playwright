@@ -128,6 +128,9 @@ const click = defineTabTool({
         throw e;
       }
     });
+
+    // Wait for page load to complete after click
+    await tab.page.waitForLoadState('load');
   },
 });
 
