@@ -39,7 +39,8 @@ const browserTabs = defineTool({
         return;
       }
       case 'new': {
-        await context.newTab();
+        const tab = await context.newTab();
+        await tab.page.waitForLoadState('load');
         response.setIncludeTabs();
         return;
       }
@@ -51,7 +52,8 @@ const browserTabs = defineTool({
       case 'select': {
         if (params.index === undefined)
           throw new Error('Tab index is required');
-        await context.selectTab(params.index);
+        const tab = await context.selectTab(params.index);
+        await tab.page.waitForLoadState('load');
         response.setIncludeSnapshot();
         return;
       }
