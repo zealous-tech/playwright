@@ -2215,42 +2215,37 @@ const validate_tab_exist = defineTabTool({
     title: 'Validate Tab Exists',
     description: 'Check if a browser tab with the specified URL exists or does not exist. Use matchType "exist" to verify tab exists, or "not-exist" to verify tab does not exist. exactMatch is ignored when matchType is "not-exist". Optionally validate if the found tab is the current active tab with isCurrent parameter.',
     inputSchema: z.object({
-      url: z.string().describe('URL to check for in existing browser tabs'),
+      url: z.string().describe('URL or regex to check for in existing browser tabs'),
+      title: z.string().optional().describe('Page title or regex to validate'),
       matchType: z.enum(['exist', 'not-exist']).describe('Whether to check if tab exists or does not exist'),
-      exactMatch: z.boolean().optional().default(true).describe('Whether to require exact URL match (true) or partial match (false). Ignored when matchType is "not-exist"'),
+      exactMatch: z.boolean().optional().default(true).describe('Whether to require exact URL match (true) or partial match (false). Ignored when regex is used'),
       isCurrent: z.boolean().optional().describe('If true, also validates that the found tab is the current active tab'),
     }),
     type: 'readOnly',
   },
   handle: async (tab, params, response) => {
-    const { url, matchType, exactMatch, isCurrent } = params;
+    const { url, title, matchType, exactMatch, isCurrent } = params;
 
     try {
       // Get all tabs information from context
       const context = tab.context;
       const allTabs = context.tabs();
+      const isUrlRegex =
+        url.startsWith('/') && url.endsWith('/') && url.length > 2;
+      const urlRegex = isUrlRegex ? new RegExp(url.slice(1, -1)) : null;
 
       // Extract tab info using the correct page methods
-      const tabsWithInfo = await Promise.all(allTabs.map(async (tabItem: any, index: number) => {
-        try {
-          // Get URL and title from page object
-          const tabUrl = await tabItem.page.url() || 'unknown';
-          const tabTitle = await tabItem.page.title() || 'Unknown';
-          tab.page.getByText;
-          return {
-            index,
-            header: tabTitle,
-            url: tabUrl
-          };
-        } catch (error) {
-          // Fallback if we can't get tab info
-          return {
-            index,
-            header: 'Unknown',
-            url: 'unknown'
-          };
-        }
-      }));
+      const tabsWithInfo = await Promise.all(
+          allTabs.map(async (tabItem: any, index: number) => {
+            try {
+              const tabUrl = await tabItem.page.url();
+              const tabTitle = await tabItem.page.title();
+              return { index, header: tabTitle, url: tabUrl };
+            } catch {
+              return { index, header: 'Unknown', url: 'unknown' };
+            }
+          })
+      );
 
       console.log('All tabs info:', tabsWithInfo);
 
@@ -2266,15 +2261,19 @@ const validate_tab_exist = defineTabTool({
       let searchType = '';
 
       // Search for tab with matching URL
-      if (exactMatch) {
-        // Exact URL match
-        foundTab = tabsWithInfo.find((tab: any) => tab.url === url);
-        searchType = 'exact';
-      } else {
-        // Partial URL match
-        foundTab = tabsWithInfo.find((tab: any) => tab.url.includes(url) || url.includes(tab.url));
-        searchType = 'partial';
-      }
+      foundTab = tabsWithInfo.find((tabInfo: any) => {
+        const urlMatch = isUrlRegex
+          ? urlRegex!.test(tabInfo.url)
+          : exactMatch
+            ? tabInfo.url === url
+            : tabInfo.url.includes(url) || url.includes(tabInfo.url);
+
+        const titleMatch = title ? tabInfo.header === title : true;
+
+        return urlMatch && titleMatch;
+      });
+
+      searchType = isUrlRegex ? 'regex' : exactMatch ? 'exact' : 'partial';
 
       const isFound = !!foundTab;
 
@@ -2306,19 +2305,21 @@ const validate_tab_exist = defineTabTool({
           currentInfo = ` Current tab check: ${isCurrent ? 'expected current tab not found' : 'expected non-current tab not found'}.`;
 
       }
+      const titleInfo = title ? `, title: "${title}"` : '';
+      const titleMessage = title ? ` and TITLE "${title}"` : '';
 
       if (matchType === 'exist') {
         if (isFound && foundTab) {
-          evidence = `Found tab with ${searchType} URL match: "${(foundTab as any).url}" (index: ${(foundTab as any).index}, header: "${(foundTab as any).header}")${currentInfo}`;
+          evidence = `Found tab with ${searchType} URL match: "${(foundTab as any).url}" (index: ${(foundTab as any).index}, header: "${(foundTab as any).header}"${titleInfo})${currentInfo}`;
         } else {
           const availableUrls = tabsWithInfo.map((t: any) => (t as any).url).join(', ');
-          evidence = `Tab with URL "${url}" not found. Available tabs: ${availableUrls}${currentInfo}`;
+          evidence = `Tab with URL "${url}"${titleMessage} not found. Available tabs: ${availableUrls}${currentInfo}`;
         }
       } else { // matchType === 'not-exist'
         if (!isFound)
-          evidence = `Tab with URL "${url}" does not exist (as expected). Available tabs: ${tabsWithInfo.map((t: any) => (t as any).url).join(', ')}${currentInfo}`;
+          evidence = `Tab with URL "${url}"${titleMessage} does not exist (as expected). Available tabs: ${tabsWithInfo.map((t: any) => (t as any).url).join(', ')}${currentInfo}`;
         else
-          evidence = `Tab with URL "${url}" exists (unexpected). Found: "${(foundTab as any).url}" (index: ${(foundTab as any).index}, header: "${(foundTab as any).header}")${currentInfo}`;
+          evidence = `Tab with URL "${url}"${titleMessage} exists (unexpected). Found: "${(foundTab as any).url}" (index: ${(foundTab as any).index}, header: "${(foundTab as any).header}${titleInfo})")${currentInfo}`;
 
       }
 
@@ -2328,6 +2329,7 @@ const validate_tab_exist = defineTabTool({
           toolName: 'validate_tab_exist',
           arguments: {
             url,
+            title,
             matchType,
             exactMatch,
             isCurrent
@@ -2338,6 +2340,7 @@ const validate_tab_exist = defineTabTool({
 
       const payload = {
         url,
+        title,
         matchType,
         exactMatch,
         isCurrent,
@@ -2374,6 +2377,7 @@ const validate_tab_exist = defineTabTool({
           toolName: 'validate_tab_exist',
           arguments: {
             url,
+            title,
             matchType,
             exactMatch,
             isCurrent
@@ -2384,6 +2388,7 @@ const validate_tab_exist = defineTabTool({
 
       const errorPayload = {
         url,
+        title,
         exactMatch,
         summary: {
           total: 1,
