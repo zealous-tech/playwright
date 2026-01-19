@@ -1145,4 +1145,251 @@ export function getXPathCode(): string {
   `.trim();
 }
 
+// ==================== VALIDATION HELPER TYPES ====================
+
+export interface ValidationResult {
+  isPass: boolean;
+  evidenceMessage: string;
+  expectedValue?: any;
+  actualValue?: any;
+}
+
+export interface ValidationPayload {
+  mode: 'data' | 'element';
+  ref?: string;
+  element?: string;
+  summary: {
+    total: number;
+    passed: number;
+    failed: number;
+    status: 'pass' | 'fail';
+    evidence: Array<{ command: string; message: string }>;
+  };
+  checks: Array<{
+    property: string;
+    operator: string;
+    expected: any;
+    actual: any;
+    result: 'pass' | 'fail';
+  }>;
+  result: 'pass' | 'fail';
+  jsCode: string;
+  dataPreview?: string;
+  expectedValue?: any;
+  actualValue?: any;
+  error?: string;
+}
+
+// ==================== VALIDATION HELPER FUNCTIONS ====================
+
+/**
+ * Parse data input - handles string JSON or raw data
+ */
+export function parseDataInput(data: any): any {
+  if (typeof data === 'string') {
+    try {
+      return JSON.parse(data);
+    } catch {
+      return data; // Keep as-is if not valid JSON
+    }
+  }
+  return data;
+}
+
+/**
+ * Execute JavaScript validation code on data (for data mode)
+ */
+export function executeDataValidation(code: string, inputData: any): any {
+  try {
+    const func = new Function('data', `
+      'use strict';
+      ${code}
+    `);
+    return func(inputData);
+  } catch (error) {
+    return {
+      error: error instanceof Error ? error.message : String(error),
+      type: 'execution_error'
+    };
+  }
+}
+
+/**
+ * Parse validation result - handles simple 'pass'/'fail' or rich object
+ * Returns normalized result with message, expected, actual values
+ */
+export function parseValidationResult(
+  result: any,
+  elementDescription?: string
+): ValidationResult {
+  let isPass: boolean;
+  let evidenceMessage: string;
+  let expectedValue: any = undefined;
+  let actualValue: any = undefined;
+
+  // Check if result is a rich object with message
+  if (result && typeof result === 'object' && 'result' in result) {
+    // Rich result object: { result: 'pass'|'fail', message: '...', expected: ..., actual: ... }
+    isPass = result.result === 'pass';
+    evidenceMessage = result.message || (isPass ? 'Validation passed' : 'Validation failed');
+    expectedValue = result.expected;
+    actualValue = result.actual;
+
+    // Enhance message with expected/actual if provided but no custom message
+    if (expectedValue !== undefined && actualValue !== undefined && !result.message) {
+      const expStr = typeof expectedValue === 'object' ? JSON.stringify(expectedValue) : String(expectedValue);
+      const actStr = typeof actualValue === 'object' ? JSON.stringify(actualValue) : String(actualValue);
+      const desc = elementDescription || 'Data';
+      evidenceMessage = isPass
+        ? `✓ ${desc}: Expected "${expStr}" and found "${actStr}"`
+        : `✗ ${desc}: Expected "${expStr}" but found "${actStr}"`;
+    }
+  } else if (result && typeof result === 'object' && 'error' in result) {
+    // Error object
+    isPass = false;
+    const desc = elementDescription ? `on "${elementDescription}"` : '';
+    evidenceMessage = `Error executing validation${desc}: ${result.error}`;
+    actualValue = result.error;
+  } else {
+    // Simple 'pass' or 'fail' string
+    isPass = result === 'pass';
+    const desc = elementDescription ? `on "${elementDescription}"` : '';
+    evidenceMessage = isPass
+      ? `✓ Validation passed${desc}`
+      : `✗ Validation failed${desc}. Result: ${result}`;
+  }
+
+  return { isPass, evidenceMessage, expectedValue, actualValue };
+}
+
+/**
+ * Create validation evidence object
+ */
+export function createValidationEvidence(
+  mode: 'data' | 'element',
+  jsCode: string,
+  evidenceMessage: string,
+  options?: {
+    expectedValue?: any;
+    actualValue?: any;
+    dataType?: string;
+    element?: string;
+    locatorString?: string;
+  }
+): { command: string; message: string } {
+  const command: any = {
+    toolName: 'default_validation',
+    mode,
+    arguments: {
+      jsCode,
+      ...(options?.expectedValue !== undefined && { expectedValue: options.expectedValue }),
+      ...(options?.actualValue !== undefined && { actualValue: options.actualValue }),
+      ...(options?.dataType && { dataType: options.dataType }),
+    },
+  };
+
+  if (mode === 'element' && options?.element) {
+    command.locators = [{
+      element: options.element,
+      locatorString: options.locatorString || ''
+    }];
+  }
+
+  return {
+    command: JSON.stringify(command),
+    message: evidenceMessage
+  };
+}
+
+/**
+ * Build validation payload for response
+ */
+export function buildValidationPayload(
+  mode: 'data' | 'element',
+  jsCode: string,
+  validationResult: ValidationResult,
+  evidence: { command: string; message: string }[],
+  options?: {
+    ref?: string;
+    element?: string;
+    dataPreview?: string;
+    error?: string;
+  }
+): ValidationPayload {
+  const { isPass, expectedValue, actualValue } = validationResult;
+  const status = isPass ? 'pass' : 'fail';
+  const passed = isPass ? 1 : 0;
+  const failed = isPass ? 0 : 1;
+
+  const payload: ValidationPayload = {
+    mode,
+    summary: {
+      total: 1,
+      passed,
+      failed,
+      status,
+      evidence,
+    },
+    checks: [{
+      property: mode === 'data' ? 'data_validation' : 'validation',
+      operator: 'equals',
+      expected: expectedValue !== undefined ? expectedValue : 'pass',
+      actual: actualValue !== undefined ? actualValue : status,
+      result: status,
+    }],
+    result: status,
+    jsCode,
+  };
+
+  // Add optional fields
+  if (options?.ref) payload.ref = options.ref;
+  if (options?.element) payload.element = options.element;
+  if (options?.dataPreview) payload.dataPreview = options.dataPreview;
+  if (options?.error) payload.error = options.error;
+  if (expectedValue !== undefined) payload.expectedValue = expectedValue;
+  if (actualValue !== undefined) payload.actualValue = actualValue;
+
+  return payload;
+}
+
+/**
+ * Build error payload for validation failures
+ */
+export function buildValidationErrorPayload(
+  mode: 'data' | 'element',
+  jsCode: string,
+  errorMessage: string,
+  evidence: { command: string; message: string }[],
+  options?: {
+    ref?: string;
+    element?: string;
+  }
+): ValidationPayload {
+  const payload: ValidationPayload = {
+    mode,
+    summary: {
+      total: 1,
+      passed: 0,
+      failed: 1,
+      status: 'fail',
+      evidence,
+    },
+    checks: [{
+      property: mode === 'data' ? 'data_validation' : 'javascript_execution',
+      operator: 'execute',
+      expected: 'pass',
+      actual: errorMessage,
+      result: 'fail',
+    }],
+    result: 'fail',
+    jsCode,
+    error: errorMessage,
+  };
+
+  if (options?.ref) payload.ref = options.ref;
+  if (options?.element) payload.element = options.element;
+
+  return payload;
+}
+
 export { pickActualValue, parseRGBColor, isColorInRange, getAllComputedStylesDirect, hasAlertDialog, getAlertDialogText, performRegexCheck, performRegexExtract, performRegexMatch, compareValues,convertToValidJson, getValueByJsonPath, checkElementVisibilityUnique, checkTextVisibilityInAllFrames, getElementErrorMessage, generateLocatorString, collectAllFrames };
