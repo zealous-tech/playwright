@@ -747,46 +747,46 @@ async function checkElementVisibilityUnique(page: any, role: string, accessibleN
  * Check text visibility with parallel recursive search across all frames
  * Returns all search results without counting logic
  */
-async function checkTextVisibilityInAllFrames(page: any, text: string, matchType: 'exact' | 'contains' | 'not-contains' = 'contains') {
+async function checkTextVisibilityInAllFrames(
+  page: any,
+  text: string,
+  matchType: 'exact' | 'contains' | 'not-contains' = 'contains'
+) {
   const searchPromises = [];
-  
-  // Add search in main frame
-  let mainLocator;
-  if (matchType === 'exact') {
-    mainLocator = page.getByText(text, { exact: true });
-  } else {
-    mainLocator = page.getByText(text);
-  }
-  
+
+  let mainLocator =
+    matchType === 'exact'
+      ? page.getByText(text, { exact: true })
+      : page.getByText(text);
+
   searchPromises.push(
-    expect(mainLocator).toBeVisible()
-      .then(() => ({ found: true, frame: 'main', level: 0 }))
-      .catch(() => ({ found: false, frame: 'main', level: 0 }))
+    mainLocator.count().then(count => ({
+      found: count > 0,
+      count,
+      frame: 'main',
+      level: 0,
+    }))
   );
-  
-  // Recursively collect all iframes at all levels
+
   const allFrames = await collectAllFrames(page, 0);
-  
-  // Create promises for all frames
+
   for (const frameInfo of allFrames) {
-    let frameLocator;
-    if (matchType === 'exact') {
-      frameLocator = frameInfo.frame.getByText(text, { exact: true });
-    } else {
-      frameLocator = frameInfo.frame.getByText(text);
-    }
-    
+    let frameLocator =
+      matchType === 'exact'
+        ? frameInfo.frame.getByText(text, { exact: true })
+        : frameInfo.frame.getByText(text);
+
     searchPromises.push(
-      expect(frameLocator).toBeVisible({timeout:2000})
-        .then(() => ({ found: true, frame: frameInfo.name, level: frameInfo.level }))
-        .catch(() => ({ found: false, frame: frameInfo.name, level: frameInfo.level }))
+      frameLocator.count().then(count => ({
+        found: count > 0,
+        count,
+        frame: frameInfo.name,
+        level: frameInfo.level,
+      }))
     );
   }
-  
-  // Wait for all search results in parallel
-  const results = await Promise.all(searchPromises);
-  
-  return results;
+
+  return Promise.all(searchPromises);
 }
 
 /**

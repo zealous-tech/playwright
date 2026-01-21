@@ -2534,9 +2534,9 @@ const validate_text_in_whole_page = defineTabTool({
         const results = await checkTextVisibilityInAllFrames(tab.page, expectedText, matchType);
 
         // Count found results
-        const foundResults = results.filter(result => result.found);
-        actualCount = foundResults.length;
-        foundFrames = foundResults.map(result => result.frame);
+        const foundResults = results.filter(r => r.found);
+        actualCount = foundResults.reduce((sum, r) => sum + (r.count || 0), 0);
+        foundFrames = foundResults.map(r => `${r.frame} (${r.count})`);
 
         // Determine if test passes based on matchType
         if (matchType === 'exact' || matchType === 'contains') {
