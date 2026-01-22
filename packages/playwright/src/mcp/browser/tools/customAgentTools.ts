@@ -17,7 +17,7 @@ import { z } from 'zod';
 //@ZEALOUS UPDATE
 import * as jp from 'jsonpath';
 import { defineTabTool, defineTool } from './tool.js';
-import { getAllComputedStylesDirect, pickActualValue, parseRGBColor, isColorInRange,runCommandClean, compareValues, checkElementVisibilityUnique, checkTextVisibilityInAllFrames, getElementErrorMessage, generateLocatorString, getAssertionMessage, getAssertionEvidence, getXPathCode, collectAllFrames } from './helperFunctions.js';
+import { getAllComputedStylesDirect, pickActualValue, parseRGBColor, isColorInRange,runCommandClean, compareValues, checkElementVisibilityUnique, checkTextExistenceInAllFrames, getElementErrorMessage, generateLocatorString, getAssertionMessage, getAssertionEvidence, getXPathCode, collectAllFrames } from './helperFunctions.js';
 import { generateLocator } from './utils.js';
 import { expect } from '@zealous-tech/playwright/test';
 import { asLocator } from 'playwright-core/lib/utils';
@@ -2530,8 +2530,8 @@ const validate_text_in_whole_page = defineTabTool({
       let foundFrames: string[] = [];
 
       try {
-        // Use checkTextVisibilityInAllFrames to search across all frames
-        const results = await checkTextVisibilityInAllFrames(tab.page, expectedText, matchType);
+        // Use checkTextExistenceInAllFrames to search across all frames
+        const results = await checkTextExistenceInAllFrames(tab.page, expectedText, matchType);
 
         // Count found results
         const foundResults = results.filter(r => r.found);
@@ -2540,12 +2540,9 @@ const validate_text_in_whole_page = defineTabTool({
 
         // Determine if test passes based on matchType
         if (matchType === 'exact' || matchType === 'contains') {
-          if (actualCount === 1) {
+          if (actualCount > 0) {
             passed = true;
-            evidenceMessage = `The text "${expectedText}" was found once on the page using ${matchType} matching in frame: ${foundFrames[0]}.`;
-          } else if (actualCount > 1) {
-            passed = false;
-            evidenceMessage = `The text "${expectedText}" appeared ${actualCount} times on the page using ${matchType} matching in frames: ${foundFrames.join(', ')}. Expected only one occurrence.`;
+            evidenceMessage = `The text "${expectedText}" appeared ${actualCount} time(s) on the page using ${matchType} matching in frame(s): ${foundFrames.join(', ')}.`;
           } else {
             passed = false;
             evidenceMessage = `The text "${expectedText}" was not found on the page using ${matchType} matching.`;
@@ -2596,7 +2593,7 @@ const validate_text_in_whole_page = defineTabTool({
           result: passed ? 'pass' : 'fail',
         }],
         scope: 'whole-page-all-frames',
-        searchMethod: 'checkTextVisibilityInAllFrames',
+        searchMethod: 'checkTextExistenceInAllFrames',
       };
 
       console.log('Validate text in whole page:', payload);

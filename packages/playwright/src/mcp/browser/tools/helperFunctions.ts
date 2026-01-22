@@ -747,11 +747,7 @@ async function checkElementVisibilityUnique(page: any, role: string, accessibleN
  * Check text visibility with parallel recursive search across all frames
  * Returns all search results without counting logic
  */
-async function checkTextVisibilityInAllFrames(
-  page: any,
-  text: string,
-  matchType: 'exact' | 'contains' | 'not-contains' = 'contains'
-) {
+async function checkTextExistenceInAllFrames(page: any, text: string, matchType: 'exact' | 'contains' | 'not-contains' = 'contains') {
   const searchPromises = [];
 
   let mainLocator =
@@ -1145,4 +1141,4 @@ export function getXPathCode(): string {
   `.trim();
 }
 
-export { pickActualValue, parseRGBColor, isColorInRange, getAllComputedStylesDirect, hasAlertDialog, getAlertDialogText, performRegexCheck, performRegexExtract, performRegexMatch, compareValues,convertToValidJson, getValueByJsonPath, checkElementVisibilityUnique, checkTextVisibilityInAllFrames, getElementErrorMessage, generateLocatorString, collectAllFrames };
+export { pickActualValue, parseRGBColor, isColorInRange, getAllComputedStylesDirect, hasAlertDialog, getAlertDialogText, performRegexCheck, performRegexExtract, performRegexMatch, compareValues,convertToValidJson, getValueByJsonPath, checkElementVisibilityUnique, checkTextExistenceInAllFrames, getElementErrorMessage, generateLocatorString, collectAllFrames };
