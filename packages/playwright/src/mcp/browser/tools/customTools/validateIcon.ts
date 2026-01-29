@@ -66,6 +66,19 @@ function extractIconFunction(element: Element, options: { includeColors: boolean
         return imgElement.complete && imgElement.naturalWidth > 0 && imgElement.naturalHeight > 0;
     };
 
+    // Helper: Verify if a URL image is loaded (for background-image and content: url())
+    const verifyUrlImageLoaded = (url: string): boolean => {
+        // Skip data URIs - they're always "loaded"
+        if (url.startsWith('data:')) {
+            return true;
+        }
+        // Create a temporary image to check if URL is accessible/cached
+        const img = new Image();
+        img.src = url;
+        // If image is in browser cache, complete will be true and dimensions will be available
+        return img.complete && img.naturalWidth > 0 && img.naturalHeight > 0;
+    };
+
     // Helper: Extract colors from an element's computed styles
     const extractColors = (el: Element): string[] => {
         const colors = new Set<string>();
@@ -150,27 +163,81 @@ function extractIconFunction(element: Element, options: { includeColors: boolean
         visualData = null;
     }
     else {
-        const computedStyle = window.getComputedStyle(element);
-        const backgroundImage = computedStyle.backgroundImage;
-
-        if (backgroundImage && backgroundImage !== 'none') {
-            const urlMatch = backgroundImage.match(/url\(['"]?([^'"]*?)['"]?\)/);
-            if (urlMatch && urlMatch[1]) {
-                const bgUrl = urlMatch[1];
-                if (bgUrl.startsWith('data:')) {
-                    iconType = 'datauri';
-                    iconData = bgUrl;
-                } else {
-                    iconType = 'background';
-                    iconData = bgUrl;
+        // Check element and parent chain for background-image (up to 5 levels)
+        // This handles cases where LLM selects text inside an element with background
+        let bgElement: Element | null = element;
+        let bgUrl: string | null = null;
+        let levelsChecked = 0;
+        const maxLevels = 5;
+        
+        while (bgElement && levelsChecked < maxLevels) {
+            const computedStyle = window.getComputedStyle(bgElement);
+            const backgroundImage = computedStyle.backgroundImage;
+            
+            if (backgroundImage && backgroundImage !== 'none') {
+                const urlMatch = backgroundImage.match(/url\(['"]?([^'"]*?)['"]?\)/);
+                if (urlMatch && urlMatch[1]) {
+                    bgUrl = urlMatch[1];
+                    break;
                 }
-                imageLoaded = true;  // Assume background images are loaded
-                if (options.includeColors) {
-                    colors = extractColors(element);
+            }
+            bgElement = bgElement.parentElement;
+            levelsChecked++;
+        }
+        
+        if (bgUrl) {
+            if (bgUrl.startsWith('data:')) {
+                iconType = 'datauri';
+                iconData = bgUrl;
+                imageLoaded = true;  // Data URIs are always loaded
+            } else {
+                iconType = 'background';
+                iconData = bgUrl;
+                // SVG files may have naturalWidth/Height = 0 if they use viewBox
+                const isSvg = bgUrl.toLowerCase().endsWith('.svg') || bgUrl.includes('.svg?');
+                if (isSvg) {
+                    // For SVG backgrounds, trust they're loaded if page rendered
+                    imageLoaded = true;
+                } else {
+                    imageLoaded = verifyUrlImageLoaded(bgUrl);
+                }
+            }
+            if (options.includeColors) {
+                colors = extractColors(bgElement || element);
+            }
+        }
+        
+        // Check for ::before and ::after pseudo-elements with content: url(...)
+        if (iconType === 'unknown') {
+            const beforeContent = window.getComputedStyle(element, '::before').content;
+            const afterContent = window.getComputedStyle(element, '::after').content;
+            
+            // Check ::before first, then ::after
+            for (const [pseudoContent, pseudoName] of [[beforeContent, '::before'], [afterContent, '::after']] as const) {
+                if (pseudoContent && pseudoContent !== 'none' && pseudoContent !== 'normal') {
+                    // Check if content is url(...)
+                    const urlMatch = pseudoContent.match(/url\(['"]?([^'"]*?)['"]?\)/);
+                    if (urlMatch && urlMatch[1]) {
+                        const contentUrl = urlMatch[1];
+                        if (contentUrl.startsWith('data:')) {
+                            iconType = 'datauri';
+                            iconData = contentUrl;
+                            imageLoaded = true;  // Data URIs are always loaded
+                        } else {
+                            iconType = 'img';  // Treat content: url() as image type
+                            iconData = contentUrl;
+                            imageLoaded = verifyUrlImageLoaded(contentUrl);  // Actually verify the image is loaded
+                        }
+                        if (options.includeColors) {
+                            colors = extractColors(element);
+                        }
+                        break;  // Found an image, stop checking
+                    }
                 }
             }
         }
-        else {
+        
+        if (iconType === 'unknown') {
             const classList = Array.from(element.classList);
             const iconFontPatterns = [
                 /^fa-/, /^fas-/, /^far-/, /^fal-/, /^fab-/,
@@ -250,11 +317,20 @@ function compareIcons(
             passed = false;
             comparisonDetails.push(`SVG content mismatch`);
         }
+    } else if (actualIcon.iconType === 'font') {
+        // For font icons: Compare only class names, ignore ::before content
+        // The ::before content (unicode glyph) can get corrupted during JSON serialization
+        const actualClasses = actualIcon.iconData.split(':')[0];
+        const expectedClasses = expectedIcon.iconData.split(':')[0];
+        if (actualClasses !== expectedClasses) {
+            passed = false;
+            comparisonDetails.push(`Font icon classes mismatch: expected "${expectedClasses}", got "${actualClasses}"`);
+        }
     } else {
-        // For other types (font, datauri): Direct comparison
+        // For other types (datauri): Direct comparison
         if (actualIcon.iconData !== expectedIcon.iconData) {
             passed = false;
-            comparisonDetails.push(`Icon data mismatch`);
+            comparisonDetails.push(`Icon data mismatch: expected "${expectedIcon.iconData}", got "${actualIcon.iconData}"`);
         }
     }
 
