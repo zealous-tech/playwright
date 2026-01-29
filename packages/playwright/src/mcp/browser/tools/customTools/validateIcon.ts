@@ -22,7 +22,7 @@
  */
 
 import { z } from 'zod';
-import { defineTabTool } from './tool.js';
+import { defineTabTool } from '../tool.js';
 import { generateLocatorString } from './helperFunctions.js';
 import { expect } from '@zealous-tech/playwright/test';
 

@@ -32,8 +32,7 @@ import tabs from './tools/tabs';
 import tracing from './tools/tracing';
 import wait from './tools/wait';
 import verify from './tools/verify';
-import customAgentTools from './tools/customAgentTools';
-import validateIcon from './tools/validateIcon';
+import customAgentTools from './tools/customTools/customAgentTools';
 
 import type { Tool } from './tools/tool';
 import type { FullConfig } from './config';
@@ -58,7 +57,6 @@ export const browserTools: Tool<any>[] = [
   ...wait,
   ...verify,
   ...customAgentTools,
-  ...validateIcon,
 ];
 
 export function filteredTools(config: FullConfig) {

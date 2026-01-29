@@ -16,9 +16,10 @@
 import { z } from 'zod';
 //@ZEALOUS UPDATE
 import * as jp from 'jsonpath';
-import { defineTabTool, defineTool } from './tool.js';
+import { defineTabTool, defineTool } from '../tool.js';
 import { getAllComputedStylesDirect, pickActualValue, parseRGBColor, isColorInRange,runCommandClean, compareValues, checkElementVisibilityUnique, checkTextExistenceInAllFrames, getElementErrorMessage, generateLocatorString, getAssertionMessage, getAssertionEvidence, getXPathCode, collectAllFrames, parseDataInput, executeDataValidation, parseValidationResult, createValidationEvidence, buildValidationPayload, buildValidationErrorPayload } from './helperFunctions.js';
-import { generateLocator } from './utils.js';
+import { generateLocator } from '../utils.js';
+import validateIcon from './validateIcon';
 import { expect } from '@zealous-tech/playwright/test';
 import { asLocator } from 'playwright-core/lib/utils';
 import type * as playwright from '@zealous-tech/playwright';
@@ -3554,6 +3555,7 @@ export default [
   default_validation,
   validate_response,
   validate_tab_exist,
+  validateIcon,
   generate_locator,
   make_request,
   data_extraction,
