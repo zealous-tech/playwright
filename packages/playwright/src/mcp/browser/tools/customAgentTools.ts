@@ -17,7 +17,7 @@ import { z } from 'zod';
 //@ZEALOUS UPDATE
 import * as jp from 'jsonpath';
 import { defineTabTool, defineTool } from './tool.js';
-import { getAllComputedStylesDirect, pickActualValue, parseRGBColor, isColorInRange,runCommandClean, compareValues, checkElementVisibilityUnique, checkTextExistenceInAllFrames, getElementErrorMessage, generateLocatorString, getAssertionMessage, getAssertionEvidence, getXPathCode, collectAllFrames } from './helperFunctions.js';
+import { getAllComputedStylesDirect, pickActualValue, parseRGBColor, isColorInRange,runCommandClean, compareValues, checkElementVisibilityUnique, checkTextExistenceInAllFrames, getElementErrorMessage, generateLocatorString, getAssertionMessage, getAssertionEvidence, getXPathCode, collectAllFrames, parseDataInput, executeDataValidation, parseValidationResult, createValidationEvidence, buildValidationPayload, buildValidationErrorPayload } from './helperFunctions.js';
 import { generateLocator } from './utils.js';
 import { expect } from '@zealous-tech/playwright/test';
 import { asLocator } from 'playwright-core/lib/utils';
@@ -1680,217 +1680,132 @@ const default_validation = defineTabTool({
   schema: {
     name: 'default_validation',
     title: 'Default Validation Tool',
-    description: 'Default tool for when LLM cannot find a suitable tool. Accepts ref and JavaScript code to parse and execute.',
+    description: 'Flexible validation tool supporting two modes: (1) Element-based: provide ref+element to validate UI element, (2) Data-based: provide data (from browser_evaluate extraction like ${tableData}) to validate extracted data. jsCode receives either "element" or "data" parameter and must return either "pass"/"fail" string OR a rich object { result: "pass"|"fail", message: "Human readable message", expected: any, actual: any }.',
     inputSchema: z.object({
-      ref: z.string().describe('Element reference from the page snapshot'),
-      element: z.string().min(1).describe('Description of the specific element with the given ref'),
-      jsCode: z.string().describe('JavaScript code to execute on the element. Function receives single element as parameter. Should return "pass" or "fail" as string. Do not use ref in the code - work directly with the element parameter.'),
+      ref: z.string().optional().describe('Element reference from the page snapshot. Required for element-based validation.'),
+      element: z.string().optional().describe('Description of the specific element with the given ref. Required for element-based validation.'),
+      data: z.any().optional().describe('Extracted data to validate. Use variable like ${tableData} which will be substituted with data from browser_evaluate. For data-based validation.'),
+      jsCode: z.string().describe('JavaScript code to execute. For element mode: receives "element" parameter (the DOM element). For data mode: receives "data" parameter (the extracted data object/array). Can return simple "pass"/"fail" OR rich object { result: "pass"|"fail", message: "Human readable description", expected: value, actual: value } for better evidence.'),
+      validation_index: z.number().optional().describe('Validation index for batch validations'),
     }),
     type: 'readOnly',
   },
   handle: async (tab, params, response) => {
-    const { ref, element, jsCode } = params;
+    const { ref, element, data, jsCode } = params;
+
+    // ============================================================
+    // MODE 1: DATA-BASED VALIDATION (when data is provided)
+    // ============================================================
+    if (data !== undefined) {
+      try {
+        const parsedData = parseDataInput(data);
+        const result = executeDataValidation(jsCode, parsedData);
+        const validationResult = parseValidationResult(result, 'Data');
+        const dataPreview = typeof parsedData === 'object' ? JSON.stringify(parsedData).substring(0, 200) + '...' : String(parsedData);
+
+        const evidence = [createValidationEvidence('data', jsCode, validationResult.evidenceMessage, {
+          expectedValue: validationResult.expectedValue,
+          actualValue: validationResult.actualValue,
+          dataType: Array.isArray(parsedData) ? 'array' : typeof parsedData,
+        })];
+
+        const payload = buildValidationPayload('data', jsCode, validationResult, evidence, { dataPreview });
+        console.log('Default validation (data mode) executed:', payload);
+        response.addResult(JSON.stringify(payload, null, 2));
+        return;
+
+      } catch (error) {
+        const errorMessage = `Failed to execute data validation: ${error instanceof Error ? error.message : String(error)}`;
+        console.error('Default validation (data mode) error:', errorMessage);
+
+        const evidence = [createValidationEvidence('data', jsCode, errorMessage)];
+        const payload = buildValidationErrorPayload('data', jsCode, errorMessage, evidence);
+        response.addResult(JSON.stringify(payload, null, 2));
+        return;
+      }
+    }
+
+    // ============================================================
+    // MODE 2: ELEMENT-BASED VALIDATION (when ref is provided)
+    // ============================================================
+    if (!ref || !element) {
+      const errorMessage = 'Missing required parameters: provide either "data" for data validation, or "ref" + "element" for element validation.';
+      const evidence = [createValidationEvidence('element', jsCode, 'Either "data" parameter OR both "ref" and "element" parameters are required.')];
+      const payload = buildValidationErrorPayload('element', jsCode, errorMessage, evidence);
+      response.addResult(JSON.stringify(payload, null, 2));
+      return;
+    }
 
     await tab.waitForCompletion(async () => {
       try {
-        // Get element locator
         const locator = await tab.refLocator({ ref, element });
 
-        // Check if element is attached to DOM with timeout
+        // Check if element is attached to DOM
         try {
           await expect(locator).toBeAttached({ timeout: ELEMENT_ATTACHED_TIMEOUT });
-        } catch (error) {
-          // Element not found, generate payload and return early
-          let locatorString = await generateLocatorString(ref, locator);
-
-          const evidence = [{
-            command: JSON.stringify({
-              toolName: 'default_validation',
-              arguments: {
-                jsCode: jsCode
-              },
-              locators: [{
-                element: element,
-                locatorString: locatorString
-              }]
-            }),
-            message: `The UI Element "${element}" not found`
-          }];
-
-          const payload = {
-            ref,
-            element,
-            summary: {
-              total: 1,
-              passed: 0,
-              failed: 1,
-              status: 'fail',
-              evidence,
-            },
-            checks: [{
-              property: 'javascript_execution',
-              operator: 'execute',
-              expected: 'success',
-              actual: 'UI element not found',
-              result: 'fail',
-            }],
-            result: 'fail',
-            jsCode,
-          };
-
+        } catch {
+          const locatorString = await generateLocatorString(ref, locator);
+          const errorMessage = `The UI Element "${element}" not found`;
+          const evidence = [createValidationEvidence('element', jsCode, errorMessage, { element, locatorString })];
+          const payload = buildValidationErrorPayload('element', jsCode, 'UI element not found', evidence, { ref, element });
           console.log('Default validation - UI element not found:', payload);
           response.addResult(JSON.stringify(payload, null, 2));
           return;
         }
 
-        // Generate locator string after element is confirmed to be attached
         const locatorString = await generateLocatorString(ref, locator);
-        
-        // Execute the JavaScript code on the element
-        const result = await locator.evaluate((element: Element, code: string) => {
+
+        // Execute JavaScript code on the element
+        const result = await locator.evaluate((el: Element, code: string) => {
           try {
-            // Safe evaluation function
-            const safeEval = (code: string, element: Element) => {
-              const func = new Function('element', 'document', `
-              'use strict';
-              ${code}
-            `);
-
-              // Create safe context with necessary objects
-              const safeContext = {
-                element,
-                document, // Keep document for element searching
-                // Disable potentially dangerous functions
-                console: { log: () => {}, warn: () => {}, error: () => {} },
-                setTimeout: undefined,
-                setInterval: undefined,
-                eval: undefined,
-                Function: undefined,
-                // Keep limited window functionality
-                window: {
-                  innerWidth: window.innerWidth,
-                  innerHeight: window.innerHeight,
-                  localStorage: window.localStorage,
-                  sessionStorage: window.sessionStorage
-                }
-              };
-
-              return func.call(safeContext, element, document);
+            const func = new Function('element', 'document', `'use strict'; ${code}`);
+            const safeContext = {
+              element: el,
+              document,
+              console: { log: () => {}, warn: () => {}, error: () => {} },
+              setTimeout: undefined,
+              setInterval: undefined,
+              eval: undefined,
+              Function: undefined,
+              window: {
+                innerWidth: window.innerWidth,
+                innerHeight: window.innerHeight,
+                localStorage: window.localStorage,
+                sessionStorage: window.sessionStorage
+              }
             };
-
-            return safeEval(code, element);
+            return func.call(safeContext, el, document);
           } catch (error) {
-            return {
-              error: error instanceof Error ? error.message : String(error),
-              type: 'execution_error'
-            };
+            return { error: error instanceof Error ? error.message : String(error), type: 'execution_error' };
           }
         }, jsCode);
 
-        // Determine pass/fail based on result
-        const isPass = result === 'pass' && !(result && typeof result === 'object' && 'error' in result);
-        const status = isPass ? 'pass' : 'fail';
-        const passed = isPass ? 1 : 0;
-        const failed = isPass ? 0 : 1;
-
-        // Generate evidence message
-        const resultString = typeof result === 'object' ? JSON.stringify(result) : String(result);
-        const evidenceMessage = isPass
-          ? `Successfully executed JavaScript code on element "${element}". Result: ${resultString}`
-          : `JavaScript code execution failed on element "${element}". Result: ${resultString}`;
-
-        // Generate evidence as array of objects with command and message
-        const evidence = [{
-          command: JSON.stringify({
-            toolName: 'default_validation',
-            arguments: {
-              jsCode: jsCode
-            },
-            locators: [{
-              element: element,
-              locatorString: locatorString
-            }]
-          }),
-          message: evidenceMessage
-        }];
-
-        const payload = {
-          ref,
+        const validationResult = parseValidationResult(result, element);
+        const evidence = [createValidationEvidence('element', jsCode, validationResult.evidenceMessage, {
+          expectedValue: validationResult.expectedValue,
+          actualValue: validationResult.actualValue,
           element,
-          summary: {
-            total: 1,
-            passed,
-            failed,
-            status,
-            evidence,
-          },
-          checks: [{
-            property: 'javascript_execution',
-            operator: 'execute',
-            expected: 'success',
-            actual: typeof result === 'object' ? JSON.stringify(result) : String(result),
-            result: isPass ? 'pass' : 'fail',
-          }],
-          result,
-          jsCode,
-        };
+          locatorString,
+        })];
 
+        const payload = buildValidationPayload('element', jsCode, validationResult, evidence, { ref, element });
         console.log('Default validation executed:', payload);
         response.addResult(JSON.stringify(payload, null, 2));
 
       } catch (error) {
-        // Generate locator string for error case (try to generate even if execution failed)
         let locatorString = '';
         try {
           const locator = await tab.refLocator({ ref, element });
           locatorString = await generateLocatorString(ref, locator);
-        } catch {
-          // If locator generation fails, use empty string
-          locatorString = '';
-        }
+        } catch { /* ignore */ }
 
-        // Generate error evidence message
         const errorMessage = `Failed to execute JavaScript code on element "${element}".`;
-        console.log(`Failed to execute JavaScript code on element "${element}". Error: ${error instanceof Error ? error.message : String(error)}`);
+        console.log(`${errorMessage} Error: ${error instanceof Error ? error.message : String(error)}`);
 
-        // Generate evidence as array of objects with command and message
-        const errorEvidence = [{
-          command: JSON.stringify({
-            toolName: 'default_validation',
-            arguments: {
-              jsCode: jsCode
-            },
-            locators: [{
-              element: element,
-              locatorString: locatorString
-            }]
-          }),
-          message: errorMessage
-        }];
-
-        const errorPayload = {
-          ref,
-          element,
-          summary: {
-            total: 1,
-            passed: 0,
-            failed: 1,
-            status: 'fail',
-            evidence: errorEvidence,
-          },
-          checks: [{
-            property: 'javascript_execution',
-            operator: 'execute',
-            expected: 'success',
-            actual: error instanceof Error ? error.message : String(error),
-            result: 'fail',
-          }],
-          error: error instanceof Error ? error.message : String(error),
-          jsCode,
-        };
-
-        console.error('Default validation error:', errorPayload);
-        response.addResult(JSON.stringify(errorPayload, null, 2));
+        const evidence = [createValidationEvidence('element', jsCode, errorMessage, { element, locatorString })];
+        const payload = buildValidationErrorPayload('element', jsCode, error instanceof Error ? error.message : String(error), evidence, { ref, element });
+        console.error('Default validation error:', payload);
+        response.addResult(JSON.stringify(payload, null, 2));
       }
     });
   },
@@ -2215,42 +2130,37 @@ const validate_tab_exist = defineTabTool({
     title: 'Validate Tab Exists',
     description: 'Check if a browser tab with the specified URL exists or does not exist. Use matchType "exist" to verify tab exists, or "not-exist" to verify tab does not exist. exactMatch is ignored when matchType is "not-exist". Optionally validate if the found tab is the current active tab with isCurrent parameter.',
     inputSchema: z.object({
-      url: z.string().describe('URL to check for in existing browser tabs'),
+      url: z.string().describe('URL or regex to check for in existing browser tabs'),
+      title: z.string().optional().describe('Page title or regex to validate'),
       matchType: z.enum(['exist', 'not-exist']).describe('Whether to check if tab exists or does not exist'),
-      exactMatch: z.boolean().optional().default(true).describe('Whether to require exact URL match (true) or partial match (false). Ignored when matchType is "not-exist"'),
+      exactMatch: z.boolean().optional().default(true).describe('Whether to require exact URL match (true) or partial match (false). Ignored when regex is used'),
       isCurrent: z.boolean().optional().describe('If true, also validates that the found tab is the current active tab'),
     }),
     type: 'readOnly',
   },
   handle: async (tab, params, response) => {
-    const { url, matchType, exactMatch, isCurrent } = params;
+    const { url, title, matchType, exactMatch, isCurrent } = params;
 
     try {
       // Get all tabs information from context
       const context = tab.context;
       const allTabs = context.tabs();
+      const isUrlRegex =
+        url.startsWith('/') && url.endsWith('/') && url.length > 2;
+      const urlRegex = isUrlRegex ? new RegExp(url.slice(1, -1)) : null;
 
       // Extract tab info using the correct page methods
-      const tabsWithInfo = await Promise.all(allTabs.map(async (tabItem: any, index: number) => {
-        try {
-          // Get URL and title from page object
-          const tabUrl = await tabItem.page.url() || 'unknown';
-          const tabTitle = await tabItem.page.title() || 'Unknown';
-          tab.page.getByText;
-          return {
-            index,
-            header: tabTitle,
-            url: tabUrl
-          };
-        } catch (error) {
-          // Fallback if we can't get tab info
-          return {
-            index,
-            header: 'Unknown',
-            url: 'unknown'
-          };
-        }
-      }));
+      const tabsWithInfo = await Promise.all(
+          allTabs.map(async (tabItem: any, index: number) => {
+            try {
+              const tabUrl = await tabItem.page.url();
+              const tabTitle = await tabItem.page.title();
+              return { index, header: tabTitle, url: tabUrl };
+            } catch {
+              return { index, header: 'Unknown', url: 'unknown' };
+            }
+          })
+      );
 
       console.log('All tabs info:', tabsWithInfo);
 
@@ -2266,15 +2176,19 @@ const validate_tab_exist = defineTabTool({
       let searchType = '';
 
       // Search for tab with matching URL
-      if (exactMatch) {
-        // Exact URL match
-        foundTab = tabsWithInfo.find((tab: any) => tab.url === url);
-        searchType = 'exact';
-      } else {
-        // Partial URL match
-        foundTab = tabsWithInfo.find((tab: any) => tab.url.includes(url) || url.includes(tab.url));
-        searchType = 'partial';
-      }
+      foundTab = tabsWithInfo.find((tabInfo: any) => {
+        const urlMatch = isUrlRegex
+          ? urlRegex!.test(tabInfo.url)
+          : exactMatch
+            ? tabInfo.url === url
+            : tabInfo.url.includes(url) || url.includes(tabInfo.url);
+
+        const titleMatch = title ? tabInfo.header === title : true;
+
+        return urlMatch && titleMatch;
+      });
+
+      searchType = isUrlRegex ? 'regex' : exactMatch ? 'exact' : 'partial';
 
       const isFound = !!foundTab;
 
@@ -2306,19 +2220,21 @@ const validate_tab_exist = defineTabTool({
           currentInfo = ` Current tab check: ${isCurrent ? 'expected current tab not found' : 'expected non-current tab not found'}.`;
 
       }
+      const titleInfo = title ? `, title: "${title}"` : '';
+      const titleMessage = title ? ` and TITLE "${title}"` : '';
 
       if (matchType === 'exist') {
         if (isFound && foundTab) {
-          evidence = `Found tab with ${searchType} URL match: "${(foundTab as any).url}" (index: ${(foundTab as any).index}, header: "${(foundTab as any).header}")${currentInfo}`;
+          evidence = `Found tab with ${searchType} URL match: "${(foundTab as any).url}" (index: ${(foundTab as any).index}, header: "${(foundTab as any).header}"${titleInfo})${currentInfo}`;
         } else {
           const availableUrls = tabsWithInfo.map((t: any) => (t as any).url).join(', ');
-          evidence = `Tab with URL "${url}" not found. Available tabs: ${availableUrls}${currentInfo}`;
+          evidence = `Tab with URL "${url}"${titleMessage} not found. Available tabs: ${availableUrls}${currentInfo}`;
         }
       } else { // matchType === 'not-exist'
         if (!isFound)
-          evidence = `Tab with URL "${url}" does not exist (as expected). Available tabs: ${tabsWithInfo.map((t: any) => (t as any).url).join(', ')}${currentInfo}`;
+          evidence = `Tab with URL "${url}"${titleMessage} does not exist (as expected). Available tabs: ${tabsWithInfo.map((t: any) => (t as any).url).join(', ')}${currentInfo}`;
         else
-          evidence = `Tab with URL "${url}" exists (unexpected). Found: "${(foundTab as any).url}" (index: ${(foundTab as any).index}, header: "${(foundTab as any).header}")${currentInfo}`;
+          evidence = `Tab with URL "${url}"${titleMessage} exists (unexpected). Found: "${(foundTab as any).url}" (index: ${(foundTab as any).index}, header: "${(foundTab as any).header}${titleInfo})")${currentInfo}`;
 
       }
 
@@ -2328,6 +2244,7 @@ const validate_tab_exist = defineTabTool({
           toolName: 'validate_tab_exist',
           arguments: {
             url,
+            title,
             matchType,
             exactMatch,
             isCurrent
@@ -2338,6 +2255,7 @@ const validate_tab_exist = defineTabTool({
 
       const payload = {
         url,
+        title,
         matchType,
         exactMatch,
         isCurrent,
@@ -2374,6 +2292,7 @@ const validate_tab_exist = defineTabTool({
           toolName: 'validate_tab_exist',
           arguments: {
             url,
+            title,
             matchType,
             exactMatch,
             isCurrent
@@ -2384,6 +2303,7 @@ const validate_tab_exist = defineTabTool({
 
       const errorPayload = {
         url,
+        title,
         exactMatch,
         summary: {
           total: 1,
