@@ -16,6 +16,9 @@
 /* eslint-disable eqeqeq */
 import { CurlResponse } from '../common/common';
 
+// Global timeout for element attachment validation (in milliseconds)
+const ELEMENT_ATTACHED_TIMEOUT = 15000;
+
 const camelToKebab = (prop: string) =>
   prop.replace(/[A-Z]/g, m => `-${m.toLowerCase()}`);
 
@@ -452,7 +455,56 @@ function executeDataValidation(code: string, inputData: any): any {
   }
 }
 
+// Helper function to convert string to RegExp if it looks like a regex
+function stringToRegExp(str: string): string | RegExp {
+  // Check if string looks like a regex pattern (starts and ends with /)
+  if (str.startsWith('/') && str.endsWith('/') && str.length > 2) {
+    const pattern = str.slice(1, -1); // Remove leading and trailing /
+    try {
+      return new RegExp(pattern);
+    } catch (e) {
+      // If RegExp creation fails, return original string
+      return str;
+    }
+  }
+  return str;
+}
+
+// Helper function to convert string values to RegExp in objects
+function convertStringToRegExp(obj: any): any {
+  if (typeof obj === 'string')
+    return stringToRegExp(obj);
+
+
+  if (Array.isArray(obj))
+    return obj.map(convertStringToRegExp);
+
+
+  if (obj && typeof obj === 'object') {
+    const converted: any = {};
+    for (const [key, value] of Object.entries(obj)) {
+      // Convert specific fields that can contain RegExp values
+      if (key === 'expected' || key === 'value' || key === 'values' ||
+          key === 'name' || key === 'description' || key === 'errorMessage' ||
+          key === 'id' || key === 'role')
+        converted[key] = convertStringToRegExp(value);
+      else
+        converted[key] = value;
+
+    }
+    return converted;
+  }
+
+  return obj;
+}
+
+// Helper function to normalize value by removing spaces and converting to lowercase
+function normalizeValue(value: string): string {
+  return value.replace(/\s+/g, '').toLowerCase();
+}
+
 export {
+  ELEMENT_ATTACHED_TIMEOUT,
   pickActualValue,
   parseRGBColor,
   isColorInRange,
@@ -465,4 +517,7 @@ export {
   getXPathCode,
   parseDataInput,
   executeDataValidation,
+  stringToRegExp,
+  convertStringToRegExp,
+  normalizeValue,
 };
