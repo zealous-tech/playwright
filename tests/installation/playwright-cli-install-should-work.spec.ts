@@ -16,7 +16,11 @@
 import { test, expect } from './npmTest';
 import { chromium } from '@playwright/test';
 import path from 'path';
+import http from 'http';
+import https from 'https';
+import { Writable } from 'stream';
 import { TestProxy } from '../config/proxy';
+import { TestServer } from '../config/testserver';
 
 test.use({ isolateBrowsers: true });
 
@@ -77,6 +81,38 @@ test('install command should work with HTTPS_PROXY', { annotation: { type: 'issu
   await proxy.stop();
 });
 
+test('install command should work with mirror that uses chunked encoding', async ({ exec, checkInstalledSoftwareOnDisk }) => {
+  await exec('npm i playwright');
+  const server = http.createServer(async (req, res) => {
+    try {
+      const upstream = await fetch(
+          req.url.startsWith('/builds/')
+            ? 'https://cdn.playwright.dev/dbazure/download/playwright' + req.url
+            : 'https://cdn.playwright.dev/chrome-for-testing-public' + req.url
+      );
+      const headers = new Headers(upstream.headers);
+      headers.delete('content-length');
+      res.writeHead(upstream.status, Object.fromEntries(headers));
+      await upstream.body.pipeTo(Writable.toWeb(res));
+      return;
+    } catch (e) {
+      console.error(e);
+      res.statusCode = 500;
+      res.end(String(e));
+      return;
+    }
+  });
+  await new Promise<void>(resolve => server.listen(0, resolve));
+  const result = await exec('npx playwright install chromium', {
+    env: {
+      PLAYWRIGHT_DOWNLOAD_HOST: `http://localhost:${(server.address() as any).port}`,
+    }
+  });
+  expect(result).toHaveLoggedSoftwareDownload(['chromium', 'chromium-headless-shell', 'ffmpeg', ...extraInstalledSoftware]);
+  await checkInstalledSoftwareOnDisk(['chromium', 'chromium-headless-shell', 'ffmpeg', ...extraInstalledSoftware]);
+  server.close();
+});
+
 test('install command should ignore HTTP_PROXY', { annotation: { type: 'issue', description: 'https://github.com/microsoft/playwright/issues/36412' } }, async ({ exec, checkInstalledSoftwareOnDisk }) => {
   await exec('npm i playwright');
   await test.step('playwright install chromium', async () => {
@@ -90,12 +126,36 @@ test('install command should ignore HTTP_PROXY', { annotation: { type: 'issue', 
   });
 });
 
+test('install command should work with HTTPS proxy for HTTP downloads', async ({ exec }) => {
+  await exec('npm i playwright');
+  const httpsProxyServer = https.createServer(await TestServer.certOptions());
+
+  let requestCount = 0;
+  httpsProxyServer.on('request', (_req, res) => {
+    requestCount++;
+    res.statusCode = 502;
+    res.end();
+  });
+
+  await new Promise<void>(resolve => httpsProxyServer.listen(0, resolve));
+  await exec('npx playwright install chromium', {
+    env: {
+      PLAYWRIGHT_DOWNLOAD_HOST: 'http://example.com',
+      ALL_PROXY: `https://localhost:${(httpsProxyServer.address() as any).port}`,
+      NODE_TLS_REJECT_UNAUTHORIZED: '0',
+    },
+    expectToExitWithError: true,
+  });
+  expect(requestCount).toBeGreaterThan(0);
+  httpsProxyServer.close();
+});
+
 test('should be able to remove browsers', async ({ exec, checkInstalledSoftwareOnDisk }) => {
   await exec('npm i playwright');
   await exec('npx playwright install chromium');
   await checkInstalledSoftwareOnDisk(['chromium', 'chromium-headless-shell', 'ffmpeg', ...extraInstalledSoftware]);
   await exec('npx playwright uninstall');
-  await checkInstalledSoftwareOnDisk([...extraInstalledSoftware]);
+  await checkInstalledSoftwareOnDisk([]);
 });
 
 test('should print the right install command without browsers', async ({ exec }) => {

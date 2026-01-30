@@ -147,7 +147,6 @@ export const baseRules = {
   "space-in-parens": [2, "never"],
   "array-bracket-spacing": [2, "never"],
   "comma-spacing": [2, { before: false, after: true }],
-  "keyword-spacing": [2, "always"],
   "space-before-function-paren": [
     2,
     {
@@ -309,6 +308,13 @@ function reactPackageSection(packageName) {
     rules: {
       ...baseRules,
       "no-console": 2,
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "JSXElement > JSXText[value=/^;\n/]",
+          message: 'Unexpected semicolon after JSX element',
+        },
+      ]
     },
   };
 }

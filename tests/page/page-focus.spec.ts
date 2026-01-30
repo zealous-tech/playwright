@@ -16,8 +16,8 @@
 
 import { test as it, expect } from './pageTest';
 
-it('should work @smoke', async function({ page, browserName }) {
-  it.skip(browserName === 'firefox');
+it('should work @smoke', async function({ page, browserName, isBidi }) {
+  it.skip(browserName === 'firefox' && !isBidi);
 
   await page.setContent(`<div id=d1 tabIndex=0></div>`);
   expect(await page.evaluate(() => document.activeElement.nodeName)).toBe('BODY');

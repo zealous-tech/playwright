@@ -24,8 +24,11 @@ import { generateCurlCommand, generateFetchCall } from '../third_party/devtools'
 import { CopyToClipboardTextButton } from './copyToClipboard';
 import { getAPIRequestCodeGen } from './codegen';
 import type { Language } from '@isomorphic/locatorGenerators';
-import { msToString, useAsyncMemo } from '@web/uiUtils';
+import { isJsonMimeType } from '@isomorphic/mimeType';
+import { msToString, useAsyncMemo, useSetting } from '@web/uiUtils';
 import type { Entry } from '@trace/har';
+import { useTraceModel } from './traceModelContext';
+import { Expandable } from '@web/components/expandable';
 
 type RequestBody = { text: string, mimeType?: string } | null;
 
@@ -36,14 +39,15 @@ export const NetworkResourceDetails: React.FunctionComponent<{
   startTimeOffset: number;
   onClose: () => void;
 }> = ({ resource, sdkLanguage, startTimeOffset, onClose }) => {
-  const [selectedTab, setSelectedTab] = React.useState('request');
+  const [selectedTab, setSelectedTab] = React.useState('headers');
+  const model = useTraceModel();
 
   const requestBody = useAsyncMemo<RequestBody>(async () => {
-    if (resource.request.postData) {
+    if (model && resource.request.postData) {
       const requestContentTypeHeader = resource.request.headers.find(q => q.name.toLowerCase() === 'content-type');
       const requestContentType = requestContentTypeHeader ? requestContentTypeHeader.value : '';
       if (resource.request.postData._sha1) {
-        const response = await fetch(`sha1/${resource.request.postData._sha1}`);
+        const response = await fetch(model.createRelativeUrl(`sha1/${resource.request.postData._sha1}`));
         return { text: formatBody(await response.text(), requestContentType), mimeType: requestContentType };
       } else {
         return { text: formatBody(resource.request.postData.text, requestContentType), mimeType: requestContentType };
@@ -54,24 +58,23 @@ export const NetworkResourceDetails: React.FunctionComponent<{
   }, [resource], null);
 
   return <TabbedPane
-    dataTestId='network-request-details'
     leftToolbar={[<ToolbarButton key='close' icon='close' title='Close' onClick={onClose} />]}
     rightToolbar={[<CopyDropdown key='dropdown' requestBody={requestBody} resource={resource} sdkLanguage={sdkLanguage} />]}
     tabs={[
       {
-        id: 'request',
-        title: 'Request',
-        render: () => <RequestTab resource={resource} startTimeOffset={startTimeOffset} requestBody={requestBody} />,
+        id: 'headers',
+        title: 'Headers',
+        render: () => <HeadersTab resource={resource} startTimeOffset={startTimeOffset} />,
+      },
+      {
+        id: 'payload',
+        title: 'Payload',
+        render: () => <PayloadTab resource={resource} requestBody={requestBody} />,
       },
       {
         id: 'response',
         title: 'Response',
-        render: () => <ResponseTab resource={resource}/>,
-      },
-      {
-        id: 'body',
-        title: 'Body',
-        render: () => <BodyTab resource={resource}/>,
+        render: () => <ResponseTab resource={resource} />,
       },
     ]}
     selectedTab={selectedTab}
@@ -84,6 +87,7 @@ const CopyDropdown: React.FC<{
   sdkLanguage: Language,
   requestBody: RequestBody,
 }> = ({ resource, sdkLanguage, requestBody }) => {
+  const model = useTraceModel();
   const copiedDescription = <><span className='codicon codicon-check' style={{ marginRight: '5px' }} /> Copied </>;
   const copyAsPlaywright = async () => getAPIRequestCodeGen(sdkLanguage).generatePlaywrightRequestCall(resource.request, requestBody?.text);
   return (
@@ -95,64 +99,94 @@ const CopyDropdown: React.FC<{
       </ToolbarButton>
 
       <div className='copy-request-dropdown-menu'>
-        <CopyToClipboardTextButton description='Copy as cURL' copiedDescription={copiedDescription} value={() => generateCurlCommand(resource)}/>
-        <CopyToClipboardTextButton description='Copy as Fetch' copiedDescription={copiedDescription} value={() => generateFetchCall(resource)}/>
+        <CopyToClipboardTextButton description='Copy as cURL' copiedDescription={copiedDescription} value={() => generateCurlCommand(model, resource)}/>
+        <CopyToClipboardTextButton description='Copy as Fetch' copiedDescription={copiedDescription} value={() => generateFetchCall(model, resource)}/>
         <CopyToClipboardTextButton description='Copy as Playwright' copiedDescription={copiedDescription} value={copyAsPlaywright}/>
       </div>
     </div>
   );
 };
 
-const RequestTab: React.FunctionComponent<{
+const ExpandableSection: React.FC<{
+  title: string;
+  showCount?: boolean,
+  data?: { name: string, value: React.ReactNode }[],
+  children?: React.ReactNode
+  className?: string;
+}> = ({ title, data, showCount, children, className }) => {
+  const [expanded, setExpanded] = useSetting(`trace-viewer-network-details-${title.replaceAll(' ', '-')}`, true);
+  return <Expandable
+    expanded={expanded}
+    setExpanded={setExpanded}
+    expandOnTitleClick
+    title={
+      <span className='network-request-details-header'>{title}
+        {showCount && <span className='network-request-details-header-count'> × {data?.length ?? 0}</span>}
+      </span>
+    }
+    className={className}
+  >
+    {data && <table className='network-request-details-table'>
+      <tbody>
+        {data.map(({ name, value }, index) => (
+          value !== null &&
+          (<tr key={index}>
+            <td>{name}</td>
+            <td>{value}</td>
+          </tr>)
+        ))}
+      </tbody>
+    </table>}
+    {children}
+  </Expandable>;
+};
+
+const HeadersTab: React.FunctionComponent<{
   resource: ResourceSnapshot;
   startTimeOffset: number;
-  requestBody: RequestBody,
-}> = ({ resource, startTimeOffset, requestBody }) => {
-  return <div className='network-request-details-tab'>
-    <div className='network-request-details-header'>General</div>
-    <div className='network-request-details-url'>{`URL: ${resource.request.url}`}</div>
-    <div className='network-request-details-general'>{`Method: ${resource.request.method}`}</div>
-    {resource.response.status !== -1 && <div className='network-request-details-general' style={{ display: 'flex' }}>
-      Status Code: <span className={statusClass(resource.response.status)} style={{ display: 'inline-flex' }}>
-        {`${resource.response.status} ${resource.response.statusText}`}
-      </span></div>}
-    {resource.request.queryString.length ? <>
-      <div className='network-request-details-header'>Query String Parameters</div>
-      <div className='network-request-details-headers'>
-        {resource.request.queryString.map(param => `${param.name}: ${param.value}`).join('\n')}
-      </div>
-    </> : null}
-    <div className='network-request-details-header'>Request Headers</div>
-    <div className='network-request-details-headers'>{resource.request.headers.map(pair => `${pair.name}: ${pair.value}`).join('\n')}</div>
-    <div className='network-request-details-header'>Time</div>
-    <div className='network-request-details-general'>{`Start: ${msToString(startTimeOffset)}`}</div>
-    <div className='network-request-details-general'>{`Duration: ${msToString(resource.time)}`}</div>
+}> = ({ resource, startTimeOffset }) => {
+  const generalData = React.useMemo(() =>
+    Object.entries({
+      'URL': resource.request.url,
+      'Method': resource.request.method,
+      'Status Code': resource.response.status !== -1 && <span className={statusClass(resource.response.status)}> {resource.response.status} {resource.response.statusText}</span>,
+      'Start': msToString(startTimeOffset),
+      'Duration': msToString(resource.time),
+    }).map(([name, value]) => ({ name, value })),
+  [resource, startTimeOffset]);
 
-    {requestBody && <div className='network-request-details-header'>Request Body</div>}
-    {requestBody && <CodeMirrorWrapper text={requestBody.text} mimeType={requestBody.mimeType} readOnly lineNumbers={true}/>}
+  return <div className='vbox network-request-details-tab'>
+    <ExpandableSection title='General' data={generalData} />
+    <ExpandableSection title='Request Headers' showCount data={resource.request.headers} />
+    <ExpandableSection title='Response Headers' showCount data={resource.response.headers} />
+  </div>;
+};
+
+const PayloadTab: React.FunctionComponent<{
+  resource: ResourceSnapshot;
+  requestBody: RequestBody,
+}> = ({ resource, requestBody }) => {
+  return <div className='vbox network-request-details-tab'>
+    {resource.request.queryString.length === 0 && !requestBody && <em className='network-request-no-payload'>No payload for this request.</em>}
+    {resource.request.queryString.length > 0 && <ExpandableSection title='Query String Parameters' showCount data={resource.request.queryString}/>}
+    {requestBody && <ExpandableSection title='Request Body' className='network-request-request-body'>
+      <CodeMirrorWrapper text={requestBody.text} mimeType={requestBody.mimeType} readOnly lineNumbers={true}/>
+    </ExpandableSection>}
   </div>;
 };
 
 const ResponseTab: React.FunctionComponent<{
   resource: ResourceSnapshot;
 }> = ({ resource }) => {
-  return <div className='network-request-details-tab'>
-    <div className='network-request-details-header'>Response Headers</div>
-    <div className='network-request-details-headers'>{resource.response.headers.map(pair => `${pair.name}: ${pair.value}`).join('\n')}</div>
-  </div>;
-};
-
-const BodyTab: React.FunctionComponent<{
-  resource: ResourceSnapshot;
-}> = ({ resource }) => {
+  const model = useTraceModel();
   const [responseBody, setResponseBody] = React.useState<{ dataUrl?: string, text?: string, mimeType?: string, font?: BufferSource } | null>(null);
 
   React.useEffect(() => {
     const readResources = async  () => {
-      if (resource.response.content._sha1) {
+      if (model && resource.response.content._sha1) {
         const useBase64 = resource.response.content.mimeType.includes('image');
         const isFont = resource.response.content.mimeType.includes('font');
-        const response = await fetch(`sha1/${resource.response.content._sha1}`);
+        const response = await fetch(model.createRelativeUrl(`sha1/${resource.response.content._sha1}`));
         if (useBase64) {
           const blob = await response.blob();
           const reader = new FileReader();
@@ -172,12 +206,12 @@ const BodyTab: React.FunctionComponent<{
     };
 
     readResources();
-  }, [resource]);
+  }, [resource, model]);
 
-  return <div className='network-request-details-tab'>
+  return <div className='vbox network-request-details-tab'>
     {!resource.response.content._sha1 && <div>Response body is not available for this request.</div>}
     {responseBody && responseBody.font && <FontPreview font={responseBody.font} />}
-    {responseBody && responseBody.dataUrl && <img draggable='false' src={responseBody.dataUrl} />}
+    {responseBody && responseBody.dataUrl && <div><img draggable='false' src={responseBody.dataUrl} /></div>}
     {responseBody && responseBody.text && <CodeMirrorWrapper text={responseBody.text} mimeType={responseBody.mimeType} readOnly lineNumbers={true}/>}
   </div>;
 };
@@ -234,7 +268,7 @@ function formatBody(body: string | null, contentType: string): string {
   if (bodyStr === '')
     return '<Empty>';
 
-  if (contentType.includes('application/json')) {
+  if (isJsonMimeType(contentType)) {
     try {
       return JSON.stringify(JSON.parse(bodyStr), null, 2);
     } catch (err) {

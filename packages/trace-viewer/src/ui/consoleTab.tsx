@@ -17,7 +17,7 @@
 import type * as channels from '@protocol/channels';
 import * as React from 'react';
 import './consoleTab.css';
-import type * as modelUtil from './modelUtil';
+import type { TraceModel } from '@isomorphic/trace/traceModel';
 import { ListView } from '@web/components/listView';
 import type { Boundaries } from './geometry';
 import { clsx, msToString } from '@web/uiUtils';
@@ -47,7 +47,7 @@ type ConsoleTabModel = {
 const ConsoleListView = ListView<ConsoleEntry>;
 
 
-export function useConsoleTabModel(model: modelUtil.MultiTraceModel | undefined, selectedTime: Boundaries | undefined): ConsoleTabModel {
+export function useConsoleTabModel(model: TraceModel | undefined, selectedTime: Boundaries | undefined): ConsoleTabModel {
   const { entries } = React.useMemo(() => {
     if (!model)
       return { entries: [] };
@@ -130,7 +130,7 @@ export const ConsoleTab: React.FunctionComponent<{
   boundaries: Boundaries,
   consoleModel: ConsoleTabModel,
   selectedTime?: Boundaries | undefined,
-  onEntryHovered?: (entry: ConsoleEntry | undefined) => void,
+  onEntryHovered?: (ordinal: number | undefined) => void,
   onAccepted?: (entry: ConsoleEntry) => void,
 }> = ({ consoleModel, boundaries, onEntryHovered, onAccepted }) => {
   if (!consoleModel.entries.length)
@@ -140,7 +140,7 @@ export const ConsoleTab: React.FunctionComponent<{
     <ConsoleListView
       name='console'
       onAccepted={onAccepted}
-      onHighlighted={onEntryHovered}
+      onHighlighted={entry => onEntryHovered?.(entry ? consoleModel.entries.indexOf(entry) : undefined)}
       items={consoleModel.entries}
       isError={entry => entry.isError}
       isWarning={entry => entry.isWarning}

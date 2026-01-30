@@ -20,7 +20,7 @@ import * as path from 'path';
 import { baseTest } from './baseTest';
 import { RunServer, RemoteServer } from './remoteServer';
 import { removeFolders } from '../../packages/playwright-core/lib/server/utils/fileUtils';
-import { parseHar } from '../config/utils';
+import { isBidiChannel, parseHar } from '../config/utils';
 import { createSkipTestPredicate } from '../bidi/expectationUtil';
 
 import type { PageTestFixtures, PageWorkerFixtures } from '../page/pageTestApi';
@@ -39,6 +39,7 @@ export type BrowserTestWorkerFixtures = PageWorkerFixtures & {
   isElectron: boolean;
   isHeadlessShell: boolean;
   nodeVersion: { major: number, minor: number, patch: number };
+  isBidi: boolean;
   bidiTestSkipPredicate: (info: TestInfo) => boolean;
 };
 
@@ -66,15 +67,15 @@ const test = baseTest.extend<BrowserTestTestFixtures, BrowserTestWorkerFixtures>
     await run(playwright[browserName]);
   }, { scope: 'worker' }],
 
-  allowsThirdParty: [async ({ browserName }, run) => {
-    if (browserName === 'firefox' || browserName as any === '_bidiFirefox')
+  allowsThirdParty: [async ({ browserName, channel }, run) => {
+    if (browserName === 'firefox')
       await run(true);
     else
       await run(false);
   }, { scope: 'worker' }],
 
-  defaultSameSiteCookieValue: [async ({ browserName, platform, channel }, run) => {
-    if (browserName === 'chromium' || browserName as any === '_bidiChromium' || browserName as any === '_bidiFirefox')
+  defaultSameSiteCookieValue: [async ({ browserName, platform, channel, isBidi }, run) => {
+    if (browserName === 'chromium' || isBidi)
       await run('Lax');
     else if (browserName === 'webkit' && (platform === 'linux' || channel === 'webkit-wsl'))
       await run('Lax');
@@ -95,13 +96,18 @@ const test = baseTest.extend<BrowserTestTestFixtures, BrowserTestWorkerFixtures>
     await use({ major: +major, minor: +minor, patch: +patch });
   }, { scope: 'worker' }],
 
+  isBidi: [async ({ channel }, use) => {
+    await use(isBidiChannel(channel));
+  }, { scope: 'worker' }],
+
   isAndroid: [false, { scope: 'worker' }],
   isElectron: [false, { scope: 'worker' }],
   electronMajorVersion: [0, { scope: 'worker' }],
-  isWebView2: [false, { scope: 'worker' }],
 
   isHeadlessShell: [async ({ browserName, channel, headless }, use) => {
-    await use(browserName === 'chromium' && (channel === 'chromium-headless-shell' || channel === 'chromium-tip-of-tree-headless-shell' || (!channel && headless)));
+    const isShell = channel === 'chromium-headless-shell' || (!channel && headless);
+    const isToTShell = channel === 'chromium-tip-of-tree-headless-shell' || (channel === 'chromium-tip-of-tree' && headless);
+    await use(browserName === 'chromium' && (isShell || isToTShell));
   }, { scope: 'worker' }],
 
   contextFactory: async ({ _contextFactory }: any, run) => {
@@ -128,7 +134,9 @@ const test = baseTest.extend<BrowserTestTestFixtures, BrowserTestWorkerFixtures>
     await removeFolders(dirs);
   },
 
-  launchPersistent: async ({ createUserDataDir, browserType }, run) => {
+  launchPersistent: async ({ createUserDataDir, browserType, mode }, run) => {
+    test.skip(mode !== 'default', 'Remote persistent contexts are not supported');
+
     let persistentContext: BrowserContext | undefined;
     await run(async options => {
       if (persistentContext)
@@ -142,7 +150,9 @@ const test = baseTest.extend<BrowserTestTestFixtures, BrowserTestWorkerFixtures>
       await persistentContext.close();
   },
 
-  startRemoteServer: async ({ childProcess, browserType, channel }, run) => {
+  startRemoteServer: async ({ childProcess, browserType, channel, mode }, run) => {
+    test.skip(mode !== 'default', 'Starting remote server is not supported in remote modes');
+
     let server: PlaywrightServer | undefined;
     const fn = async (kind: 'launchServer' | 'run-server', options?: RemoteServerOptions) => {
       if (server)

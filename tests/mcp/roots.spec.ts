@@ -100,6 +100,57 @@ test('should tolerate malformed roots', async ({ startClient, server }, testInfo
   expect(file).toMatch(/mcp-.*/);
 });
 
+test('should tolerate WSL client roots on Windows server', async ({ startClient, server }, testInfo) => {
+  test.skip(process.platform !== 'win32');
+  const { client } = await startClient({
+    clientName: 'client',
+    roots: [
+      {
+        name: 'test',
+        uri: 'file:///mnt/c/users/username/Desktop',
+      }
+    ],
+  });
+
+  expect(await client.callTool({
+    name: 'browser_navigate',
+    arguments: { url: server.HELLO_WORLD },
+  })).toHaveResponse({
+    code: expect.stringContaining(`page.goto('http://localhost`),
+  });
+
+  const [file] = await fs.promises.readdir(testInfo.outputPath('ms-playwright'));
+  expect(file).toMatch(/mcp-.*/);
+});
+
 function createHash(data: string): string {
   return crypto.createHash('sha256').update(data).digest('hex').slice(0, 7);
 }
+
+test('should return relative paths when root is specified', async ({ startClient, server }, testInfo) => {
+  const rootPath = testInfo.outputPath('workspace');
+  await fs.promises.mkdir(rootPath, { recursive: true });
+
+  const { client } = await startClient({
+    clientName: 'test-client',
+    config: { outputDir: path.join(rootPath, 'output') },
+    roots: [
+      {
+        name: 'workspace',
+        uri: pathToFileURL(rootPath).toString(),
+      },
+    ],
+  });
+
+  await client.callTool({
+    name: 'browser_navigate',
+    arguments: { url: server.HELLO_WORLD },
+  });
+
+  expect(await client.callTool({
+    name: 'browser_take_screenshot',
+    arguments: { filename: 'screenshot.png' },
+  })).toHaveResponse({
+    result: expect.stringContaining(`[Screenshot of viewport](output${path.sep}screenshot.png)`),
+  });
+});

@@ -21,10 +21,10 @@
  * - createEvidence/Payload helpers: Standardize response format
  */
 
-import { z } from 'zod';
+import { z } from 'playwright-core/lib/mcpBundle';
 import { defineTabTool } from '../tool.js';
 import { generateLocatorString } from './helperFunctions.js';
-import { expect } from '@zealous-tech/playwright/test';
+import { expect } from '@playwright/test';
 
 // Global timeout for element attachment validation (in milliseconds)
 const ELEMENT_ATTACHED_TIMEOUT = 15000;
@@ -528,7 +528,7 @@ async function handleElementNotFound(
     evidence,
   });
 
-  response.addResult(JSON.stringify(errorPayload, null, 2));
+  response.addTextResult(JSON.stringify(errorPayload, null, 2));
 }
 
 /**
@@ -558,7 +558,7 @@ function handleExtractionMode(
       evidence: failureEvidence,
     });
 
-    response.addResult(JSON.stringify(failurePayload, null, 2));
+    response.addTextResult(JSON.stringify(failurePayload, null, 2));
     return;
   }
 
@@ -588,7 +588,7 @@ function handleExtractionMode(
     evidence,
   });
 
-  response.addResult(JSON.stringify(payload, null, 2));
+  response.addTextResult(JSON.stringify(payload, null, 2));
 }
 
 /**
@@ -625,7 +625,7 @@ function handleValidationMode(
       evidence: failureEvidence,
     });
 
-    response.addResult(JSON.stringify(failurePayload, null, 2));
+    response.addTextResult(JSON.stringify(failurePayload, null, 2));
     return;
   }
 
@@ -652,7 +652,7 @@ function handleValidationMode(
     evidence,
   });
 
-  response.addResult(JSON.stringify(payload, null, 2));
+  response.addTextResult(JSON.stringify(payload, null, 2));
 }
 
 /**
@@ -672,7 +672,7 @@ async function handleValidationError(
   // Try to get locator string for better error reporting
   let locatorString = '';
   try {
-    const locator = await tab.refLocator({ ref, element });
+    const { locator } = await tab.refLocator({ ref, element });
     locatorString = await generateLocatorString(ref, locator);
   } catch {
     locatorString = '';
@@ -693,7 +693,7 @@ async function handleValidationError(
     error: error instanceof Error ? error.message : String(error),
   });
 
-  response.addResult(JSON.stringify(errorPayload, null, 2));
+  response.addTextResult(JSON.stringify(errorPayload, null, 2));
 }
 
 const validate_icon = defineTabTool({
@@ -711,7 +711,7 @@ const validate_icon = defineTabTool({
     await tab.waitForCompletion(async () => {
       try {
         // Step 1: Locate the element
-        const locator = await tab.refLocator({ ref, element });
+        const { locator } = await tab.refLocator({ ref, element });
 
         // Step 2: Verify element is attached to DOM
         try {

@@ -14,12 +14,4 @@
  * limitations under the License.
  */
 
-export const expect: typeof import('../../bundles/expect/third_party/index').expect = require('./expectBundleImpl').expect;
-export const mock: typeof import('../../bundles/expect/node_modules/jest-mock') = require('./expectBundleImpl').mock;
-export const asymmetricMatchers = require('./expectBundleImpl').asymmetricMatchers;
-export const matcherUtils = require('./expectBundleImpl').matcherUtils;
-export const EXPECTED_COLOR: typeof import('../../bundles/expect/node_modules/jest-matcher-utils/build').EXPECTED_COLOR = require('./expectBundleImpl').EXPECTED_COLOR;
-export const INVERTED_COLOR: typeof import('../../bundles/expect/node_modules/jest-matcher-utils/build').INVERTED_COLOR = require('./expectBundleImpl').INVERTED_COLOR;
-export const RECEIVED_COLOR: typeof import('../../bundles/expect/node_modules/jest-matcher-utils/build').RECEIVED_COLOR = require('./expectBundleImpl').RECEIVED_COLOR;
-export const DIM_COLOR: typeof import('../../bundles/expect/node_modules/jest-matcher-utils/build').DIM_COLOR = require('./expectBundleImpl').DIM_COLOR;
-export const printReceived: typeof import('../../bundles/expect/node_modules/jest-matcher-utils/build').printReceived = require('./expectBundleImpl').printReceived;
+export const expect: typeof import('../../bundles/expect/node_modules/expect/build').expect = require('./expectBundleImpl').expect;

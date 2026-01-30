@@ -26,6 +26,7 @@ export interface Channel {
 
 // ----------- Initializer Traits -----------
 export type InitializerTraits<T> =
+    T extends PageAgentChannel ? PageAgentInitializer :
     T extends JsonPipeChannel ? JsonPipeInitializer :
     T extends AndroidDeviceChannel ? AndroidDeviceInitializer :
     T extends AndroidSocketChannel ? AndroidSocketInitializer :
@@ -63,6 +64,7 @@ export type InitializerTraits<T> =
 
 // ----------- Event Traits -----------
 export type EventsTraits<T> =
+    T extends PageAgentChannel ? PageAgentEvents :
     T extends JsonPipeChannel ? JsonPipeEvents :
     T extends AndroidDeviceChannel ? AndroidDeviceEvents :
     T extends AndroidSocketChannel ? AndroidSocketEvents :
@@ -100,6 +102,7 @@ export type EventsTraits<T> =
 
 // ----------- EventTarget Traits -----------
 export type EventTargetTraits<T> =
+    T extends PageAgentChannel ? PageAgentEventTarget :
     T extends JsonPipeChannel ? JsonPipeEventTarget :
     T extends AndroidDeviceChannel ? AndroidDeviceEventTarget :
     T extends AndroidSocketChannel ? AndroidSocketEventTarget :
@@ -219,36 +222,6 @@ export type SelectorEngine = {
   name: string,
   source: string,
   contentScript?: boolean,
-};
-
-export type AXNode = {
-  role: string,
-  name: string,
-  valueString?: string,
-  valueNumber?: number,
-  description?: string,
-  keyshortcuts?: string,
-  roledescription?: string,
-  valuetext?: string,
-  disabled?: boolean,
-  expanded?: boolean,
-  focused?: boolean,
-  modal?: boolean,
-  multiline?: boolean,
-  multiselectable?: boolean,
-  readonly?: boolean,
-  required?: boolean,
-  selected?: boolean,
-  checked?: 'checked' | 'unchecked' | 'mixed',
-  pressed?: 'pressed' | 'released' | 'mixed',
-  level?: number,
-  valuemin?: number,
-  valuemax?: number,
-  autocomplete?: string,
-  haspopup?: string,
-  invalid?: string,
-  orientation?: string,
-  children?: AXNode[],
 };
 
 export type SetNetworkCookie = {
@@ -563,9 +536,11 @@ export type LocalUtilsConnectResult = {
 export type LocalUtilsTracingStartedParams = {
   tracesDir?: string,
   traceName: string,
+  live?: boolean,
 };
 export type LocalUtilsTracingStartedOptions = {
   tracesDir?: string,
+  live?: boolean,
 };
 export type LocalUtilsTracingStartedResult = {
   stacksId: string,
@@ -626,8 +601,6 @@ export type PlaywrightInitializer = {
   chromium: BrowserTypeChannel,
   firefox: BrowserTypeChannel,
   webkit: BrowserTypeChannel,
-  _bidiChromium: BrowserTypeChannel,
-  _bidiFirefox: BrowserTypeChannel,
   android: AndroidChannel,
   electron: ElectronChannel,
   utils?: LocalUtilsChannel,
@@ -917,7 +890,6 @@ export type BrowserTypeLaunchParams = {
   timeout: number,
   env?: NameValue[],
   headless?: boolean,
-  devtools?: boolean,
   proxy?: {
     server: string,
     bypass?: string,
@@ -943,7 +915,6 @@ export type BrowserTypeLaunchOptions = {
   handleSIGHUP?: boolean,
   env?: NameValue[],
   headless?: boolean,
-  devtools?: boolean,
   proxy?: {
     server: string,
     bypass?: string,
@@ -973,7 +944,6 @@ export type BrowserTypeLaunchPersistentContextParams = {
   timeout: number,
   env?: NameValue[],
   headless?: boolean,
-  devtools?: boolean,
   proxy?: {
     server: string,
     bypass?: string,
@@ -1056,7 +1026,6 @@ export type BrowserTypeLaunchPersistentContextOptions = {
   handleSIGHUP?: boolean,
   env?: NameValue[],
   headless?: boolean,
-  devtools?: boolean,
   proxy?: {
     server: string,
     bypass?: string,
@@ -1135,10 +1104,12 @@ export type BrowserTypeConnectOverCDPParams = {
   headers?: NameValue[],
   slowMo?: number,
   timeout: number,
+  isLocal?: boolean,
 };
 export type BrowserTypeConnectOverCDPOptions = {
   headers?: NameValue[],
   slowMo?: number,
+  isLocal?: boolean,
 };
 export type BrowserTypeConnectOverCDPResult = {
   browser: BrowserChannel,
@@ -1629,6 +1600,7 @@ export interface BrowserContextChannel extends BrowserContextEventTarget, EventT
   pause(params?: BrowserContextPauseParams, progress?: Progress): Promise<BrowserContextPauseResult>;
   enableRecorder(params: BrowserContextEnableRecorderParams, progress?: Progress): Promise<BrowserContextEnableRecorderResult>;
   disableRecorder(params?: BrowserContextDisableRecorderParams, progress?: Progress): Promise<BrowserContextDisableRecorderResult>;
+  exposeConsoleApi(params?: BrowserContextExposeConsoleApiParams, progress?: Progress): Promise<BrowserContextExposeConsoleApiResult>;
   newCDPSession(params: BrowserContextNewCDPSessionParams, progress?: Progress): Promise<BrowserContextNewCDPSessionResult>;
   harStart(params: BrowserContextHarStartParams, progress?: Progress): Promise<BrowserContextHarStartResult>;
   harExport(params: BrowserContextHarExportParams, progress?: Progress): Promise<BrowserContextHarExportResult>;
@@ -1654,7 +1626,8 @@ export type BrowserContextConsoleEvent = {
     lineNumber: number,
     columnNumber: number,
   },
-  page: PageChannel,
+  page?: PageChannel,
+  worker?: WorkerChannel,
 };
 export type BrowserContextCloseEvent = {};
 export type BrowserContextDialogEvent = {
@@ -1907,6 +1880,9 @@ export type BrowserContextEnableRecorderResult = void;
 export type BrowserContextDisableRecorderParams = {};
 export type BrowserContextDisableRecorderOptions = {};
 export type BrowserContextDisableRecorderResult = void;
+export type BrowserContextExposeConsoleApiParams = {};
+export type BrowserContextExposeConsoleApiOptions = {};
+export type BrowserContextExposeConsoleApiResult = void;
 export type BrowserContextNewCDPSessionParams = {
   page?: PageChannel,
   frame?: FrameChannel,
@@ -2092,7 +2068,6 @@ export interface PageChannel extends PageEventTarget, EventTargetChannel {
   mouseClick(params: PageMouseClickParams, progress?: Progress): Promise<PageMouseClickResult>;
   mouseWheel(params: PageMouseWheelParams, progress?: Progress): Promise<PageMouseWheelResult>;
   touchscreenTap(params: PageTouchscreenTapParams, progress?: Progress): Promise<PageTouchscreenTapResult>;
-  accessibilitySnapshot(params: PageAccessibilitySnapshotParams, progress?: Progress): Promise<PageAccessibilitySnapshotResult>;
   pageErrors(params?: PagePageErrorsParams, progress?: Progress): Promise<PagePageErrorsResult>;
   pdf(params: PagePdfParams, progress?: Progress): Promise<PagePdfResult>;
   requests(params?: PageRequestsParams, progress?: Progress): Promise<PageRequestsResult>;
@@ -2103,6 +2078,7 @@ export interface PageChannel extends PageEventTarget, EventTargetChannel {
   stopCSSCoverage(params?: PageStopCSSCoverageParams, progress?: Progress): Promise<PageStopCSSCoverageResult>;
   bringToFront(params?: PageBringToFrontParams, progress?: Progress): Promise<PageBringToFrontResult>;
   updateSubscription(params: PageUpdateSubscriptionParams, progress?: Progress): Promise<PageUpdateSubscriptionResult>;
+  agent(params: PageAgentParams, progress?: Progress): Promise<PageAgentResult>;
 }
 export type PageBindingCallEvent = {
   binding: BindingCallChannel,
@@ -2483,17 +2459,6 @@ export type PageTouchscreenTapOptions = {
 
 };
 export type PageTouchscreenTapResult = void;
-export type PageAccessibilitySnapshotParams = {
-  interestingOnly?: boolean,
-  root?: ElementHandleChannel,
-};
-export type PageAccessibilitySnapshotOptions = {
-  interestingOnly?: boolean,
-  root?: ElementHandleChannel,
-};
-export type PageAccessibilitySnapshotResult = {
-  rootAXNode?: AXNode,
-};
 export type PagePageErrorsParams = {};
 export type PagePageErrorsOptions = {};
 export type PagePageErrorsResult = {
@@ -2550,13 +2515,15 @@ export type PageRequestsResult = {
   requests: RequestChannel[],
 };
 export type PageSnapshotForAIParams = {
+  track?: string,
   timeout: number,
 };
 export type PageSnapshotForAIOptions = {
-
+  track?: string,
 };
 export type PageSnapshotForAIResult = {
-  snapshot: string,
+  full: string,
+  incremental?: string,
 };
 export type PageStartJSCoverageParams = {
   resetOnNavigation?: boolean,
@@ -2615,6 +2582,41 @@ export type PageUpdateSubscriptionOptions = {
 
 };
 export type PageUpdateSubscriptionResult = void;
+export type PageAgentParams = {
+  api?: string,
+  apiKey?: string,
+  apiEndpoint?: string,
+  apiTimeout?: number,
+  apiCacheFile?: string,
+  cacheFile?: string,
+  cacheOutFile?: string,
+  doNotRenderActive?: boolean,
+  maxActions?: number,
+  maxActionRetries?: number,
+  maxTokens?: number,
+  model?: string,
+  secrets?: NameValue[],
+  systemPrompt?: string,
+};
+export type PageAgentOptions = {
+  api?: string,
+  apiKey?: string,
+  apiEndpoint?: string,
+  apiTimeout?: number,
+  apiCacheFile?: string,
+  cacheFile?: string,
+  cacheOutFile?: string,
+  doNotRenderActive?: boolean,
+  maxActions?: number,
+  maxActionRetries?: number,
+  maxTokens?: number,
+  model?: string,
+  secrets?: NameValue[],
+  systemPrompt?: string,
+};
+export type PageAgentResult = {
+  agent: PageAgentChannel,
+};
 
 export interface PageEvents {
   'bindingCall': PageBindingCallEvent;
@@ -2802,6 +2804,7 @@ export type FrameClickParams = {
   clickCount?: number,
   timeout: number,
   trial?: boolean,
+  steps?: number,
 };
 export type FrameClickOptions = {
   strict?: boolean,
@@ -2813,6 +2816,7 @@ export type FrameClickOptions = {
   button?: 'left' | 'right' | 'middle',
   clickCount?: number,
   trial?: boolean,
+  steps?: number,
 };
 export type FrameClickResult = void;
 export type FrameContentParams = {};
@@ -2829,6 +2833,7 @@ export type FrameDragAndDropParams = {
   sourcePosition?: Point,
   targetPosition?: Point,
   strict?: boolean,
+  steps?: number,
 };
 export type FrameDragAndDropOptions = {
   force?: boolean,
@@ -2836,6 +2841,7 @@ export type FrameDragAndDropOptions = {
   sourcePosition?: Point,
   targetPosition?: Point,
   strict?: boolean,
+  steps?: number,
 };
 export type FrameDragAndDropResult = void;
 export type FrameDblclickParams = {
@@ -2848,6 +2854,7 @@ export type FrameDblclickParams = {
   button?: 'left' | 'right' | 'middle',
   timeout: number,
   trial?: boolean,
+  steps?: number,
 };
 export type FrameDblclickOptions = {
   strict?: boolean,
@@ -2857,6 +2864,7 @@ export type FrameDblclickOptions = {
   delay?: number,
   button?: 'left' | 'right' | 'middle',
   trial?: boolean,
+  steps?: number,
 };
 export type FrameDblclickResult = void;
 export type FrameDispatchEventParams = {
@@ -3313,10 +3321,11 @@ export type WorkerInitializer = {
 export interface WorkerEventTarget {
   on(event: 'close', callback: (params: WorkerCloseEvent) => void): this;
 }
-export interface WorkerChannel extends WorkerEventTarget, Channel {
+export interface WorkerChannel extends WorkerEventTarget, EventTargetChannel {
   _type_Worker: boolean;
   evaluateExpression(params: WorkerEvaluateExpressionParams, progress?: Progress): Promise<WorkerEvaluateExpressionResult>;
   evaluateExpressionHandle(params: WorkerEvaluateExpressionHandleParams, progress?: Progress): Promise<WorkerEvaluateExpressionHandleResult>;
+  updateSubscription(params: WorkerUpdateSubscriptionParams, progress?: Progress): Promise<WorkerUpdateSubscriptionResult>;
 }
 export type WorkerCloseEvent = {};
 export type WorkerEvaluateExpressionParams = {
@@ -3341,6 +3350,14 @@ export type WorkerEvaluateExpressionHandleOptions = {
 export type WorkerEvaluateExpressionHandleResult = {
   handle: JSHandleChannel,
 };
+export type WorkerUpdateSubscriptionParams = {
+  event: 'console',
+  enabled: boolean,
+};
+export type WorkerUpdateSubscriptionOptions = {
+
+};
+export type WorkerUpdateSubscriptionResult = void;
 
 export interface WorkerEvents {
   'close': WorkerCloseEvent;
@@ -3513,6 +3530,7 @@ export type ElementHandleClickParams = {
   clickCount?: number,
   timeout: number,
   trial?: boolean,
+  steps?: number,
 };
 export type ElementHandleClickOptions = {
   force?: boolean,
@@ -3523,6 +3541,7 @@ export type ElementHandleClickOptions = {
   button?: 'left' | 'right' | 'middle',
   clickCount?: number,
   trial?: boolean,
+  steps?: number,
 };
 export type ElementHandleClickResult = void;
 export type ElementHandleContentFrameParams = {};
@@ -3538,6 +3557,7 @@ export type ElementHandleDblclickParams = {
   button?: 'left' | 'right' | 'middle',
   timeout: number,
   trial?: boolean,
+  steps?: number,
 };
 export type ElementHandleDblclickOptions = {
   force?: boolean,
@@ -3546,6 +3566,7 @@ export type ElementHandleDblclickOptions = {
   delay?: number,
   button?: 'left' | 'right' | 'middle',
   trial?: boolean,
+  steps?: number,
 };
 export type ElementHandleDblclickResult = void;
 export type ElementHandleDispatchEventParams = {
@@ -5074,4 +5095,102 @@ export interface JsonPipeEvents {
   'message': JsonPipeMessageEvent;
   'closed': JsonPipeClosedEvent;
 }
+
+// ----------- PageAgent -----------
+export type PageAgentInitializer = {
+  page: PageChannel,
+};
+export interface PageAgentEventTarget {
+  on(event: 'turn', callback: (params: PageAgentTurnEvent) => void): this;
+}
+export interface PageAgentChannel extends PageAgentEventTarget, EventTargetChannel {
+  _type_PageAgent: boolean;
+  perform(params: PageAgentPerformParams, progress?: Progress): Promise<PageAgentPerformResult>;
+  expect(params: PageAgentExpectParams, progress?: Progress): Promise<PageAgentExpectResult>;
+  extract(params: PageAgentExtractParams, progress?: Progress): Promise<PageAgentExtractResult>;
+  dispose(params?: PageAgentDisposeParams, progress?: Progress): Promise<PageAgentDisposeResult>;
+  usage(params?: PageAgentUsageParams, progress?: Progress): Promise<PageAgentUsageResult>;
+}
+export type PageAgentTurnEvent = {
+  role: string,
+  message: string,
+  usage?: {
+    inputTokens: number,
+    outputTokens: number,
+  },
+};
+export type PageAgentPerformParams = {
+  task: string,
+  maxActions?: number,
+  maxActionRetries?: number,
+  maxTokens?: number,
+  cacheKey?: string,
+  timeout?: number,
+};
+export type PageAgentPerformOptions = {
+  maxActions?: number,
+  maxActionRetries?: number,
+  maxTokens?: number,
+  cacheKey?: string,
+  timeout?: number,
+};
+export type PageAgentPerformResult = {
+  usage: AgentUsage,
+};
+export type PageAgentExpectParams = {
+  expectation: string,
+  maxActions?: number,
+  maxActionRetries?: number,
+  maxTokens?: number,
+  cacheKey?: string,
+  timeout?: number,
+};
+export type PageAgentExpectOptions = {
+  maxActions?: number,
+  maxActionRetries?: number,
+  maxTokens?: number,
+  cacheKey?: string,
+  timeout?: number,
+};
+export type PageAgentExpectResult = {
+  usage: AgentUsage,
+};
+export type PageAgentExtractParams = {
+  query: string,
+  schema: any,
+  maxActions?: number,
+  maxActionRetries?: number,
+  maxTokens?: number,
+  cacheKey?: string,
+  timeout?: number,
+};
+export type PageAgentExtractOptions = {
+  maxActions?: number,
+  maxActionRetries?: number,
+  maxTokens?: number,
+  cacheKey?: string,
+  timeout?: number,
+};
+export type PageAgentExtractResult = {
+  result: any,
+  usage: AgentUsage,
+};
+export type PageAgentDisposeParams = {};
+export type PageAgentDisposeOptions = {};
+export type PageAgentDisposeResult = void;
+export type PageAgentUsageParams = {};
+export type PageAgentUsageOptions = {};
+export type PageAgentUsageResult = {
+  usage: AgentUsage,
+};
+
+export interface PageAgentEvents {
+  'turn': PageAgentTurnEvent;
+}
+
+export type AgentUsage = {
+  turns: number,
+  inputTokens: number,
+  outputTokens: number,
+};
 

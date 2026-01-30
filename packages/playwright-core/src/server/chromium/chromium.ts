@@ -42,9 +42,10 @@ import type { HTTPRequestParams } from '../utils/network';
 import type { BrowserOptions, BrowserProcess } from '../browser';
 import type { SdkObject } from '../instrumentation';
 import type { Progress } from '../progress';
-import type { ProtocolError } from '../protocolError';
 import type { ConnectionTransport, ProtocolRequest } from '../transport';
+import type { BrowserContext } from '../browserContext';
 import type * as types from '../types';
+import type * as channels from '@protocol/channels';
 import type http from 'http';
 import type stream from 'stream';
 
@@ -52,19 +53,33 @@ const ARTIFACTS_FOLDER = path.join(os.tmpdir(), 'playwright-artifacts-');
 
 export class Chromium extends BrowserType {
   private _devtools: CRDevTools | undefined;
+  private _bidiChromium: BrowserType;
 
-  constructor(parent: SdkObject) {
+  constructor(parent: SdkObject, bidiChromium: BrowserType) {
     super(parent, 'chromium');
+    this._bidiChromium = bidiChromium;
 
     if (debugMode() === 'inspector')
       this._devtools = this._createDevTools();
   }
 
-  override async connectOverCDP(progress: Progress, endpointURL: string, options: { slowMo?: number, headers?: types.HeadersArray }) {
+  override launch(progress: Progress, options: types.LaunchOptions, protocolLogger?: types.ProtocolLogger): Promise<Browser> {
+    if (options.channel?.startsWith('bidi-'))
+      return this._bidiChromium.launch(progress, options, protocolLogger);
+    return super.launch(progress, options, protocolLogger);
+  }
+
+  override async launchPersistentContext(progress: Progress, userDataDir: string, options: channels.BrowserTypeLaunchPersistentContextOptions & { cdpPort?: number, internalIgnoreHTTPSErrors?: boolean, socksProxyPort?: number }): Promise<BrowserContext> {
+    if (options.channel?.startsWith('bidi-'))
+      return this._bidiChromium.launchPersistentContext(progress, userDataDir, options);
+    return super.launchPersistentContext(progress, userDataDir, options);
+  }
+
+  override async connectOverCDP(progress: Progress, endpointURL: string, options: { slowMo?: number, headers?: types.HeadersArray, isLocal?: boolean }) {
     return await this._connectOverCDPInternal(progress, endpointURL, options);
   }
 
-  async _connectOverCDPInternal(progress: Progress, endpointURL: string, options: types.LaunchOptions & { headers?: types.HeadersArray }, onClose?: () => Promise<void>) {
+  async _connectOverCDPInternal(progress: Progress, endpointURL: string, options: types.LaunchOptions & { headers?: types.HeadersArray, isLocal?: boolean }, onClose?: () => Promise<void>) {
     let headersMap: { [key: string]: string; } | undefined;
     if (options.headers)
       headersMap = headersArrayToObject(options.headers, false);
@@ -109,7 +124,8 @@ export class Chromium extends BrowserType {
       };
       validateBrowserContextOptions(persistent, browserOptions);
       const browser = await progress.race(CRBrowser.connect(this.attribution.playwright, chromeTransport, browserOptions));
-      browser._isCollocatedWithServer = false;
+      if (!options.isLocal)
+        browser._isCollocatedWithServer = false;
       browser.on(Browser.Events.Disconnected, doCleanup);
       return browser;
     } catch (error) {
@@ -125,13 +141,8 @@ export class Chromium extends BrowserType {
   }
 
   override async connectToTransport(transport: ConnectionTransport, options: BrowserOptions, browserLogsCollector: RecentLogsCollector): Promise<CRBrowser> {
-    let devtools = this._devtools;
-    if ((options as any).__testHookForDevTools) {
-      devtools = this._createDevTools();
-      await (options as any).__testHookForDevTools(devtools);
-    }
     try {
-      return await CRBrowser.connect(this.attribution.playwright, transport, options, devtools);
+      return await CRBrowser.connect(this.attribution.playwright, transport, options, this._devtools);
     } catch (e) {
       if (browserLogsCollector.recentLogs().some(log => log.includes('Failed to create a ProcessSingleton for your profile directory.'))) {
         throw new Error(
@@ -143,16 +154,14 @@ export class Chromium extends BrowserType {
     }
   }
 
-  override doRewriteStartupLog(error: ProtocolError): ProtocolError {
-    if (!error.logs)
-      return error;
-    if (error.logs.includes('Missing X server'))
-      error.logs = '\n' + wrapInASCIIBox(kNoXServerRunningError, 1);
+  override doRewriteStartupLog(logs: string): string {
+    if (logs.includes('Missing X server'))
+      logs = '\n' + wrapInASCIIBox(kNoXServerRunningError, 1);
     // These error messages are taken from Chromium source code as of July, 2020:
     // https://github.com/chromium/chromium/blob/70565f67e79f79e17663ad1337dc6e63ee207ce9/content/browser/zygote_host/zygote_host_impl_linux.cc
-    if (!error.logs.includes('crbug.com/357670') && !error.logs.includes('No usable sandbox!') && !error.logs.includes('crbug.com/638180'))
-      return error;
-    error.logs = [
+    if (!logs.includes('crbug.com/357670') && !logs.includes('No usable sandbox!') && !logs.includes('crbug.com/638180'))
+      return logs;
+    return [
       `Chromium sandboxing failed!`,
       `================================`,
       `To avoid the sandboxing issue, do either of the following:`,
@@ -161,7 +170,6 @@ export class Chromium extends BrowserType {
       `================================`,
       ``,
     ].join('\n');
-    return error;
   }
 
   override amendEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
@@ -305,13 +313,9 @@ export class Chromium extends BrowserType {
       throw new Error('Arguments can not specify page to be opened');
     const chromeArguments = [...chromiumSwitches(options.assistantMode, options.channel)];
 
-    if (os.platform() === 'darwin') {
-      // See https://issues.chromium.org/issues/40277080
-      chromeArguments.push('--enable-unsafe-swiftshader');
-    }
+    // See https://issues.chromium.org/issues/40277080
+    chromeArguments.push('--enable-unsafe-swiftshader');
 
-    if (options.devtools)
-      chromeArguments.push('--auto-open-devtools-for-tabs');
     if (options.headless) {
       chromeArguments.push('--headless');
 
@@ -353,6 +357,10 @@ export class Chromium extends BrowserType {
   }
 
   override getExecutableName(options: types.LaunchOptions): string {
+    if (options.channel && registry.isChromiumAlias(options.channel))
+      return 'chromium';
+    if (options.channel === 'chromium-tip-of-tree')
+      return options.headless ? 'chromium-tip-of-tree-headless-shell' : 'chromium-tip-of-tree';
     if (options.channel)
       return options.channel;
     return options.headless ? 'chromium-headless-shell' : 'chromium';

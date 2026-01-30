@@ -14,15 +14,15 @@
   limitations under the License.
 */
 
-import type { ActionTraceEvent, AfterActionTraceEventAttachment } from '@trace/trace';
+import type { ActionTraceEvent } from '@trace/trace';
 import { clsx, msToString } from '@web/uiUtils';
 import * as React from 'react';
 import './actionList.css';
-import * as modelUtil from './modelUtil';
+import { stats, buildActionTree } from '@isomorphic/trace/traceModel';
 import { asLocatorDescription, type Language } from '@isomorphic/locatorGenerators';
 import type { TreeState } from '@web/components/treeView';
 import { TreeView } from '@web/components/treeView';
-import type { ActionTraceEventInContext, ActionTreeItem } from './modelUtil';
+import type { ActionTraceEventInContext, ActionTreeItem } from '@isomorphic/trace/traceModel';
 import type { Boundaries } from './geometry';
 import { ToolbarButton } from '@web/components/toolbarButton';
 import { testStatusIcon } from './testUtils';
@@ -34,11 +34,13 @@ export interface ActionListProps {
   selectedAction: ActionTraceEventInContext | undefined,
   selectedTime: Boundaries | undefined,
   setSelectedTime: (time: Boundaries | undefined) => void,
+  treeState: TreeState,
+  setTreeState: (treeState: TreeState) => void,
   sdkLanguage: Language | undefined;
   onSelected?: (action: ActionTraceEventInContext) => void,
   onHighlighted?: (action: ActionTraceEventInContext | undefined) => void,
   revealConsole?: () => void,
-  revealAttachment(attachment: AfterActionTraceEventAttachment): void,
+  revealActionAttachment?(callId: string): void,
   isLive?: boolean,
 }
 
@@ -49,15 +51,16 @@ export const ActionList: React.FC<ActionListProps> = ({
   selectedAction,
   selectedTime,
   setSelectedTime,
+  treeState,
+  setTreeState,
   sdkLanguage,
   onSelected,
   onHighlighted,
   revealConsole,
-  revealAttachment,
+  revealActionAttachment,
   isLive,
 }) => {
-  const [treeState, setTreeState] = React.useState<TreeState>({ expandedItems: new Map() });
-  const { rootItem, itemMap } = React.useMemo(() => modelUtil.buildActionTree(actions), [actions]);
+  const { rootItem, itemMap } = React.useMemo(() => buildActionTree(actions), [actions]);
 
   const { selectedItem } = React.useMemo(() => {
     const selectedItem = selectedAction ? itemMap.get(selectedAction.callId) : undefined;
@@ -65,23 +68,24 @@ export const ActionList: React.FC<ActionListProps> = ({
   }, [itemMap, selectedAction]);
 
   const isError = React.useCallback((item: ActionTreeItem) => {
-    return !!item.action?.error?.message;
+    return !!item.action.error?.message;
   }, []);
 
   const onAccepted = React.useCallback((item: ActionTreeItem) => {
-    return setSelectedTime({ minimum: item.action!.startTime, maximum: item.action!.endTime });
+    return setSelectedTime({ minimum: item.action.startTime, maximum: item.action.endTime });
   }, [setSelectedTime]);
 
   const render = React.useCallback((item: ActionTreeItem) => {
-    return renderAction(item.action!, { sdkLanguage, revealConsole, revealAttachment, isLive, showDuration: true, showBadges: true });
-  }, [isLive, revealConsole, revealAttachment, sdkLanguage]);
+    const showAttachments = !!revealActionAttachment && !!item.action.attachments?.length;
+    return renderAction(item.action, { sdkLanguage, revealConsole, revealActionAttachment: () => revealActionAttachment?.(item.action.callId), isLive, showDuration: true, showBadges: true, showAttachments });
+  }, [isLive, revealConsole, revealActionAttachment, sdkLanguage]);
 
   const isVisible = React.useCallback((item: ActionTreeItem) => {
-    return !selectedTime || !item.action || (item.action!.startTime <= selectedTime.maximum && item.action!.endTime >= selectedTime.minimum);
+    return !selectedTime || !item.action || (item.action.startTime <= selectedTime.maximum && item.action.endTime >= selectedTime.minimum);
   }, [selectedTime]);
 
   const onSelectedAction = React.useCallback((item: ActionTreeItem) => {
-    onSelected?.(item.action!);
+    onSelected?.(item.action);
   }, [onSelected]);
 
   const onHighlightedAction = React.useCallback((item: ActionTreeItem | undefined) => {
@@ -111,14 +115,14 @@ export const renderAction = (
   options: {
     sdkLanguage?: Language,
     revealConsole?: () => void,
-    revealAttachment?(attachment: AfterActionTraceEventAttachment): void,
+    revealActionAttachment?(): void,
     isLive?: boolean,
     showDuration?: boolean,
     showBadges?: boolean,
+    showAttachments?: boolean,
   }) => {
-  const { sdkLanguage, revealConsole, revealAttachment, isLive, showDuration, showBadges } = options;
-  const { errors, warnings } = modelUtil.stats(action);
-  const showAttachments = !!action.attachments?.length && !!revealAttachment;
+  const { sdkLanguage, revealConsole, revealActionAttachment, isLive, showDuration, showBadges, showAttachments } = options;
+  const { errors, warnings } = stats(action);
 
   const locator = action.params.selector ? asLocatorDescription(sdkLanguage || 'javascript', action.params.selector) : undefined;
 
@@ -135,7 +139,7 @@ export const renderAction = (
     <div className='hbox'>
       <span className='action-title-method' title={title}>{elements}</span>
       {(showDuration || showBadges || showAttachments || isSkipped) && <div className='spacer'></div>}
-      {showAttachments && <ToolbarButton icon='attach' title='Open Attachment' onClick={() => revealAttachment(action.attachments![0])} />}
+      {showAttachments && <ToolbarButton icon='attach' title='Open Attachment' onClick={() => revealActionAttachment?.()} />}
       {showDuration && !isSkipped && <div className='action-duration'>{time || <span className='codicon codicon-loading'></span>}</div>}
       {isSkipped && <span className={clsx('action-skipped', 'codicon', testStatusIcon('skipped'))} title='skipped'></span>}
       {showBadges && <div className='action-icons' onClick={() => revealConsole?.()}>
@@ -148,7 +152,8 @@ export const renderAction = (
 };
 
 export function renderTitleForCall(action: ActionTraceEvent): { elements: React.ReactNode[], title: string } {
-  const titleFormat = action.title ?? methodMetainfo.get(action.class + '.' + action.method)?.title ?? action.method;
+  let titleFormat = action.title ?? methodMetainfo.get(action.class + '.' + action.method)?.title ?? action.method;
+  titleFormat = titleFormat.replace(/\n/g, ' ');
 
   const elements: React.ReactNode[] = [];
   const title: string[] = [];
@@ -171,7 +176,7 @@ export function renderTitleForCall(action: ActionTraceEvent): { elements: React.
       elements.push(param);
       title.push(param);
     } else {
-      elements.push(<span className='action-title-param'>{param}</span>);
+      elements.push(<span key={elements.length} className='action-title-param'>{param}</span>);
       title.push(param);
     }
     currentIndex = match.index + fullMatch.length;

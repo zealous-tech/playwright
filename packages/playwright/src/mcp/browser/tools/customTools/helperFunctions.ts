@@ -16,7 +16,7 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import type * as playwright from 'playwright';
-import { expect } from '@zealous-tech/playwright/test';
+import { expect } from '@playwright/test';
 import { generateLocator } from '../utils.js';
 const camelToKebab = (prop: string) =>
   prop.replace(/[A-Z]/g, m => `-${m.toLowerCase()}`);
@@ -132,7 +132,7 @@ async function getAllComputedStylesDirect(
   ref: string,
   element: string
 ): Promise<Record<string, string>> {
-  const locator = await tab.refLocator({ ref, element });
+  const { locator } = await tab.refLocator({ ref, element });
 
   const allStyles: Record<string, string> = await locator.evaluate(
       (el: Element) => {
@@ -815,7 +815,7 @@ async function collectAllFrames(page: any, level: number): Promise<Array<{frame:
 /**
  * Generate locator string from ref and locator
  * If ref starts with ###code, extracts the code directly
- * Otherwise, generates locator string using generateLocator
+ * Otherwise, generates locator string using asLocator
  */
 async function generateLocatorString(ref: string, locator: any): Promise<string> {
   const isLocatorCode = ref && ref.startsWith('###code');

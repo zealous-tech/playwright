@@ -14,8 +14,9 @@
  * limitations under the License.
  */
 
-import { z } from '../../sdk/bundle';
+import { z } from 'playwright-core/lib/mcpBundle';
 import { defineTool } from './tool';
+import { renderTabsMarkdown } from '../response';
 
 const browserTabs = defineTool({
   capability: 'core-tabs',
@@ -35,29 +36,30 @@ const browserTabs = defineTool({
     switch (params.action) {
       case 'list': {
         await context.ensureTab();
-        response.setIncludeTabs();
-        return;
+        break;
       }
       case 'new': {
-        const tab = await context.newTab();
-        await tab.page.waitForLoadState('load');
-        response.setIncludeTabs();
-        return;
+        // @ZEALOUS UPDATE - wait for load state after creating new tab
+        const newTab = await context.newTab();
+        await newTab.page.waitForLoadState('load');
+        break;
       }
       case 'close': {
         await context.closeTab(params.index);
-        response.setIncludeSnapshot();
-        return;
+        break;
       }
       case 'select': {
         if (params.index === undefined)
           throw new Error('Tab index is required');
-        const tab = await context.selectTab(params.index);
-        await tab.page.waitForLoadState('load');
-        response.setIncludeSnapshot();
-        return;
+        // @ZEALOUS UPDATE - wait for load state after selecting tab
+        const selectedTab = await context.selectTab(params.index);
+        await selectedTab.page.waitForLoadState('load');
+        break;
       }
     }
+    const tabHeaders = await Promise.all(context.tabs().map(tab => tab.headerSnapshot()));
+    const result = renderTabsMarkdown(tabHeaders);
+    response.addTextResult(result.join('\n'));
   },
 });
 
