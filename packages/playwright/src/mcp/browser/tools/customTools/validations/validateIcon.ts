@@ -22,13 +22,10 @@
  */
 
 import { z } from 'playwright-core/lib/mcpBundle';
-import { defineTabTool } from '../tool.js';
-import { generateLocatorString } from './helperFunctions.js';
 import { expect } from '@playwright/test';
-
-
-// Global timeout for element attachment validation (in milliseconds)
-const ELEMENT_ATTACHED_TIMEOUT = 15000;
+import { defineTabTool } from '../../tool';
+import { generateLocatorString } from '../helpers/helpers';
+import { ELEMENT_ATTACHED_TIMEOUT } from '../helpers/utils';
 
 // ============================================================================
 // TYPE DEFINITIONS
@@ -697,7 +694,7 @@ async function handleValidationError(
   response.addTextResult(JSON.stringify(errorPayload, null, 2));
 }
 
-const validate_icon = defineTabTool({
+export const validate_icon = defineTabTool({
   capability: 'core',
   schema: {
     name: 'validate_icon',
@@ -746,4 +743,3 @@ const validate_icon = defineTabTool({
   },
 });
 
-export default [validate_icon];

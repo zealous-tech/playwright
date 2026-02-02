@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 import { promisify } from 'util';
-import type * as playwright from 'playwright';
 import { expect } from '@playwright/test';
 import { execFile } from 'child_process';
 import { generateLocator } from '../../utils.js';
@@ -595,74 +594,74 @@ function getAssertionEvidence(
         return `'${elementDescription}' is ${negate ? 'detached from' : 'attached to'} DOM `;
       }
     },
-    toHaveAttribute: (args) => {
+    toHaveAttribute: args => {
       const attrName = args?.name || 'attribute';
       const attrValue = args?.value;
       if (attrValue !== undefined)
         return `'${elementDescription}' attribute "${attrName}" ${negate ? 'does not equal' : 'equals'} "${attrValue}" `;
       return `'${elementDescription}' ${negate ? 'does not have' : 'has'} attribute "${attrName}" `;
     },
-    toHaveText: (args) => {
+    toHaveText: args => {
       const expected = args?.expected || 'text';
       const expectedStr = Array.isArray(expected) ? expected.join(', ') : expected;
       return `'${elementDescription}' text ${negate ? 'does not match' : 'matches'} "${expectedStr}" `;
     },
-    toContainText: (args) => {
+    toContainText: args => {
       const expected = args?.expected || 'text';
       const expectedStr = Array.isArray(expected) ? expected.join(', ') : expected;
       return `'${elementDescription}' ${negate ? 'does not contain' : 'contains'} text "${expectedStr}" `;
     },
-    toHaveValue: (args) => {
+    toHaveValue: args => {
       const value = args?.value !== undefined ? args.value : 'value';
       return `'${elementDescription}' value ${negate ? 'does not equal' : 'equals'} "${value}" `;
     },
-    toHaveValues: (args) => {
+    toHaveValues: args => {
       const values = args?.values || [];
       const valuesStr = Array.isArray(values) ? values.join(', ') : String(values);
       return `'${elementDescription}' values ${negate ? 'do not match' : 'match'} [${valuesStr}] `;
     },
-    selectHasValue: (args) => {
+    selectHasValue: args => {
       const value = args?.value || 'value';
       return `'${elementDescription}' selected value ${negate ? 'does not equal' : 'equals'} "${value}" `;
     },
-    toMatchAriaSnapshot: (args) => {
+    toMatchAriaSnapshot: args => {
       const expected = args?.expected || 'snapshot';
       return `'${elementDescription}' ARIA structure ${negate ? 'does not match' : 'matches'} "${expected}" `;
     },
     toMatchAriaSnapshotOptions: () => `'${elementDescription}' ARIA structure ${negate ? 'does not match' : 'matches'} snapshot with options `,
-    toContainClass: (args) => {
+    toContainClass: args => {
       const expected = args?.expected || 'class';
       const expectedStr = Array.isArray(expected) ? expected.join(' ') : expected;
       return `'${elementDescription}' ${negate ? 'does not contain' : 'contains'} class "${expectedStr}" `;
     },
-    toHaveClass: (args) => {
+    toHaveClass: args => {
       const expected = args?.expected || 'class';
       const expectedStr = Array.isArray(expected) ? expected.join(' ') : expected;
       return `'${elementDescription}' classes ${negate ? 'do not match' : 'match'} "${expectedStr}" `;
     },
-    toHaveCount: (args) => {
+    toHaveCount: args => {
       const count = args?.count !== undefined ? args.count : 'count';
       return `'${elementDescription}' count ${negate ? 'does not equal' : 'equals'} ${count} as expected`;
     },
-    toHaveCSS: (args) => {
+    toHaveCSS: args => {
       const cssName = args?.name || 'property';
       const cssValue = args?.value || 'value';
       return `'${elementDescription}' CSS "${cssName}" ${negate ? 'does not equal' : 'equals'} "${cssValue}" `;
     },
-    toHaveId: (args) => {
+    toHaveId: args => {
       const id = args?.id || 'id';
       return `'${elementDescription}' id ${negate ? 'does not equal' : 'equals'} "${id}" `;
     },
-    toHaveJSProperty: (args) => {
+    toHaveJSProperty: args => {
       const propName = args?.name || 'property';
       const propValue = args?.value !== undefined ? JSON.stringify(args.value) : 'value';
       return `'${elementDescription}' JS property "${propName}" ${negate ? 'does not equal' : 'equals'} ${propValue} `;
     },
-    toHaveRole: (args) => {
+    toHaveRole: args => {
       const role = args?.role || 'role';
       return `'${elementDescription}' role ${negate ? 'does not equal' : 'equals'} "${role}" `;
     },
-    toHaveScreenshot: (args) => {
+    toHaveScreenshot: args => {
       const name = args?.name;
       if (name !== undefined) {
         const nameStr = Array.isArray(name) ? name.join(', ') : name;
@@ -671,15 +670,15 @@ function getAssertionEvidence(
         return `'${elementDescription}' screenshot ${negate ? 'does not match' : 'matches'} with options `;
       }
     },
-    toHaveAccessibleDescription: (args) => {
+    toHaveAccessibleDescription: args => {
       const description = args?.description || 'description';
       return `'${elementDescription}' accessible description ${negate ? 'does not equal' : 'equals'} "${description}" `;
     },
-    toHaveAccessibleErrorMessage: (args) => {
+    toHaveAccessibleErrorMessage: args => {
       const errorMessage = args?.errorMessage || 'error message';
       return `'${elementDescription}' accessible error message ${negate ? 'does not equal' : 'equals'} "${errorMessage}" `;
     },
-    toHaveAccessibleName: (args) => {
+    toHaveAccessibleName: args => {
       const name = args?.name || 'name';
       return `'${elementDescription}' accessible name ${negate ? 'does not equal' : 'equals'} "${name}" `;
     },
