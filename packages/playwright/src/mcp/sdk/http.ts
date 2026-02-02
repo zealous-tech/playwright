@@ -20,8 +20,9 @@ import http from 'http';
 import crypto from 'crypto';
 
 import { debug } from 'playwright-core/lib/utilsBundle';
+import * as mcpBundle from 'playwright-core/lib/mcpBundle';
+import { createHttpServer, startHttpServer } from 'playwright-core/lib/utils';
 
-import * as mcpBundle from './bundle';
 import * as mcpServer from './server';
 
 import type { ServerBackendFactory } from './server';
@@ -30,37 +31,31 @@ import type { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/se
 
 const testDebug = debug('pw:mcp:test');
 
-export async function startHttpServer(config: { host?: string, port?: number }, abortSignal?: AbortSignal): Promise<http.Server> {
-  const { host, port } = config;
-  const httpServer = http.createServer();
-  decorateServer(httpServer);
-  await new Promise<void>((resolve, reject) => {
-    httpServer.on('error', reject);
-    abortSignal?.addEventListener('abort', () => {
-      httpServer.close();
-      reject(new Error('Aborted'));
-    });
-    httpServer.listen(port, host, () => {
-      resolve();
-      httpServer.removeListener('error', reject);
-    });
-  });
-  return httpServer;
+export async function startMcpHttpServer(
+  config: { host?: string, port?: number },
+  serverBackendFactory: ServerBackendFactory,
+  allowedHosts?: string[]
+): Promise<string> {
+  const httpServer = createHttpServer();
+  await startHttpServer(httpServer, config);
+  return await installHttpTransport(httpServer, serverBackendFactory, allowedHosts);
 }
 
-export function httpAddressToString(address: string | net.AddressInfo | null): string {
+export function addressToString(address: string | net.AddressInfo | null, options: {
+  protocol: 'http' | 'ws';
+  normalizeLoopback?: boolean;
+}): string {
   assert(address, 'Could not bind server socket');
   if (typeof address === 'string')
-    return address;
-  const resolvedPort = address.port;
-  let resolvedHost = address.family === 'IPv4' ? address.address : `[${address.address}]`;
-  if (resolvedHost === '0.0.0.0' || resolvedHost === '[::]')
-    resolvedHost = 'localhost';
-  return `http://${resolvedHost}:${resolvedPort}`;
+    throw new Error('Unexpected address type: ' + address);
+  let host = address.family === 'IPv4' ? address.address : `[${address.address}]`;
+  if (options.normalizeLoopback && (host === '0.0.0.0' || host === '[::]' || host === '[::1]' || host === '127.0.0.1'))
+    host = 'localhost';
+  return `${options.protocol}://${host}:${address.port}`;
 }
 
-export async function installHttpTransport(httpServer: http.Server, serverBackendFactory: ServerBackendFactory, allowedHosts?: string[]) {
-  const url = httpAddressToString(httpServer.address());
+async function installHttpTransport(httpServer: http.Server, serverBackendFactory: ServerBackendFactory, allowedHosts?: string[]) {
+  const url = addressToString(httpServer.address(), { protocol: 'http', normalizeLoopback: true });
   const host = new URL(url).host;
   allowedHosts = (allowedHosts || [host]).map(h => h.toLowerCase());
   const allowAnyHost = allowedHosts.includes('*');
@@ -96,6 +91,8 @@ export async function installHttpTransport(httpServer: http.Server, serverBacken
     else
       await handleStreamable(serverBackendFactory, req, res, streamableSessions);
   });
+
+  return url;
 }
 
 async function handleSSE(serverBackendFactory: ServerBackendFactory, req: http.IncomingMessage, res: http.ServerResponse, url: URL, sessions: Map<string, SSEServerTransport>) {
@@ -164,20 +161,4 @@ async function handleStreamable(serverBackendFactory: ServerBackendFactory, req:
 
   res.statusCode = 400;
   res.end('Invalid request');
-}
-
-function decorateServer(server: net.Server) {
-  const sockets = new Set<net.Socket>();
-  server.on('connection', socket => {
-    sockets.add(socket);
-    socket.once('close', () => sockets.delete(socket));
-  });
-
-  const close = server.close;
-  server.close = (callback?: (err?: Error) => void) => {
-    for (const socket of sockets)
-      socket.destroy();
-    sockets.clear();
-    return close.call(server, callback);
-  };
 }

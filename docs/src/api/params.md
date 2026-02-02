@@ -103,6 +103,16 @@ A selector to search for an element to drop onto. If there are multiple elements
 A point to use relative to the top-left corner of element padding box. If not specified, uses some visible point of the
 element.
 
+## input-mousemove-steps
+- `steps` <[int]>
+
+Defaults to 1. Sends `n` interpolated `mousemove` events to represent travel between Playwright's current cursor position and the provided destination. When set to 1, emits a single `mousemove` event at the destination location.
+
+## input-drag-steps
+- `steps` <[int]>
+
+Defaults to 1. Sends `n` interpolated `mousemove` events to represent travel between the `mousedown` and `mouseup` of the drag. When set to 1, emits a single `mousemove` event at the destination location.
+
 ## input-modifiers
 - `modifiers` <[Array]<[KeyboardModifier]<"Alt"|"Control"|"ControlOrMeta"|"Meta"|"Shift">>>
 
@@ -359,6 +369,42 @@ It makes the execution of the tests non-deterministic.
 
 Emulates consistent window screen size available inside web page via `window.screen`. Is only used when the
 [`option: viewport`] is set.
+
+## page-agent-cache-key
+* since: v1.58
+* hidden
+- `cacheKey` <[string]>
+
+All the agentic actions are converted to the Playwright calls and are cached.
+By default, they are cached globally with the `task` as a key. This option allows controlling the cache key explicitly.
+
+## page-agent-max-tokens
+* since: v1.58
+* hidden
+- `maxTokens` <[int]>
+
+Maximum number of tokens to consume. The agentic loop will stop after input + output tokens exceed this value.
+Defaults to context-wide value specified in `agent` property.
+
+## page-agent-max-actions
+* since: v1.58
+* hidden
+- `maxActions` <[int]>
+
+Maximum number of agentic actions to generate, defaults to context-wide value specified in `agent` property.
+
+## page-agent-max-action-retries
+* since: v1.58
+* hidden
+- `maxActionRetries` <[int]>
+
+Maximum number of retries when generating each action, defaults to context-wide value specified in `agent` property.
+
+## page-agent-call-options-v1.58
+- %%-page-agent-cache-key-%%
+- %%-page-agent-max-tokens-%%
+- %%-page-agent-max-actions-%%
+- %%-page-agent-max-action-retries-%%
 
 ## fetch-param-url
 - `url` <[string]>
@@ -1068,8 +1114,7 @@ Close the browser process on SIGHUP. Defaults to `true`.
 
 Whether to run browser in headless mode. More details for
 [Chromium](https://developers.google.com/web/updates/2017/04/headless-chrome) and
-[Firefox](https://hacks.mozilla.org/2017/12/using-headless-mode-in-firefox/). Defaults to `true` unless the
-[`option: BrowserType.launch.devtools`] option is `true`.
+[Firefox](https://hacks.mozilla.org/2017/12/using-headless-mode-in-firefox/). Defaults to `true`.
 
 ## js-python-browser-option-firefoxuserprefs
 * langs: js, python
@@ -1107,13 +1152,6 @@ disable timeout.
 
 If specified, traces are saved into this directory.
 
-## browser-option-devtools
-* deprecated: Use [debugging tools](../debug.md) instead.
-- `devtools` <[boolean]>
-
-**Chromium-only** Whether to auto-open a Developer Tools panel for each tab. If this option is `true`, the
-[`option: headless`] option will be set `false`.
-
 ## browser-option-slowmo
 - `slowMo` <[float]>
 
@@ -1123,7 +1161,6 @@ Slows down Playwright operations by the specified amount of milliseconds. Useful
 - %%-browser-option-args-%%
 - %%-browser-option-channel-%%
 - %%-browser-option-chromiumsandbox-%%
-- %%-browser-option-devtools-%%
 - %%-browser-option-downloadspath-%%
 - %%-csharp-java-browser-option-env-%%
 - %%-js-browser-option-env-%%

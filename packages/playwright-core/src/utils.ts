@@ -31,6 +31,7 @@ export * from './utils/isomorphic/stringUtils';
 export * from './utils/isomorphic/time';
 export * from './utils/isomorphic/timeoutRunner';
 export * from './utils/isomorphic/urlMatch';
+export * from './utils/isomorphic/yaml';
 
 export * from './server/utils/ascii';
 export * from './server/utils/comparators';
@@ -43,6 +44,7 @@ export * from './server/utils/expectUtils';
 export * from './server/utils/fileUtils';
 export * from './server/utils/hostPlatform';
 export * from './server/utils/httpServer';
+export * from './server/utils/imageUtils';
 export * from './server/utils/network';
 export * from './server/utils/nodePlatform';
 export * from './server/utils/processLauncher';

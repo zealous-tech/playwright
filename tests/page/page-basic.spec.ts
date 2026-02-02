@@ -94,7 +94,9 @@ it('page.close should work with window.close', async function({ page }) {
   await closedPromise;
 });
 
-it('page.frame should respect name', async function({ page }) {
+it('page.frame should respect name', async function({ page, isBidi }) {
+  it.skip(isBidi, 'page.frame({ name }) is racy with BiDi');
+
   await page.setContent(`<iframe name=target></iframe>`);
   expect(page.frame({ name: 'bogus' })).toBe(null);
   const frame = page.frame({ name: 'target' });
@@ -125,7 +127,7 @@ it('should have sane user agent', async ({ page, browserName, isElectron, isAndr
   // Second part in parenthesis is platform - ignore it.
 
   // Third part for Firefox is the last one and encodes engine and browser versions.
-  if (browserName === 'firefox' || browserName as any === '_bidiFirefox') {
+  if (browserName === 'firefox') {
     const [engine, browser] = part3.split(' ');
     expect(engine.startsWith('Gecko')).toBe(true);
     expect(browser.startsWith('Firefox')).toBe(true);

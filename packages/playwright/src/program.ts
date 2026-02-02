@@ -33,12 +33,11 @@ import * as testServer from './runner/testServer';
 import { runWatchModeLoop } from './runner/watchMode';
 import { runAllTestsWithConfig, TestRunner } from './runner/testRunner';
 import { createErrorCollectingReporter } from './runner/reporters';
-import { ServerBackendFactory, runMainBackend } from './mcp/sdk/exports';
+import * as mcp from './mcp/sdk/exports';
 import { TestServerBackend } from './mcp/test/testBackend';
-import { ensureSeedTest, seedProject } from './mcp/test/seed';
 import { decorateCommand } from './mcp/program';
 import { setupExitWatchdog } from './mcp/browser/watchdog';
-import { initClaudeCodeRepo, initOpencodeRepo, initVSCodeRepo } from './agents/generateAgents';
+import { ClaudeGenerator, OpencodeGenerator, VSCodeGenerator, CopilotGenerator } from './agents/generateAgents';
 
 import type { ConfigCLIOverrides } from './common/ipc';
 import type { TraceMode } from '../types/test';
@@ -163,20 +162,14 @@ function addTestMCPServerCommand(program: Command) {
   command.option('--port <port>', 'port to listen on for SSE transport.');
   command.action(async options => {
     setupExitWatchdog();
-    const backendFactory: ServerBackendFactory = {
+    const factory: mcp.ServerBackendFactory = {
       name: 'Playwright Test Runner',
       nameInConfig: 'playwright-test-runner',
       version: packageJSON.version,
       create: () => new TestServerBackend(options.config, { muteConsole: options.port === undefined, headless: options.headless }),
     };
-    const mdbUrl = await runMainBackend(
-        backendFactory,
-        {
-          port: options.port === undefined ? undefined : +options.port
-        },
-    );
-    if (mdbUrl)
-      console.error('MCP Listening on: ', mdbUrl);
+    // TODO: add all options from mcp.startHttpServer.
+    await mcp.start(factory, { port: options.port === undefined ? undefined : +options.port, host: options.host });
   });
 }
 
@@ -184,24 +177,23 @@ function addInitAgentsCommand(program: Command) {
   const command = program.command('init-agents');
   command.description('Initialize repository agents');
   const option = command.createOption('--loop <loop>', 'Agentic loop provider');
-  option.choices(['vscode', 'claude', 'opencode']);
+  option.choices(['claude', 'copilot', 'opencode', 'vscode', 'vscode-legacy']);
   command.addOption(option);
   command.option('-c, --config <file>', `Configuration file to find a project to use for seed test`);
   command.option('--project <project>', 'Project to use for seed test');
+  command.option('--prompts', 'Whether to include prompts in the agent initialization');
   command.action(async opts => {
+    const config = await loadConfigFromFile(opts.config);
     if (opts.loop === 'opencode') {
-      await initOpencodeRepo();
-    } else if (opts.loop === 'vscode') {
-      await initVSCodeRepo();
+      await OpencodeGenerator.init(config, opts.project, opts.prompts);
+    } else if (opts.loop === 'vscode-legacy') {
+      await VSCodeGenerator.init(config, opts.project);
     } else if (opts.loop === 'claude') {
-      await initClaudeCodeRepo();
+      await ClaudeGenerator.init(config, opts.project, opts.prompts);
     } else {
-      command.help();
+      await CopilotGenerator.init(config, opts.project, opts.prompts);
       return;
     }
-    const config = await loadConfigFromFile(opts.config);
-    const project = seedProject(config, opts.project);
-    await ensureSeedTest(project, true);
   });
 }
 
@@ -268,8 +260,8 @@ async function runTests(args: string[], opts: { [key: string]: any }) {
 }
 
 async function runTestServer(opts: { [key: string]: any }) {
-  const host = opts.host || 'localhost';
-  const port = opts.port ? +opts.port : 0;
+  const host = opts.host;
+  const port = opts.port ? +opts.port : undefined;
   const status = await testServer.runTestServer(opts.config, { }, { host, port });
   const exitCode = status === 'interrupted' ? 130 : (status === 'passed' ? 0 : 1);
   gracefullyProcessExitDoNotHang(exitCode);
@@ -308,12 +300,15 @@ function overridesFromOptions(options: { [key: string]: any }): ConfigCLIOverrid
     retries: options.retries ? parseInt(options.retries, 10) : undefined,
     reporter: resolveReporterOption(options.reporter),
     shard: resolveShardOption(options.shard),
+    shardWeights: resolveShardWeightsOption(),
     timeout: options.timeout ? parseInt(options.timeout, 10) : undefined,
     tsconfig: options.tsconfig ? path.resolve(process.cwd(), options.tsconfig) : undefined,
     ignoreSnapshots: options.ignoreSnapshots ? !!options.ignoreSnapshots : undefined,
     updateSnapshots: options.updateSnapshots,
     updateSourceMethod: options.updateSourceMethod,
+    runAgents: options.runAgents,
     workers: options.workers,
+    pause: process.env.PWPAUSE ? true : undefined,
   };
 
   if (options.browser) {
@@ -329,7 +324,7 @@ function overridesFromOptions(options: { [key: string]: any }): ConfigCLIOverrid
     });
   }
 
-  if (options.headed || options.debug)
+  if (options.headed || options.debug || overrides.pause)
     overrides.use = { headless: false };
   if (!options.ui && options.debug) {
     overrides.debug = true;
@@ -377,6 +372,19 @@ function resolveShardOption(shard?: string): ConfigCLIOverrides['shard'] {
   }
 
   return { current, total };
+}
+
+function resolveShardWeightsOption(): ConfigCLIOverrides['shardWeights'] {
+  const shardWeights = process.env.PWTEST_SHARD_WEIGHTS;
+  if (!shardWeights)
+    return undefined;
+
+  return shardWeights.split(':').map(w => {
+    const weight = parseInt(w, 10);
+    if (isNaN(weight) || weight < 0)
+      throw new Error(`PWTEST_SHARD_WEIGHTS="${shardWeights}" weights must be non-negative numbers`);
+    return weight;
+  });
 }
 
 function resolveReporter(id: string) {

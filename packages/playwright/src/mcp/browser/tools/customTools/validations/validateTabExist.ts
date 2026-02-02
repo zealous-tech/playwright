@@ -167,7 +167,7 @@ export const validate_tab_exist = defineTabTool({
         })),
       };
       console.log('Validate tab exist:', payload);
-      response.addResult(JSON.stringify(payload, null, 2));
+      response.addTextResult(JSON.stringify(payload, null, 2));
 
     } catch (error) {
       const errorMessage = `Failed to validate tab existence.`;
@@ -202,7 +202,7 @@ export const validate_tab_exist = defineTabTool({
         error: error instanceof Error ? error.message : String(error),
       };
       console.error('Validate tab exist error:', errorPayload);
-      response.addResult(JSON.stringify(errorPayload, null, 2));
+      response.addTextResult(JSON.stringify(errorPayload, null, 2));
     }
   },
 });

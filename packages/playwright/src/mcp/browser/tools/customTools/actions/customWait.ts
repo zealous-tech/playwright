@@ -108,7 +108,7 @@ export const custom_wait = defineTool({
     }
 
     const frameInfo = foundFrame && foundFrame !== 'main' ? ` (found in ${foundFrame})` : '';
-    response.addResult(`Waited for ${params.text || params.textGone || params.time}${frameInfo}`);
+    response.addTextResult(`Waited for ${params.text || params.textGone || params.time}${frameInfo}`);
     response.setIncludeSnapshot();
   },
 });

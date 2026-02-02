@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { expect } from '@zealous-tech/playwright/test';
+import { expect } from '@playwright/test';
 import { defineTabTool } from '../../tool';
 import { getAllComputedStylesDirect, generateLocatorString } from '../helpers/helpers';
 import { ELEMENT_ATTACHED_TIMEOUT, pickActualValue, parseRGBColor, isColorInRange } from '../helpers/utils';
@@ -34,7 +34,7 @@ export const validate_computed_styles = defineTabTool({
 
     await tab.waitForCompletion(async () => {
       // Get locator
-      const locator = await tab.refLocator({ ref, element });
+      const { locator } = await tab.refLocator({ ref, element });
 
       // Helper function to create evidence command
       const createEvidenceCommand = (locatorString: string, property: string, operator: string, expected?: any) => JSON.stringify({
@@ -83,7 +83,7 @@ export const validate_computed_styles = defineTabTool({
         };
 
         console.log('Validate Computed Styles (element not found):', payload);
-        response.addResult(JSON.stringify(payload, null, 2));
+        response.addTextResult(JSON.stringify(payload, null, 2));
         return;
       }
 
@@ -183,7 +183,7 @@ export const validate_computed_styles = defineTabTool({
       };
 
       console.log('Validate Computed Styles:', payload);
-      response.addResult(JSON.stringify(payload, null, 2));
+      response.addTextResult(JSON.stringify(payload, null, 2));
     });
   },
 });

@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { z } from 'zod';
+import { z } from 'playwright-core/lib/mcpBundle';
 
 const elementStyleSchema = z.object({
   element: z.string().describe('Human-readable element description used to obtain permission to interact with the element'),
@@ -144,7 +144,7 @@ const toContainClassArgsSchema = z.object({
 });
 
 const toContainTextArgsSchema = z.object({
-  expected: z.union([z.string(), z.instanceof(RegExp), z.array(z.union([z.string(), z.instanceof(RegExp)]))]).describe('Expected substring or RegExp or a list of those'),
+  expected: z.union([z.string(), z.string(), z.array(z.union([z.string(), z.string()]))]).describe('Expected substring or RegExp or a list of those'),
   options: z.object({
     ignoreCase: z.boolean().optional().describe('Whether to perform case-insensitive match. ignoreCase option takes precedence over the corresponding regular expression flag if specified'),
     useInnerText: z.boolean().optional().describe('Whether to use element.innerText instead of element.textContent when retrieving DOM node text'),
@@ -152,21 +152,21 @@ const toContainTextArgsSchema = z.object({
 });
 
 const toHaveAccessibleDescriptionArgsSchema = z.object({
-  description: z.union([z.string(), z.instanceof(RegExp)]).describe('Expected accessible description'),
+  description: z.union([z.string(), z.string()]).describe('Expected accessible description'),
   options: z.object({
     ignoreCase: z.boolean().optional().describe('Whether to perform case-insensitive match. ignoreCase option takes precedence over the corresponding regular expression flag if specified'),
   }).optional(),
 });
 
 const toHaveAccessibleErrorMessageArgsSchema = z.object({
-  errorMessage: z.union([z.string(), z.instanceof(RegExp)]).describe('Expected accessible error message'),
+  errorMessage: z.union([z.string(), z.string()]).describe('Expected accessible error message'),
   options: z.object({
     ignoreCase: z.boolean().optional().describe('Whether to perform case-insensitive match. ignoreCase option takes precedence over the corresponding regular expression flag if specified'),
   }).optional(),
 });
 
 const toHaveAccessibleNameArgsSchema = z.object({
-  name: z.union([z.string(), z.instanceof(RegExp)]).describe('Expected accessible name'),
+  name: z.union([z.string(), z.string()]).describe('Expected accessible name'),
   options: z.object({
     ignoreCase: z.boolean().optional().describe('Whether to perform case-insensitive match. ignoreCase option takes precedence over the corresponding regular expression flag if specified'),
   }).optional(),
@@ -174,14 +174,14 @@ const toHaveAccessibleNameArgsSchema = z.object({
 
 const toHaveAttributeArgsSchema = z.object({
   name: z.string().describe('Attribute name'),
-  value: z.union([z.string(), z.instanceof(RegExp)]).optional().describe('Expected attribute value. If not provided, only checks that attribute exists'),
+  value: z.union([z.string(), z.string()]).optional().describe('Expected attribute value. If not provided, only checks that attribute exists'),
   options: z.object({
     ignoreCase: z.boolean().optional().describe('Whether to perform case-insensitive match when checking attribute value. Only applicable when "value" is provided. Ignored if "value" is not specified. ignoreCase option takes precedence over the corresponding regular expression flag if specified'),
   }).optional(),
 });
 
 const toHaveClassArgsSchema = z.object({
-  expected: z.union([z.string(), z.instanceof(RegExp), z.array(z.union([z.string(), z.instanceof(RegExp)]))]).describe('Expected class or RegExp or a list of those'),
+  expected: z.union([z.string(), z.string(), z.array(z.union([z.string(), z.string()]))]).describe('Expected class or RegExp or a list of those'),
   options: z.object({
   }).optional(),
 });
@@ -194,13 +194,13 @@ const toHaveCountArgsSchema = z.object({
 
 const toHaveCSSArgsSchema = z.object({
   name: z.string().describe('CSS property name'),
-  value: z.union([z.string(), z.instanceof(RegExp)]).describe('CSS property value'),
+  value: z.union([z.string(), z.string()]).describe('CSS property value'),
   options: z.object({
   }).optional(),
 });
 
 const toHaveIdArgsSchema = z.object({
-  id: z.union([z.string(), z.instanceof(RegExp)]).describe('Element id'),
+  id: z.union([z.string(), z.string()]).describe('Element id'),
   options: z.object({
   }).optional(),
 });
@@ -236,7 +236,7 @@ const toHaveScreenshotArgsSchema = z.object({
 
 
 const toHaveTextArgsSchema = z.object({
-  expected: z.union([z.string(), z.instanceof(RegExp), z.array(z.union([z.string(), z.instanceof(RegExp)]))]).describe('Expected string or RegExp or a list of those'),
+  expected: z.union([z.string(), z.string(), z.array(z.union([z.string(), z.string()]))]).describe('Expected string or RegExp or a list of those'),
   options: z.object({
     ignoreCase: z.boolean().optional().describe('Whether to perform case-insensitive match. ignoreCase option takes precedence over the corresponding regular expression flag if specified'),
     useInnerText: z.boolean().optional().describe('Whether to use element.innerText instead of element.textContent when retrieving DOM node text'),
@@ -245,13 +245,13 @@ const toHaveTextArgsSchema = z.object({
 
 
 const toHaveValueArgsSchema = z.object({
-  value: z.union([z.string(), z.instanceof(RegExp)]).describe('Expected value'),
+  value: z.union([z.string(), z.string()]).describe('Expected value'),
   options: z.object({
   }).optional(),
 });
 
 const toHaveValuesArgsSchema = z.object({
-  values: z.array(z.union([z.string(), z.instanceof(RegExp)])).describe('Expected options currently selected'),
+  values: z.array(z.union([z.string(), z.string()])).describe('Expected options currently selected'),
   options: z.object({
   }).optional(),
 });

@@ -30,6 +30,7 @@ function firefoxUserPrefs() {
   const defaultPrefs = {
     'network.proxy.allow_hijacking_localhost': true,
     'network.proxy.testing_localhost_is_secure_when_hijacked': true,
+    'remote.bidi.dismiss_file_pickers.enabled': true,
   };
   const prefsString = process.env.PWTEST_FIREFOX_USER_PREFS;
   if (!prefsString)
@@ -44,7 +45,7 @@ const reporters = () => {
   const result: ReporterDescription[] = process.env.CI ? [
     hasDebugOutput ? ['list'] : ['dot'],
     ['json', { outputFile: path.join(outputDir, 'report.json') }],
-    ['blob', { fileName: `${process.env.PWTEST_BOT_NAME}.zip` }],
+    ['blob'],
     ['./csvReporter', { outputFile: path.join(outputDir, 'report.csv') }],
   ] : [
     ['html', { open: 'on-failure' }],
@@ -60,10 +61,11 @@ const config: Config<PlaywrightWorkerOptions & PlaywrightTestOptions & TestModeW
   expect: {
     timeout: 10000,
   },
+  tag: process.env.PW_TAG,
   maxFailures: 0,
   timeout: 15 * 1000,
   globalTimeout: 90 * 60 * 1000,
-  workers: process.env.CI ? 2 : undefined,
+  workers: process.env.CI ? 4 : undefined,
   fullyParallel: !process.env.CI,
   forbidOnly: !!process.env.CI,
   retries: 0, // No retries even on CI for now.
@@ -71,18 +73,18 @@ const config: Config<PlaywrightWorkerOptions & PlaywrightTestOptions & TestModeW
   projects: [],
 };
 
-type BrowserName = '_bidiChromium' | '_bidiFirefox';
+type BrowserName = 'chromium' | 'firefox';
 
 const getExecutablePath = (browserName: BrowserName) => {
-  if (browserName === '_bidiChromium')
+  if (browserName === 'chromium')
     return process.env.BIDI_CRPATH;
-  if (browserName === '_bidiFirefox')
+  if (browserName === 'firefox')
     return process.env.BIDI_FFPATH;
 };
 
 const browserToChannels = {
-  '_bidiChromium': ['bidi-chromium', 'bidi-chrome-canary', 'bidi-chrome-stable'],
-  '_bidiFirefox': ['moz-firefox', 'moz-firefox-beta', 'moz-firefox-nightly'],
+  'chromium': ['bidi-chromium', 'bidi-chrome-canary', 'bidi-chrome-stable'],
+  'firefox': ['moz-firefox', 'moz-firefox-beta', 'moz-firefox-nightly'],
 };
 
 for (const [key, channels] of Object.entries(browserToChannels)) {
@@ -108,7 +110,7 @@ for (const [key, channels] of Object.entries(browserToChannels)) {
         use: {
           browserName,
           headless: !headed,
-          channel: channel === 'bidi-chromium' ? undefined : channel,
+          channel,
           video: 'off',
           launchOptions: {
             executablePath,

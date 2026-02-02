@@ -78,6 +78,10 @@ export const Events = {
     Worker: 'worker',
   },
 
+  PageAgent: {
+    Turn: 'turn',
+  },
+
   WebSocket: {
     Close: 'close',
     Error: 'socketerror',
@@ -87,6 +91,7 @@ export const Events = {
 
   Worker: {
     Close: 'close',
+    Console: 'console',
   },
 
   ElectronApplication: {

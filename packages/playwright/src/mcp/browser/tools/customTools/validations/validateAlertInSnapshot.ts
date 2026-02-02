@@ -116,7 +116,7 @@ export const validate_alert_in_snapshot = defineTabTool({
 
       const resultString = JSON.stringify(payload, null, 2);
       // console.log('Result string:', resultString);
-      response.addResult(resultString);
+      response.addTextResult(resultString);
     } catch (error) {
       const errorMessage = `Failed to check alert dialog in snapshot.`;
       console.log(`Failed to check alert dialog in snapshot. Error: ${error instanceof Error ? error.message : String(error)}`);
@@ -146,7 +146,7 @@ export const validate_alert_in_snapshot = defineTabTool({
       console.error('Check alert in snapshot error:', errorPayload);
       const errorResultString = JSON.stringify(errorPayload, null, 2);
       // console.log('Error result string:', errorResultString);
-      response.addResult(errorResultString);
+      response.addTextResult(errorResultString);
       console.log('Error result added to response');
       console.log('Function completed with error');
     }

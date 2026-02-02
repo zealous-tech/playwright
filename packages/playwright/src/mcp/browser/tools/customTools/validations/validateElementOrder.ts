@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { expect } from '@zealous-tech/playwright/test';
+import { expect } from '@playwright/test';
 import { defineTabTool } from '../../tool';
 import { generateLocatorString } from '../helpers/helpers';
 import { ELEMENT_ATTACHED_TIMEOUT } from '../helpers/utils';
@@ -49,7 +49,7 @@ export const validate_element_order = defineTabTool({
           const allLocators: Array<{ element: string; locatorString: string }> = [];
           for (const { element, ref } of elements) {
             try {
-              const locator = await tab.refLocator({ ref, element });
+              const { locator } = await tab.refLocator({ ref, element });
               const locatorString = await generateLocatorString(ref, locator);
               allLocators.push({ element, locatorString });
             } catch {
@@ -87,7 +87,7 @@ export const validate_element_order = defineTabTool({
         // Get locators for all elements and check if they are attached
         const elementLocators: Array<{ element: string; ref: string; locator: any }> = [];
         for (const { element, ref } of elements) {
-          const locator = await tab.refLocator({ ref, element });
+          const { locator } = await tab.refLocator({ ref, element });
           elementLocators.push({ element, ref, locator });
         }
 
@@ -99,7 +99,7 @@ export const validate_element_order = defineTabTool({
             // Element not found, generate payload and return early
             const payload = await generateElementNotFoundPayload(element);
             console.log('Validate element order - UI element not found:', payload);
-            response.addResult(JSON.stringify(payload, null, 2));
+            response.addTextResult(JSON.stringify(payload, null, 2));
             return;
           }
         }
@@ -235,7 +235,7 @@ export const validate_element_order = defineTabTool({
       };
 
       console.log('Validate element order:', payload);
-      response.addResult(JSON.stringify(payload, null, 2));
+      response.addTextResult(JSON.stringify(payload, null, 2));
     });
   },
 });

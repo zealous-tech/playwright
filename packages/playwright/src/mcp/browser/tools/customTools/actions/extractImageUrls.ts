@@ -15,7 +15,6 @@
  */
 import { defineTabTool } from '../../tool';
 import { elementImageSchema } from '../helpers/schemas';
-import type * as playwright from '@zealous-tech/playwright';
 
 export const extract_image_urls = defineTabTool({
   capability: 'core',
@@ -32,7 +31,7 @@ export const extract_image_urls = defineTabTool({
     const { ref, element, includeBackgroundImages, includeDataUrls, searchDepth } = elementImageSchema.parse(params);
     const result = { ref, element };
 
-    const locator: playwright.Locator | undefined = await tab.refLocator(result);
+    const { locator } = await tab.refLocator(result);
 
     await tab.waitForCompletion(async () => {
       try {
@@ -210,12 +209,12 @@ export const extract_image_urls = defineTabTool({
                 (img.title ? `\n   Title: ${img.title}` : '')
             ).join('\n\n');
 
-        response.addResult(JSON.stringify(imageData));
+        response.addTextResult(JSON.stringify(imageData));
 
       } catch (error) {
         response.addCode(`// Failed to extract image URLs from ${params.element}`);
         const errorMessage = `Failed to extract image URLs from ${element}. Error: ${error instanceof Error ? error.message : String(error)}`;
-        response.addResult(errorMessage);
+        response.addTextResult(errorMessage);
       }
     });
   },

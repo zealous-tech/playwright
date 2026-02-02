@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { expect } from '@zealous-tech/playwright/test';
+import { expect } from '@playwright/test';
 import { defineTabTool } from '../../tool';
 import { generateLocatorString, getAssertionEvidence } from '../helpers/helpers';
 import { ELEMENT_ATTACHED_TIMEOUT, getElementErrorMessage, getAssertionMessage, convertStringToRegExp, normalizeValue } from '../helpers/utils';
@@ -32,7 +32,7 @@ export const validate_dom_assertions = defineTabTool({
     const { ref, element, checks } = validateDomAssertionsSchema.parse(rawParams);
 
     await tab.waitForCompletion(async () => {
-      const locator = await tab.refLocator({ ref, element });
+      const { locator } = await tab.refLocator({ ref, element });
       const results = [];
 
       for (const check of checks) {
@@ -647,7 +647,7 @@ export const validate_dom_assertions = defineTabTool({
 
       console.log('Validate DOM Assertions:');
       console.log(payload);
-      response.addResult(JSON.stringify(payload, null, 2));
+      response.addTextResult(JSON.stringify(payload, null, 2));
     });
   },
 });

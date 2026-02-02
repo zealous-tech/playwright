@@ -30,7 +30,7 @@ type BaseWorkerFixtures = {
 };
 
 export type TraceViewerFixtures = {
-  showTraceViewer: (trace: string[], options?: {host?: string, port?: number}) => Promise<TraceViewerPage>;
+  showTraceViewer: (trace: string | undefined, options?: {host?: string, port?: number}) => Promise<TraceViewerPage>;
   runAndTrace: (body: () => Promise<void>, optsOverrides?: Parameters<BrowserContext['tracing']['start']>[0]) => Promise<TraceViewerPage>;
 };
 
@@ -47,9 +47,10 @@ class TraceViewerPage {
   metadataTab: Locator;
   snapshotContainer: Locator;
   sourceCodeTab: Locator;
+  networkTab: Locator;
 
   settingsDialog: Locator;
-  darkModeSetting: Locator;
+  themeSetting: Locator;
   displayCanvasContentSetting: Locator;
 
   constructor(public page: Page) {
@@ -65,9 +66,10 @@ class TraceViewerPage {
     this.snapshotContainer = page.locator('.snapshot-container iframe.snapshot-visible[name=snapshot]');
     this.metadataTab = page.getByRole('tabpanel', { name: 'Metadata' });
     this.sourceCodeTab = page.getByRole('tabpanel', { name: 'Source' });
+    this.networkTab = page.getByRole('tabpanel', { name: 'Network' });
 
     this.settingsDialog = page.getByTestId('settings-toolbar-dialog');
-    this.darkModeSetting = page.locator('.setting').getByText('Dark mode');
+    this.themeSetting = this.settingsDialog.getByRole('combobox', { name: 'Theme' });
     this.displayCanvasContentSetting = page.locator('.setting').getByText('Display canvas content');
   }
 
@@ -153,8 +155,8 @@ export const traceViewerFixtures: Fixtures<TraceViewerFixtures, {}, BaseTestFixt
   showTraceViewer: async ({ playwright, browserName, headless }, use, testInfo) => {
     const browsers: Browser[] = [];
     const contextImpls: any[] = [];
-    await use(async (traces: string[], { host, port } = {}) => {
-      const pageImpl = await runTraceViewerApp(traces, browserName, { headless, host, port });
+    await use(async (trace: string | undefined, { host, port } = {}) => {
+      const pageImpl = await runTraceViewerApp(trace, browserName, { headless, host, port });
       const contextImpl = pageImpl.browserContext;
       const browser = await playwright.chromium.connectOverCDP(contextImpl._browser.options.wsEndpoint);
       browsers.push(browser);
@@ -173,7 +175,7 @@ export const traceViewerFixtures: Fixtures<TraceViewerFixtures, {}, BaseTestFixt
       await context.tracing.start({ snapshots: true, screenshots: true, sources: true, ...optsOverrides });
       await body();
       await context.tracing.stop({ path: traceFile });
-      return showTraceViewer([traceFile]);
+      return showTraceViewer(traceFile);
     });
   },
 };

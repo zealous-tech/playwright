@@ -14,66 +14,78 @@
  * limitations under the License.
  */
 
-import { asLocator } from 'playwright-core/lib/utils';
-
 import type * as playwright from 'playwright-core';
 import type { Tab } from '../tab';
-
+import { asLocator } from 'playwright-core/lib/utils';
 export async function waitForCompletion<R>(tab: Tab, callback: () => Promise<R>): Promise<R> {
-  const requests = new Set<playwright.Request>();
-  let frameNavigated = false;
-  let waitCallback: () => void = () => {};
-  const waitBarrier = new Promise<void>(f => { waitCallback = f; });
+  const requests: playwright.Request[] = [];
 
-  const responseListener = (request: playwright.Request) => {
-    requests.delete(request);
-    if (!requests.size)
-      waitCallback();
-  };
-
-  const requestListener = (request: playwright.Request) => {
-    requests.add(request);
-    void request.response().then(() => responseListener(request)).catch(() => {});
-  };
-
-  const frameNavigateListener = (frame: playwright.Frame) => {
-    if (frame.parentFrame())
-      return;
-    frameNavigated = true;
-    dispose();
-    clearTimeout(timeout);
-    void tab.waitForLoadState('load').then(waitCallback);
-  };
-
-  const onTimeout = () => {
-    dispose();
-    waitCallback();
-  };
-
-  tab.page.on('request', requestListener);
-  tab.page.on('requestfailed', responseListener);
-  tab.page.on('framenavigated', frameNavigateListener);
-  const timeout = setTimeout(onTimeout, 10000);
-
-  const dispose = () => {
+  const requestListener = (request: playwright.Request) => requests.push(request);
+  const disposeListeners = () => {
     tab.page.off('request', requestListener);
-    tab.page.off('requestfailed', responseListener);
-    tab.page.off('framenavigated', frameNavigateListener);
-    clearTimeout(timeout);
   };
+  tab.page.on('request', requestListener);
 
+  let result: R;
   try {
-    const result = await callback();
-    if (!requests.size && !frameNavigated)
-      waitCallback();
-    await waitBarrier;
-    //ZEALOUS UPDATE setting this to 1 second to avoid waiting for the timeout
-    //await tab.waitForTimeout(1000);
-    await new Promise(f => setTimeout(f, 1000));
-    return result;
+    result = await callback();
+    await tab.waitForTimeout(500);
   } finally {
-    dispose();
+    disposeListeners();
   }
+
+  const requestedNavigation = requests.some(request => request.isNavigationRequest());
+  if (requestedNavigation) {
+    await tab.page.mainFrame().waitForLoadState('load', { timeout: 10000 }).catch(() => {});
+    return result;
+  }
+
+  const promises: Promise<any>[] = [];
+  for (const request of requests) {
+    if (['document', 'stylesheet', 'script', 'xhr', 'fetch'].includes(request.resourceType()))
+      promises.push(request.response().then(r => r?.finished()).catch(() => {}));
+    else
+      promises.push(request.response().catch(() => {}));
+  }
+  const timeout = new Promise<void>(resolve => setTimeout(resolve, 5000));
+  await Promise.race([Promise.all(promises), timeout]);
+  if (requests.length)
+    await tab.waitForTimeout(500);
+
+  return result;
+}
+
+export async function callOnPageNoTrace<T>(page: playwright.Page, callback: (page: playwright.Page) => Promise<T>): Promise<T> {
+  return await (page as any)._wrapApiCall(() => callback(page), { internal: true });
+}
+
+export function dateAsFileName(extension: string): string {
+  const date = new Date();
+  return `page-${date.toISOString().replace(/[:.]/g, '-')}.${extension}`;
+}
+
+export function eventWaiter<T>(page: playwright.Page, event: string, timeout: number): { promise: Promise<T | undefined>, abort: () => void } {
+  const disposables: (() => void)[] = [];
+
+  const eventPromise = new Promise<T | undefined>((resolve, reject) => {
+    page.on(event as any, resolve as any);
+    disposables.push(() => page.off(event as any, resolve as any));
+  });
+
+  let abort: () => void;
+  const abortPromise = new Promise<T | undefined>((resolve, reject) => {
+    abort = () => resolve(undefined);
+  });
+
+  const timeoutPromise = new Promise<T | undefined>(f => {
+    const timeoutId = setTimeout(() => f(undefined), timeout);
+    disposables.push(() => clearTimeout(timeoutId));
+  });
+
+  return {
+    promise: Promise.race([eventPromise, abortPromise, timeoutPromise]).finally(() => disposables.forEach(dispose => dispose())),
+    abort: abort!
+  };
 }
 
 export async function generateLocator(locator: playwright.Locator): Promise<string> {
@@ -84,13 +96,4 @@ export async function generateLocator(locator: playwright.Locator): Promise<stri
     console.error('Ref not found, likely because element was removed. Use browser_snapshot to see what elements are currently on the page.', e);
     return "UI Element not found";
   }
-}
-
-export async function callOnPageNoTrace<T>(page: playwright.Page, callback: (page: playwright.Page) => Promise<T>): Promise<T> {
-  return await (page as any)._wrapApiCall(() => callback(page), { internal: true });
-}
-
-export function dateAsFileName(extension: string): string {
-  const date = new Date();
-  return `page-${date.toISOString().replace(/[:.]/g, '-')}.${extension}`;
 }

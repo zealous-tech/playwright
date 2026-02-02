@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { expect } from '@zealous-tech/playwright/test';
+import { expect } from '@playwright/test';
 import { defineTabTool } from '../../tool';
 import { generateLocatorString } from '../helpers/helpers';
 import { ELEMENT_ATTACHED_TIMEOUT } from '../helpers/utils';
@@ -47,8 +47,8 @@ export const validate_element_position = defineTabTool({
       let locatorString2 = '';
 
       try {
-        const locator1 = await tab.refLocator({ ref: ref1, element: element1 });
-        const locator2 = await tab.refLocator({ ref: ref2, element: element2 });
+        const { locator: locator1 } = await tab.refLocator({ ref: ref1, element: element1 });
+        const { locator: locator2 } = await tab.refLocator({ ref: ref2, element: element2 });
 
         // Helper function to generate payload when element is not found
         const generateElementNotFoundPayload = async (
@@ -115,7 +115,7 @@ export const validate_element_position = defineTabTool({
           // Element1 not found, generate payload and return early
           const payload = await generateElementNotFoundPayload(element1, ref1, locator1, element2, ref2, locator2);
           console.log('Validate element position - UI element not found:', payload);
-          response.addResult(JSON.stringify(payload, null, 2));
+          response.addTextResult(JSON.stringify(payload, null, 2));
           return;
         }
 
@@ -125,7 +125,7 @@ export const validate_element_position = defineTabTool({
           // Element2 not found, generate payload and return early
           const payload = await generateElementNotFoundPayload(element2, ref2, locator2, element1, ref1, locator1);
           console.log('Validate element position - UI element not found:', payload);
-          response.addResult(JSON.stringify(payload, null, 2));
+          response.addTextResult(JSON.stringify(payload, null, 2));
           return;
         }
 
@@ -215,14 +215,14 @@ export const validate_element_position = defineTabTool({
 
         // Generate locator strings for error case (try to generate even if execution failed)
         try {
-          const locator1 = await tab.refLocator({ ref: ref1, element: element1 });
+          const { locator: locator1 } = await tab.refLocator({ ref: ref1, element: element1 });
           locatorString1 = await generateLocatorString(ref1, locator1);
         } catch {
           locatorString1 = 'The UI Element not found';
         }
 
         try {
-          const locator2 = await tab.refLocator({ ref: ref2, element: element2 });
+          const { locator: locator2 } = await tab.refLocator({ ref: ref2, element: element2 });
           locatorString2 = await generateLocatorString(ref2, locator2);
         } catch {
           locatorString2 = 'The UI Element not found';
@@ -280,7 +280,7 @@ export const validate_element_position = defineTabTool({
       };
 
       console.log('Validate element position:', payload);
-      response.addResult(JSON.stringify(payload, null, 2));
+      response.addTextResult(JSON.stringify(payload, null, 2));
     });
   },
 });

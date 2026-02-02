@@ -14,10 +14,10 @@
  * limitations under the License.
  */
 
-import { z } from '../../sdk/bundle';
+import { z } from 'playwright-core/lib/mcpBundle';
+import { escapeWithQuotes } from 'playwright-core/lib/utils';
+
 import { defineTabTool } from './tool';
-import * as javascript from '../codegen';
-import { generateLocator } from './utils';
 
 const verifyElement = defineTabTool({
   capability: 'testing',
@@ -39,8 +39,8 @@ const verifyElement = defineTabTool({
       return;
     }
 
-    response.addCode(`await expect(page.getByRole(${javascript.escapeWithQuotes(params.role)}, { name: ${javascript.escapeWithQuotes(params.accessibleName)} })).toBeVisible();`);
-    response.addResult('Done');
+    response.addCode(`await expect(page.getByRole(${escapeWithQuotes(params.role)}, { name: ${escapeWithQuotes(params.accessibleName)} })).toBeVisible();`);
+    response.addTextResult('Done');
   },
 });
 
@@ -63,8 +63,8 @@ const verifyText = defineTabTool({
       return;
     }
 
-    response.addCode(`await expect(page.getByText(${javascript.escapeWithQuotes(params.text)})).toBeVisible();`);
-    response.addResult('Done');
+    response.addCode(`await expect(page.getByText(${escapeWithQuotes(params.text)})).toBeVisible();`);
+    response.addTextResult('Done');
   },
 });
 
@@ -83,7 +83,7 @@ const verifyList = defineTabTool({
   },
 
   handle: async (tab, params, response) => {
-    const locator = await tab.refLocator({ ref: params.ref, element: params.element });
+    const { locator } = await tab.refLocator({ ref: params.ref, element: params.element });
     const itemTexts: string[] = [];
     for (const item of params.items) {
       const itemLocator = locator.getByText(item);
@@ -95,10 +95,10 @@ const verifyList = defineTabTool({
     }
     const ariaSnapshot = `\`
 - list:
-${itemTexts.map(t => `  - listitem: ${javascript.escapeWithQuotes(t, '"')}`).join('\n')}
+${itemTexts.map(t => `  - listitem: ${escapeWithQuotes(t, '"')}`).join('\n')}
 \``;
     response.addCode(`await expect(page.locator('body')).toMatchAriaSnapshot(${ariaSnapshot});`);
-    response.addResult('Done');
+    response.addTextResult('Done');
   },
 });
 
@@ -118,15 +118,15 @@ const verifyValue = defineTabTool({
   },
 
   handle: async (tab, params, response) => {
-    const locator = await tab.refLocator({ ref: params.ref, element: params.element });
-    const locatorSource = `page.${await generateLocator(locator)}`;
+    const { locator, resolved } = await tab.refLocator({ ref: params.ref, element: params.element });
+    const locatorSource = `page.${resolved}`;
     if (params.type === 'textbox' || params.type === 'slider' || params.type === 'combobox') {
       const value = await locator.inputValue();
       if (value !== params.value) {
         response.addError(`Expected value "${params.value}", but got "${value}"`);
         return;
       }
-      response.addCode(`await expect(${locatorSource}).toHaveValue(${javascript.quote(params.value)});`);
+      response.addCode(`await expect(${locatorSource}).toHaveValue(${escapeWithQuotes(params.value)});`);
     } else if (params.type === 'checkbox' || params.type === 'radio') {
       const value = await locator.isChecked();
       if (value !== (params.value === 'true')) {
@@ -136,7 +136,7 @@ const verifyValue = defineTabTool({
       const matcher = value ? 'toBeChecked' : 'not.toBeChecked';
       response.addCode(`await expect(${locatorSource}).${matcher}();`);
     }
-    response.addResult('Done');
+    response.addTextResult('Done');
   },
 });
 

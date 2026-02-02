@@ -17,7 +17,8 @@
 import './snapshotTab.css';
 import * as React from 'react';
 import type { ActionTraceEvent } from '@trace/trace';
-import { context, type MultiTraceModel, nextActionByStartTime, previousActionByEndTime } from './modelUtil';
+import { nextActionByStartTime, previousActionByEndTime } from '@isomorphic/trace/traceModel';
+import type { TraceModel } from '@isomorphic/trace/traceModel';
 import { Toolbar } from '@web/components/toolbar';
 import { ToolbarButton } from '@web/components/toolbarButton';
 import { clsx, useMeasure, useSetting } from '@web/uiUtils';
@@ -40,14 +41,14 @@ export type HighlightedElement = {
 
 export const SnapshotTabsView: React.FunctionComponent<{
   action: ActionTraceEvent | undefined,
-  model?: MultiTraceModel,
+  model?: TraceModel,
   sdkLanguage: Language,
   testIdAttributeName: string,
   isInspecting: boolean,
   setIsInspecting: (isInspecting: boolean) => void,
   highlightedElement: HighlightedElement,
   setHighlightedElement: (element: HighlightedElement) => void,
-}> = ({ action, sdkLanguage, testIdAttributeName, isInspecting, setIsInspecting, highlightedElement, setHighlightedElement }) => {
+}> = ({ action, model, sdkLanguage, testIdAttributeName, isInspecting, setIsInspecting, highlightedElement, setHighlightedElement }) => {
   const [snapshotTab, setSnapshotTab] = React.useState<'action'|'before'|'after'>('action');
 
   const [shouldPopulateCanvasFromScreenshot] = useSetting('shouldPopulateCanvasFromScreenshot', false);
@@ -57,23 +58,25 @@ export const SnapshotTabsView: React.FunctionComponent<{
   }, [action]);
   const { snapshotInfoUrl, snapshotUrl, popoutUrl } = React.useMemo(() => {
     const snapshot = snapshots[snapshotTab];
-    return snapshot ? extendSnapshot(snapshot, shouldPopulateCanvasFromScreenshot) : { snapshotInfoUrl: undefined, snapshotUrl: undefined, popoutUrl: undefined };
-  }, [snapshots, snapshotTab, shouldPopulateCanvasFromScreenshot]);
+    return model && snapshot ? extendSnapshot(model.traceUri, snapshot, shouldPopulateCanvasFromScreenshot) : { snapshotInfoUrl: undefined, snapshotUrl: undefined, popoutUrl: undefined };
+  }, [snapshots, snapshotTab, shouldPopulateCanvasFromScreenshot, model]);
 
   const snapshotUrls = React.useMemo((): SnapshotUrls | undefined => snapshotInfoUrl !== undefined ? { snapshotInfoUrl, snapshotUrl, popoutUrl } : undefined, [snapshotInfoUrl, snapshotUrl, popoutUrl]);
 
   return <div className='snapshot-tab vbox'>
     <Toolbar>
       <ToolbarButton className='pick-locator' title='Pick locator' icon='target' toggled={isInspecting} onClick={() => setIsInspecting(!isInspecting)} />
-      {['action', 'before', 'after'].map(tab => {
-        return <TabbedPaneTab
-          key={tab}
-          id={tab}
-          title={renderTitle(tab)}
-          selected={snapshotTab === tab}
-          onSelect={() => setSnapshotTab(tab as 'action' | 'before' | 'after')}
-        ></TabbedPaneTab>;
-      })}
+      <div className='hbox' style={{ height: '100%' }} role='tablist'>
+        {(['action', 'before', 'after'] as const).map(tab => {
+          return <TabbedPaneTab
+            key={tab}
+            id={tab}
+            title={renderTitle(tab)}
+            selected={snapshotTab === tab}
+            onSelect={() => setSnapshotTab(tab)}
+          />;
+        })}
+      </div>
       <div style={{ flex: 'auto' }}></div>
       <ToolbarButton icon='link-external' title='Open snapshot in a new tab' disabled={!snapshotUrls?.popoutUrl} onClick={() => {
         const win = window.open(snapshotUrls?.popoutUrl || '', '_blank');
@@ -412,11 +415,10 @@ export function collectSnapshots(action: ActionTraceEvent | undefined): Snapshot
 }
 
 const isUnderTest = new URLSearchParams(window.location.search).has('isUnderTest');
-const serverParam = new URLSearchParams(window.location.search).get('server');
 
-export function extendSnapshot(snapshot: Snapshot, shouldPopulateCanvasFromScreenshot: boolean): SnapshotUrls {
+export function extendSnapshot(traceUri: string, snapshot: Snapshot, shouldPopulateCanvasFromScreenshot: boolean): SnapshotUrls {
   const params = new URLSearchParams();
-  params.set('trace', context(snapshot.action).traceUrl);
+  params.set('trace', traceUri);
   params.set('name', snapshot.snapshotName);
   if (isUnderTest)
     params.set('isUnderTest', 'true');
@@ -434,15 +436,7 @@ export function extendSnapshot(snapshot: Snapshot, shouldPopulateCanvasFromScree
 
   const popoutParams = new URLSearchParams();
   popoutParams.set('r', snapshotUrl);
-  if (serverParam)
-    popoutParams.set('server', serverParam);
-  popoutParams.set('trace', context(snapshot.action).traceUrl);
-  if (snapshot.point) {
-    popoutParams.set('pointX', String(snapshot.point.x));
-    popoutParams.set('pointY', String(snapshot.point.y));
-    if (snapshot.hasInputTarget)
-      params.set('hasInputTarget', '1');
-  }
+  popoutParams.set('trace', traceUri);
   const popoutUrl = new URL(`snapshot.html?${popoutParams.toString()}`, window.location.href).toString();
   return { snapshotInfoUrl, snapshotUrl, popoutUrl };
 }

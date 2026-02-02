@@ -18,7 +18,6 @@
 import http from 'http';
 import http2 from 'http2';
 import https from 'https';
-import url from 'url';
 
 import { HttpsProxyAgent, SocksProxyAgent, getProxyForUrl } from '../../utilsBundle';
 import { httpHappyEyeballsAgent, httpsHappyEyeballsAgent } from './happyEyeballs';
@@ -40,10 +39,8 @@ export type HTTPRequestParams = {
 export const NET_DEFAULT_TIMEOUT = 30_000;
 
 export function httpRequest(params: HTTPRequestParams, onResponse: (r: http.IncomingMessage) => void, onError: (error: Error) => void): { cancel(error: Error | undefined): void } {
-  const parsedUrl = url.parse(params.url);
-  let options: https.RequestOptions = {
-    ...parsedUrl,
-    agent: parsedUrl.protocol === 'https:' ? httpsHappyEyeballsAgent : httpHappyEyeballsAgent,
+  let url = new URL(params.url);
+  const options: https.RequestOptions = {
     method: params.method || 'GET',
     headers: params.headers,
   };
@@ -52,22 +49,17 @@ export function httpRequest(params: HTTPRequestParams, onResponse: (r: http.Inco
 
   const proxyURL = getProxyForUrl(params.url);
   if (proxyURL) {
-    const parsedProxyURL = url.parse(proxyURL);
+    const parsedProxyURL = normalizeProxyURL(proxyURL);
     if (params.url.startsWith('http:')) {
-      options = {
-        path: parsedUrl.href,
-        host: parsedProxyURL.hostname,
-        port: parsedProxyURL.port,
-        headers: options.headers,
-        method: options.method
-      };
+      parsedProxyURL.pathname = url.toString();
+      url = parsedProxyURL;
     } else {
-      (parsedProxyURL as any).secureProxy = parsedProxyURL.protocol === 'https:';
-
       options.agent = new HttpsProxyAgent(parsedProxyURL);
       options.rejectUnauthorized = false;
     }
   }
+
+  options.agent ??= url.protocol === 'https:' ? httpsHappyEyeballsAgent : httpHappyEyeballsAgent;
 
   let cancelRequest: (e: Error | undefined) => void;
   const requestCallback = (res: http.IncomingMessage) => {
@@ -81,9 +73,9 @@ export function httpRequest(params: HTTPRequestParams, onResponse: (r: http.Inco
       onResponse(res);
     }
   };
-  const request = options.protocol === 'https:' ?
-    https.request(options, requestCallback) :
-    http.request(options, requestCallback);
+  const request = url.protocol === 'https:' ?
+    https.request(url, options, requestCallback) :
+    http.request(url, options, requestCallback);
   request.on('error', onError);
   if (params.socketTimeout !== undefined) {
     request.setTimeout(params.socketTimeout, () =>  {
@@ -137,34 +129,44 @@ function shouldBypassProxy(url: URL, bypass?: string): boolean {
   return domains.some(d => domain.endsWith(d));
 }
 
+function normalizeProxyURL(proxy: string): URL {
+  proxy = proxy.trim();
+  // Browsers allow to specify proxy without a protocol, defaulting to http.
+  if (!/^\w+:\/\//.test(proxy))
+    proxy = 'http://' + proxy;
+  return new URL(proxy);
+}
+
 export function createProxyAgent(proxy?: ProxySettings, forUrl?: URL) {
   if (!proxy)
     return;
   if (forUrl && proxy.bypass && shouldBypassProxy(forUrl, proxy.bypass))
     return;
 
-  // Browsers allow to specify proxy without a protocol, defaulting to http.
-  let proxyServer = proxy.server.trim();
-  if (!/^\w+:\/\//.test(proxyServer))
-    proxyServer = 'http://' + proxyServer;
+  const proxyURL = normalizeProxyURL(proxy.server);
+  if (proxyURL.protocol?.startsWith('socks')) {
+    // SocksProxyAgent distinguishes between socks5 and socks5h.
+    // socks5h is what we want, it means that hostnames are resolved by the proxy.
+    // browsers behave the same way, even if socks5 is specified.
+    if (proxyURL.protocol === 'socks5:')
+      proxyURL.protocol = 'socks5h:';
+    else if (proxyURL.protocol === 'socks4:')
+      proxyURL.protocol = 'socks4a:';
 
-  const proxyOpts = url.parse(proxyServer);
-  if (proxyOpts.protocol?.startsWith('socks')) {
-    return new SocksProxyAgent({
-      host: proxyOpts.hostname,
-      port: proxyOpts.port || undefined,
-    });
+    return new SocksProxyAgent(proxyURL);
   }
-  if (proxy.username)
-    proxyOpts.auth = `${proxy.username}:${proxy.password || ''}`;
+  if (proxy.username) {
+    proxyURL.username = proxy.username;
+    proxyURL.password = proxy.password || '';
+  }
 
   if (forUrl && ['ws:', 'wss:'].includes(forUrl.protocol)) {
     // Force CONNECT method for WebSockets.
-    return new HttpsProxyAgent(proxyOpts);
+    return new HttpsProxyAgent(proxyURL);
   }
 
-  // TODO: We should use HttpProxyAgent conditional on proxyOpts.protocol instead of always using CONNECT method.
-  return new HttpsProxyAgent(proxyOpts);
+  // TODO: This branch should be different from above. We should use HttpProxyAgent conditional on proxyURL.protocol instead of always using CONNECT method.
+  return new HttpsProxyAgent(proxyURL);
 }
 
 export function createHttpServer(requestListener?: (req: http.IncomingMessage, res: http.ServerResponse) => void): http.Server;
@@ -189,6 +191,22 @@ export function createHttp2Server(...args: any[]): http2.Http2SecureServer {
   const server = http2.createSecureServer(...args);
   decorateServer(server);
   return server;
+}
+
+export async function startHttpServer(server: http.Server, options: { host?: string, port?: number }) {
+  const { host = 'localhost', port = 0 } = options;
+  const errorPromise = new ManualPromise();
+  const errorListener = (error: Error) => errorPromise.reject(error);
+  server.on('error', errorListener);
+  try {
+    server.listen(port, host);
+    await Promise.race([
+      new Promise(cb => server.once('listening', cb)),
+      errorPromise,
+    ]);
+  } finally {
+    server.removeListener('error', errorListener);
+  }
 }
 
 export async function isURLAvailable(url: URL, ignoreHTTPSErrors: boolean, onLog?: (data: string) => void, onStdErr?: (data: string) => void) {

@@ -49,6 +49,7 @@ export class CRBrowser extends Browser {
   _serviceWorkers = new Map<string, CRServiceWorker>();
   _devtools?: CRDevTools;
   private _version = '';
+  private _majorVersion = 0;
 
   private _tracingRecording = false;
   private _tracingClient: CRSession | undefined;
@@ -68,6 +69,10 @@ export class CRBrowser extends Browser {
 
     const version = await session.send('Browser.getVersion');
     browser._version = version.product.substring(version.product.indexOf('/') + 1);
+    try {
+      browser._majorVersion = +browser._version.split('.')[0];
+    } catch {
+    }
     browser._userAgent = version.userAgent;
     // We don't trust the option as it may lie in case of connectOverCDP where remote browser
     // may have been launched with different options.
@@ -128,6 +133,10 @@ export class CRBrowser extends Browser {
 
   version(): string {
     return this._version;
+  }
+
+  majorVersion() {
+    return this._majorVersion;
   }
 
   userAgent(): string {
@@ -318,10 +327,16 @@ export class CRBrowser extends Browser {
   }
 }
 
-export class CRBrowserContext extends BrowserContext {
-  static CREvents = {
-    ServiceWorker: 'serviceworker',
-  };
+const CREvents = {
+  ServiceWorker: 'serviceworker',
+} as const;
+
+export type CREventsMap = {
+  [CREvents.ServiceWorker]: [serviceWorker: CRServiceWorker];
+};
+
+export class CRBrowserContext extends BrowserContext<CREventsMap> {
+  static CREvents = CREvents;
 
   declare readonly _browser: CRBrowser;
 
@@ -417,7 +432,7 @@ export class CRBrowserContext extends BrowserContext {
   }
 
   async doGrantPermissions(origin: string, permissions: string[]) {
-    const webPermissionToProtocol = new Map<string, Protocol.Browser.PermissionType>([
+    const webPermissionToProtocol = new Map<string, Protocol.Browser.PermissionType | Protocol.Browser.PermissionType[]>([
       ['geolocation', 'geolocation'],
       ['midi', 'midi'],
       ['notifications', 'notifications'],
@@ -435,13 +450,13 @@ export class CRBrowserContext extends BrowserContext {
       ['midi-sysex', 'midiSysex'],
       ['storage-access', 'storageAccess'],
       ['local-fonts', 'localFonts'],
-      ['local-network-access', 'localNetworkAccess'],
+      ['local-network-access', ['localNetworkAccess', 'localNetwork', 'loopbackNetwork']],
     ]);
-    const filtered = permissions.map(permission => {
+    const filtered = permissions.flatMap(permission => {
       const protocolPermission = webPermissionToProtocol.get(permission);
       if (!protocolPermission)
         throw new Error('Unknown permission: ' + permission);
-      return protocolPermission;
+      return typeof protocolPermission === 'string' ? [protocolPermission] : protocolPermission;
     });
     await this._browser._session.send('Browser.grantPermissions', { origin: origin === '*' ? undefined : origin, browserContextId: this._browserContextId, permissions: filtered });
   }
@@ -545,7 +560,7 @@ export class CRBrowserContext extends BrowserContext {
   }
 
   async stopVideoRecording() {
-    await Promise.all(this._crPages().map(crPage => crPage._mainFrameSession._stopVideoRecording()));
+    await Promise.all(this._crPages().map(crPage => crPage._page.screencast.stopVideoRecording()));
   }
 
   onClosePersistent() {

@@ -117,7 +117,7 @@ export const validate_text_in_whole_page = defineTabTool({
       };
 
       console.log('Validate text in whole page:', payload);
-      response.addResult(JSON.stringify(payload, null, 2));
+      response.addTextResult(JSON.stringify(payload, null, 2));
     });
   },
 });

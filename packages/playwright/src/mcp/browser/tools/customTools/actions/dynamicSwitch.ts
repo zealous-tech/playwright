@@ -64,6 +64,6 @@ export const dynamic_switch = defineTabTool({
       actions: chosenTool && chosenTool.readyForCaching ? [{ type: 'invoke_tool', toolName: chosenTool.toolName, params: chosenTool.params }] : []
     };
 
-    response.addResult(JSON.stringify(payload, null, 2));
+    response.addTextResult(JSON.stringify(payload, null, 2));
   },
 });

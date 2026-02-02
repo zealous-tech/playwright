@@ -14,10 +14,10 @@
  * limitations under the License.
  */
 
-import { z } from '../../sdk/bundle';
+import { z } from 'playwright-core/lib/mcpBundle';
+import { escapeWithQuotes } from 'playwright-core/lib/utils';
+
 import { defineTabTool } from './tool';
-import { generateLocator } from './utils';
-import * as codegen from '../codegen';
 
 const fillForm = defineTabTool({
   capability: 'core',
@@ -39,8 +39,8 @@ const fillForm = defineTabTool({
 
   handle: async (tab, params, response) => {
     for (const field of params.fields) {
-      const locator = await tab.refLocator({ element: field.name, ref: field.ref });
-      const locatorSource = `await page.${await generateLocator(locator)}`;
+      const { locator, resolved } = await tab.refLocator({ element: field.name, ref: field.ref });
+      const locatorSource = `await page.${resolved}`;
       if (field.type === 'textbox' || field.type === 'slider') {
         const secret = tab.context.lookupSecret(field.value);
         await locator.fill(secret.value);
@@ -50,7 +50,7 @@ const fillForm = defineTabTool({
         response.addCode(`${locatorSource}.setChecked(${field.value});`);
       } else if (field.type === 'combobox') {
         await locator.selectOption({ label: field.value });
-        response.addCode(`${locatorSource}.selectOption(${codegen.quote(field.value)});`);
+        response.addCode(`${locatorSource}.selectOption(${escapeWithQuotes(field.value)});`);
       }
     }
   },

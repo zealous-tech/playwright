@@ -67,7 +67,7 @@ export const validate_response = defineTabTool({
       };
 
       console.error('Validate response JSON parse error:', errorPayload);
-      response.addResult(JSON.stringify(errorPayload, null, 2));
+      response.addTextResult(JSON.stringify(errorPayload, null, 2));
       return;
     }
 
@@ -145,6 +145,6 @@ export const validate_response = defineTabTool({
     };
 
     console.log('Validate response JSON path:', payload);
-    response.addResult(JSON.stringify(payload, null, 2));
+    response.addTextResult(JSON.stringify(payload, null, 2));
   },
 });

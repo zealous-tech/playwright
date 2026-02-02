@@ -78,6 +78,8 @@ export class BrowserContext extends ChannelOwner<channels.BrowserContextChannel>
   private _closeReason: string | undefined;
   private _harRouters: HarRouter[] = [];
   private _onRecorderEventSink: RecorderEventSink | undefined;
+  private _allowedProtocols: string[] | undefined;
+  private _allowedDirectories: string[] | undefined;
 
   static from(context: channels.BrowserContextChannel): BrowserContext {
     return (context as any)._object;
@@ -94,6 +96,7 @@ export class BrowserContext extends ChannelOwner<channels.BrowserContextChannel>
     this.tracing = Tracing.from(initializer.tracing);
     this.request = APIRequestContext.from(initializer.requestContext);
     this.request._timeoutSettings = this._timeoutSettings;
+    this.request._checkUrlAllowed = (url: string) => this._checkUrlAllowed(url);
     this.clock = new Clock(this);
 
     this._channel.on('bindingCall', ({ binding }) => this._onBinding(BindingCall.from(binding)));
@@ -108,11 +111,19 @@ export class BrowserContext extends ChannelOwner<channels.BrowserContextChannel>
       this.emit(Events.BrowserContext.ServiceWorker, serviceWorker);
     });
     this._channel.on('console', event => {
-      const consoleMessage = new ConsoleMessage(this._platform, event, Page.fromNullable(event.page));
+      const worker = Worker.fromNullable(event.worker);
+      const page = Page.fromNullable(event.page);
+      const consoleMessage = new ConsoleMessage(this._platform, event, page, worker);
+      worker?.emit(Events.Worker.Console, consoleMessage);
+      page?.emit(Events.Page.Console, consoleMessage);
+      if (worker && this._serviceWorkers.has(worker)) {
+        const scope = this._serviceWorkerScope(worker);
+        for (const page of this._pages) {
+          if (scope && page.url().startsWith(scope))
+            page.emit(Events.Page.Console, consoleMessage);
+        }
+      }
       this.emit(Events.BrowserContext.Console, consoleMessage);
-      const page = consoleMessage.page();
-      if (page)
-        page.emit(Events.Page.Console, consoleMessage);
     });
     this._channel.on('pageError', ({ error, page }) => {
       const pageObject = Page.from(page);
@@ -252,6 +263,17 @@ export class BrowserContext extends ChannelOwner<channels.BrowserContextChannel>
     if (!func)
       return;
     await bindingCall.call(func);
+  }
+
+  private _serviceWorkerScope(serviceWorker: Worker) {
+    try {
+      let url = new URL('.', serviceWorker.url()).href;
+      if (!url.endsWith('/'))
+        url += '/';
+      return url;
+    } catch {
+      return null;
+    }
   }
 
   setDefaultNavigationTimeout(timeout: number | undefined) {
@@ -518,6 +540,45 @@ export class BrowserContext extends ChannelOwner<channels.BrowserContextChannel>
   async _disableRecorder() {
     this._onRecorderEventSink = undefined;
     await this._channel.disableRecorder();
+  }
+
+  async _exposeConsoleApi() {
+    await this._channel.exposeConsoleApi();
+  }
+
+  _setAllowedProtocols(protocols: string[]) {
+    this._allowedProtocols = protocols;
+  }
+
+  _checkUrlAllowed(url: string) {
+    if (!this._allowedProtocols)
+      return;
+    let parsedURL;
+    try {
+      parsedURL = new URL(url);
+    } catch (e) {
+      throw new Error(`Access to ${url} is blocked. Invalid URL: ${e.message}`);
+    }
+    if (!this._allowedProtocols.includes(parsedURL.protocol))
+      throw new Error(`Access to "${parsedURL.protocol}" URL is blocked. Allowed protocols: ${this._allowedProtocols.join(', ')}. Attempted URL: ${url}`);
+  }
+
+  _setAllowedDirectories(rootDirectories: string[]) {
+    this._allowedDirectories = rootDirectories;
+  }
+
+  _checkFileAccess(filePath: string) {
+    if (!this._allowedDirectories)
+      return;
+    const path = this._platform.path().resolve(filePath);
+    const isInsideDir = (container: string, child: string): boolean => {
+      const path = this._platform.path();
+      const rel = path.relative(container, child);
+      return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel);
+    };
+    if (this._allowedDirectories.some(root => isInsideDir(root, path)))
+      return;
+    throw new Error(`File access denied: ${filePath} is outside allowed roots. Allowed roots: ${this._allowedDirectories.length ? this._allowedDirectories.join(', ') : 'none'}`);
   }
 }
 

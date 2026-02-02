@@ -37,7 +37,7 @@ export const data_extraction = defineTabTool({
       try {
         parsedResponseData = JSON.parse(data);
       } catch (error) {
-        response.addResult(JSON.stringify({
+        response.addTextResult(JSON.stringify({
           success: false,
           error: `Failed to parse data as JSON: ${error.message}`,
           extractedData: null
@@ -50,7 +50,7 @@ export const data_extraction = defineTabTool({
         const queryResult = jp.query(parsedResponseData, normalizedPath);
         extractedValue = queryResult.length === 0 ? null : queryResult.length === 1 ? queryResult[0] : queryResult;
       } catch (error) {
-        response.addResult(JSON.stringify({
+        response.addTextResult(JSON.stringify({
           success: false,
           error: `Failed to extract value using JSON path "${jsonPath}": ${error.message}`,
           extractedData: null
@@ -71,6 +71,6 @@ export const data_extraction = defineTabTool({
       },
       data: parsedResponseData,
     };
-    response.addResult(JSON.stringify(toolResult, null, 2));
+    response.addTextResult(JSON.stringify(toolResult, null, 2));
   },
 });

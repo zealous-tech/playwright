@@ -65,6 +65,6 @@ export const make_request = defineTabTool({
       };
     }
 
-    response.addResult(JSON.stringify(toolResult, null, 2));
+    response.addTextResult(JSON.stringify(toolResult, null, 2));
   },
 });

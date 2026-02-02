@@ -30,6 +30,8 @@ test('should filter network requests by resource type', async ({ runUITest, serv
   });
 
   await page.getByText('network tab test').dblclick();
+  await expect(page.getByTestId('workbench-run-status')).toContainText('Passed');
+
   await page.getByText('Network', { exact: true }).click();
 
   const networkItems = page.getByRole('list', { name: 'Network requests' }).getByRole('listitem');
@@ -59,6 +61,49 @@ test('should filter network requests by resource type', async ({ runUITest, serv
   await expect(networkItems.getByText('font.woff2')).toBeVisible();
 });
 
+test('should filter network requests by multiple resource types', async ({ runUITest, server }) => {
+  server.setRoute('/api/endpoint', (_, res) => res.setHeader('Content-Type', 'application/json').end());
+
+  const { page } = await runUITest({
+    'network-tab.test.ts': `
+      import { test, expect } from '@playwright/test';
+      test('network tab test', async ({ page }) => {
+        await page.goto('${server.PREFIX}/network-tab/network.html');
+        await page.evaluate(() => (window as any).donePromise);
+      });
+    `,
+  });
+
+  await page.getByText('network tab test').dblclick();
+  await expect(page.getByTestId('workbench-run-status')).toContainText('Passed');
+
+  await page.getByText('Network', { exact: true }).click();
+
+  const networkItems = page.getByRole('list', { name: 'Network requests' }).getByRole('listitem');
+  await expect(networkItems).toHaveCount(9);
+
+  await page.getByText('JS', { exact: true }).click();
+  await expect(networkItems).toHaveCount(1);
+  await expect(networkItems.getByText('script.js')).toBeVisible();
+
+  await page.getByText('CSS', { exact: true }).click({ modifiers: ['ControlOrMeta'] });
+  await expect(networkItems.getByText('script.js')).toBeVisible();
+  await expect(networkItems.getByText('style.css')).toBeVisible();
+  await expect(networkItems).toHaveCount(2);
+
+  await page.getByText('Image', { exact: true }).click({ modifiers: ['ControlOrMeta'] });
+  await expect(networkItems.getByText('image.png')).toBeVisible();
+  await expect(networkItems).toHaveCount(3);
+
+  await page.getByText('CSS', { exact: true }).click({ modifiers: ['ControlOrMeta'] });
+  await expect(networkItems).toHaveCount(2);
+  await expect(networkItems.getByText('script.js')).toBeVisible();
+  await expect(networkItems.getByText('image.png')).toBeVisible();
+
+  await page.getByText('All', { exact: true }).click();
+  await expect(networkItems).toHaveCount(9);
+});
+
 test('should filter network requests by url', async ({ runUITest, server }) => {
   const { page } = await runUITest({
     'network-tab.test.ts': `
@@ -71,6 +116,8 @@ test('should filter network requests by url', async ({ runUITest, server }) => {
   });
 
   await page.getByText('network tab test').dblclick();
+  await expect(page.getByTestId('workbench-run-status')).toContainText('Passed');
+
   await page.getByText('Network', { exact: true }).click();
 
   const networkItems = page.getByRole('list', { name: 'Network requests' }).getByRole('listitem');
@@ -108,11 +155,14 @@ test('should format JSON request body', async ({ runUITest, server }) => {
   });
 
   await page.getByText('network tab test').dblclick();
+  await expect(page.getByTestId('workbench-run-status')).toContainText('Passed');
+
   await page.getByText('Network', { exact: true }).click();
 
   await page.getByText('post-data-1').click();
-
-  await expect(page.locator('.CodeMirror-code .CodeMirror-line')).toHaveText([
+  await page.getByRole('tabpanel', { name: 'Network' }).getByRole('tab', { name: 'Payload' }).click();
+  const payloadPanel = page.getByRole('tabpanel', { name: 'Payload' });
+  await expect(payloadPanel.locator('.CodeMirror-code .CodeMirror-line')).toHaveText([
     '{',
     '  "data": {',
     '    "key": "value",',
@@ -126,7 +176,7 @@ test('should format JSON request body', async ({ runUITest, server }) => {
 
   await page.getByText('post-data-2').click();
 
-  await expect(page.locator('.CodeMirror-code .CodeMirror-line')).toHaveText([
+  await expect(payloadPanel.locator('.CodeMirror-code .CodeMirror-line')).toHaveText([
     '{',
     '  "data": {',
     '    "key": "value",',
@@ -151,18 +201,26 @@ test('should display list of query parameters (only if present)', async ({ runUI
   });
 
   await page.getByText('network tab test').dblclick();
+  await expect(page.getByTestId('workbench-run-status')).toContainText('Passed');
+
   await page.getByText('Network', { exact: true }).click();
 
   await page.getByText('call-with-query-params').click();
-
-  await expect(page.getByText('Query String Parameters')).toBeVisible();
-  await expect(page.getByText('param1: value1')).toBeVisible();
-  await expect(page.getByText('param1: value2')).toBeVisible();
-  await expect(page.getByText('param2: value2')).toBeVisible();
+  await page.getByRole('tabpanel', { name: 'Network' }).getByRole('tab', { name: 'Payload' }).click();
+  const payloadPanel = page.getByRole('tabpanel', { name: 'Payload' });
+  const region = payloadPanel.getByRole('region', { name: 'Query String Parameters × 3' });
+  await expect(region).toMatchAriaSnapshot(
+      `- table:
+         - rowgroup:
+           - 'row "param1 value1"'
+           - 'row "param1 value2"'
+           - 'row "param2 value2"'
+      `
+  );
 
   await page.getByText('endpoint').click();
 
-  await expect(page.getByText('Query String Parameters')).not.toBeVisible();
+  await expect(region).toBeHidden();
 });
 
 test('should not duplicate network entries from beforeAll', {
@@ -197,32 +255,137 @@ test('should not duplicate network entries from beforeAll', {
   });
 
   await page.getByText('first test').dblclick();
+  await expect(page.getByTestId('workbench-run-status')).toContainText('Passed');
+
   await page.getByText('Network', { exact: true }).click();
   await expect(page.getByRole('list', { name: 'Network requests' }).getByText('empty.html')).toHaveCount(1);
 });
 
-test('should not preserve selection across test runs', async ({ runUITest, server }) => {
-  server.setRoute('/api/endpoint', (_, res) => res.setHeader('Content-Type', 'application/json').end());
-
+test('should toggle sections inside network details', async ({ runUITest, server }) => {
   const { page } = await runUITest({
-    'a.spec.ts': `
-      import { test } from '@playwright/test';
-
-      test('some test', async ({ page }) => {
+    'network-tab.test.ts': `
+      import { test, expect } from '@playwright/test';
+      test('network tab test', async ({ page }) => {
         await page.goto('${server.PREFIX}/network-tab/network.html');
-        // await page.evaluate(() => (window as any).donePromise);
+        await page.evaluate(() => (window as any).donePromise);
       });
     `,
   });
 
-  await page.getByText('some test').dblclick();
-  await page.getByText('Network', { exact: true }).click();
+  await page.getByRole('treeitem', { name: 'network tab test' }).dblclick();
+  await expect(page.getByTestId('workbench-run-status')).toContainText('Passed');
 
-  await page.getByText('network.html', { exact: true }).click();
-  await expect(page.getByText('General')).toBeVisible();
+  await page.getByRole('tab', { name: 'Network' }).click();
+  await page.getByRole('listitem').filter({ hasText: 'post-data-1' }).click();
+  const headersPanel = page.getByRole('tabpanel', { name: 'Headers' });
 
-  await page.getByText('some test').dblclick();
-  await expect(page.getByText('network.html', { exact: true })).toBeVisible();
+  await headersPanel.getByRole('button', { name: 'Request Headers × 16' }).click();
+  await expect(headersPanel.getByRole('region', { name: 'Request Headers × 16' })).toBeHidden();
+  await expect(headersPanel.getByRole('region', { name: 'General' })).toContainText(/Start.+Duration\d+ms/);
 
-  await expect(page.getByText('General')).not.toBeVisible();
+  await headersPanel.getByRole('button', { name: 'General' }).click();
+  await expect(headersPanel.getByRole('region', { name: 'Request Headers × 16' })).toBeHidden();
+  await expect(headersPanel.getByRole('region', { name: 'General' })).toBeHidden();
+
+  await headersPanel.getByRole('button', { name: 'General' }).click();
+  await expect(headersPanel.getByRole('region', { name: 'Request Headers × 16' })).toBeHidden();
+  await expect(headersPanel.getByRole('region', { name: 'General' })).toContainText(/Start.+Duration\d+ms/);
+
+  // Re-opening should preserve open state
+  await page.getByRole('tabpanel', { name: 'Network' }).getByRole('button', { name: 'Close' }).click();
+  await page.getByRole('listitem').filter({ hasText: 'post-data-1' }).click();
+  await expect(headersPanel.getByRole('region', { name: 'Request Headers × 16' })).toBeHidden();
+  await expect(headersPanel.getByRole('region', { name: 'General' })).toContainText(/Start.+Duration\d+ms/);
+});
+
+test('should copy network request', async ({ runUITest, server }) => {
+  const { page } = await runUITest({
+    'network-tab.test.ts': `
+      import { test, expect } from '@playwright/test';
+      test('network tab test', async ({ page }) => {
+        await page.goto('${server.PREFIX}/network-tab/network.html');
+        await page.evaluate(() => (window as any).donePromise);
+      });
+    `,
+  });
+
+  await page.evaluate(() => {
+    (window as any).__clipboardCall = '';
+    navigator.clipboard.writeText = async (text: string) => {
+      (window as any).__clipboardCall = text;
+    };
+  });
+
+  await page.getByRole('treeitem', { name: 'network tab test' }).dblclick();
+  await expect(page.getByTestId('workbench-run-status')).toContainText('Passed');
+
+  await page.getByRole('tab', { name: 'Network' }).click();
+  await page.getByRole('listitem').filter({ hasText: 'post-data-1' }).click();
+  await page.getByRole('button', { name: 'Copy request' }).hover();
+
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+
+  await page.getByRole('button', { name: 'Copy as cURL' }).click();
+  await expect(async () => {
+    const curlRequest = await page.evaluate(() => (window as any).__clipboardCall);
+    if (process.platform === 'win32') {
+      expect(curlRequest).toContain(`curl ^"${server.PREFIX}/post-data-1^"`);
+      expect(curlRequest).toContain(`-H ^"content-type: application/json^"`);
+      expect(curlRequest).toContain(`--data-raw ^"^{^\\^"data^\\^":^{^\\^"key^\\^":^\\^"value^\\^",^\\^"array^\\^":^[^\\^"value-1^\\^",^\\^"value-2^\\^"^]^}^}^"`);
+    } else {
+      expect(curlRequest).toContain(`curl '${server.PREFIX}/post-data-1'`);
+      expect(curlRequest).toContain(`-H 'content-type: application/json'`);
+      expect(curlRequest).toContain(`--data-raw '{"data":{"key":"value","array":["value-1","value-2"]}}'`);
+    }
+  }).toPass();
+
+  await page.getByRole('button', { name: 'Copy as Fetch' }).click();
+  await expect(async () => {
+    const fetchRequest = await page.evaluate(() => (window as any).__clipboardCall);
+    expect(fetchRequest).toContain(`fetch("${server.PREFIX}/post-data-1", {`);
+    expect(fetchRequest).toContain(`"content-type": "application/json"`);
+    expect(fetchRequest).toContain(`"body": "{\\"data\\":{\\"key\\":\\"value\\",\\"array\\":[\\"value-1\\",\\"value-2\\"]}}"`);
+    expect(fetchRequest).toContain(`"method": "POST"`);
+  }).toPass();
+
+  await page.getByRole('button', { name: 'Copy as Playwright' }).click();
+  await expect(async () => {
+    const playwrightRequest = await page.evaluate(() => (window as any).__clipboardCall);
+    expect(playwrightRequest).toContain(`await page.request.post('${server.PREFIX}/post-data-1', {`);
+    expect(playwrightRequest.replaceAll('\r\n', '\n')).toContain(`  data: \`{
+  "data": {
+    "key": "value",
+    "array": [
+      "value-1",
+      "value-2"
+    ]
+  }
+}\``);
+    expect(playwrightRequest).toContain(`'content-type': 'application/json'`);
+  }).toPass();
+});
+
+
+test('should not preserve selection across test runs', async ({ runUITest, server }) => {
+  const { page } = await runUITest({
+    'network-tab.test.ts': `
+      import { test, expect } from '@playwright/test';
+      test('network tab test', async ({ page }) => {
+        await page.goto('${server.PREFIX}/network-tab/network.html');
+        await page.evaluate(() => (window as any).donePromise);
+      });
+    `,
+  });
+
+  await page.getByRole('treeitem', { name: 'network tab test' }).dblclick();
+  await expect(page.getByTestId('workbench-run-status')).toContainText('Passed');
+
+  await page.getByRole('tab', { name: 'Network' }).click();
+  const networkItem = page.getByRole('listitem').filter({ hasText: 'network.html' });
+  await networkItem.click();
+  const headersPanel = page.getByRole('tabpanel', { name: 'Headers' });
+  await expect(headersPanel).toBeVisible();
+
+  await page.getByRole('treeitem', { name: 'network tab test' }).dblclick();
+  await expect(headersPanel).toBeHidden();
 });

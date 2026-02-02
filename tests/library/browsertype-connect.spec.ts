@@ -22,7 +22,7 @@ import * as path from 'path';
 import { getUserAgent, getPlaywrightVersion } from '../../packages/playwright-core/lib/server/utils/userAgent';
 import WebSocket from 'ws';
 import { expect, playwrightTest } from '../config/browserTest';
-import { parseTrace, suppressCertificateWarning } from '../config/utils';
+import { parseTraceRaw, suppressCertificateWarning, rafraf } from '../config/utils';
 import formidable from 'formidable';
 import type { Browser, ConnectOptions } from 'playwright-core';
 import { createHttpServer } from '../../packages/playwright-core/lib/server/utils/network';
@@ -72,13 +72,11 @@ const test = playwrightTest.extend<ExtraFixtures>({
 });
 
 test.slow(true, 'All connect tests are slow');
-test.skip(({ mode }) => mode.startsWith('service'));
 
 for (const kind of ['launchServer', 'run-server'] as const) {
   test.describe(kind, () => {
 
-    test('should connect over wss', async ({ connect, startRemoteServer, httpsServer, mode }) => {
-      test.skip(mode !== 'default'); // Out of process transport does not allow us to set env vars dynamically.
+    test('should connect over wss', async ({ connect, startRemoteServer, httpsServer }) => {
       const remoteServer = await startRemoteServer(kind);
 
       const oldValue = process.env['NODE_TLS_REJECT_UNAUTHORIZED'];
@@ -313,9 +311,7 @@ for (const kind of ['launchServer', 'run-server'] as const) {
       expect(disconnected).toBe(browser);
     });
 
-    test('should handle exceptions during connect', async ({ connect, startRemoteServer, mode }) => {
-      test.skip(mode !== 'default');
-
+    test('should handle exceptions during connect', async ({ connect, startRemoteServer }) => {
       const remoteServer = await startRemoteServer(kind);
       const __testHookBeforeCreateBrowser = () => { throw new Error('Dummy'); };
       const error = await connect(remoteServer.wsEndpoint(), { __testHookBeforeCreateBrowser } as any).catch(e => e);
@@ -501,7 +497,7 @@ for (const kind of ['launchServer', 'run-server'] as const) {
       });
       const page = await context.newPage();
       await page.evaluate(() => document.body.style.backgroundColor = 'red');
-      await new Promise(r => setTimeout(r, 1000));
+      await rafraf(page, 100);
       await context.close();
 
       test.info().annotations.push({ type: 'issue', description: 'https://github.com/microsoft/playwright/issues/36685' });
@@ -662,7 +658,7 @@ for (const kind of ['launchServer', 'run-server'] as const) {
       await context.close();
       await browser.close();
 
-      const { resources } = await parseTrace(testInfo.outputPath('trace1.zip'));
+      const { resources } = await parseTraceRaw(testInfo.outputPath('trace1.zip'));
       const sourceNames = Array.from(resources.keys()).filter(k => k.endsWith('.txt'));
       expect(sourceNames.length).toBe(1);
       const sourceFile = resources.get(sourceNames[0]);
@@ -686,8 +682,7 @@ for (const kind of ['launchServer', 'run-server'] as const) {
       expect(await response.json()).toEqual({ 'foo': 'bar' });
     });
 
-    test('should upload large file', async ({ connect, startRemoteServer, server, mode }, testInfo) => {
-      test.skip(mode.startsWith('service'), 'Take it easy on service');
+    test('should upload large file', async ({ connect, startRemoteServer, server }, testInfo) => {
       test.slow();
       const remoteServer = await startRemoteServer(kind);
       const browser = await connect(remoteServer.wsEndpoint());
@@ -758,8 +753,7 @@ for (const kind of ['launchServer', 'run-server'] as const) {
         expect(Math.abs(timestamps[i] - expectedTimestamps[i]), `expected: ${expectedTimestamps}; actual: ${timestamps}`).toBeLessThan(1000);
     });
 
-    test('should connect over http', async ({ connect, startRemoteServer, mode }) => {
-      test.skip(mode !== 'default');
+    test('should connect over http', async ({ connect, startRemoteServer }) => {
       const remoteServer = await startRemoteServer(kind);
 
       const url = new URL(remoteServer.wsEndpoint());
@@ -769,7 +763,6 @@ for (const kind of ['launchServer', 'run-server'] as const) {
     });
 
     test.describe('socks proxy', () => {
-      test.skip(({ mode }) => mode !== 'default');
       test.skip(kind === 'launchServer', 'not supported yet');
 
       test('should forward non-forwarded requests', async ({ server, startRemoteServer, connect }) => {
@@ -970,7 +963,7 @@ for (const kind of ['launchServer', 'run-server'] as const) {
         expect(failed).toBe(true);
       });
 
-      test('should check proxy pattern on the client', async ({ connect, startRemoteServer, server, browserName, platform, dummyServerPort }, workerInfo) => {
+      test('should check proxy pattern on the client', async ({ connect, startRemoteServer, server, dummyServerPort }) => {
         let reachedOriginalTarget = false;
         server.setRoute('/foo.html', async (req, res) => {
           reachedOriginalTarget = true;

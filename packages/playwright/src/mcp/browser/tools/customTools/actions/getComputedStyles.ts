@@ -31,7 +31,7 @@ export const get_computed_styles = defineTabTool({
     const { ref, element } = elementStyleSchema.parse(params);
     const result = { ref, element };
 
-    const locator = await tab.refLocator(result);
+    const { locator } = await tab.refLocator(result);
 
     await tab.waitForCompletion(async () => {
       const getStylesFunction = (element: Element, props?: string[]) => {
@@ -48,7 +48,7 @@ export const get_computed_styles = defineTabTool({
       response.addCode(`// Get computed styles for ${params.element}`);
       const computedStyles = await locator.evaluate(getStylesFunction, params.propertyNames);
       console.log('Requested Computed Styles : ', computedStyles);
-      response.addResult(JSON.stringify(computedStyles, null, 2) || 'Couldn\'t get requested styles');
+      response.addTextResult(JSON.stringify(computedStyles, null, 2) || 'Couldn\'t get requested styles');
     });
   },
 });

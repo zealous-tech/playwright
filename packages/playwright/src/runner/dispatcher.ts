@@ -20,13 +20,17 @@ import { colors } from 'playwright-core/lib/utils';
 import { addSuggestedRebaseline } from './rebase';
 import { WorkerHost } from './workerHost';
 import { serializeConfig } from '../common/ipc';
+import { addLocationAndSnippetToError } from '../reporters/internalReporter';
+import { serializeError } from '../util';
+import { Storage } from './storage';
 
 import type { FailureTracker } from './failureTracker';
 import type { ProcessExitData } from './processHost';
 import type { TestGroup } from './testGroups';
 import type { TestError, TestResult, TestStep } from '../../types/testReporter';
+import type * as ipc from '../common/ipc';
 import type { FullConfigInternal } from '../common/config';
-import type { AttachmentPayload, DonePayload, RunPayload, SerializedConfig, StepBeginPayload, StepEndPayload, TeardownErrorsPayload, TestBeginPayload, TestEndPayload, TestOutputPayload } from '../common/ipc';
+import type { AttachmentPayload, DonePayload, RunPayload, SerializedConfig, StepBeginPayload, StepEndPayload, TeardownErrorsPayload, TestBeginPayload, TestEndPayload, TestOutputPayload, TestPausedPayload } from '../common/ipc';
 import type { Suite } from '../common/test';
 import type { TestCase } from '../common/test';
 import type { ReporterV2 } from '../reporters/reporterV2';
@@ -98,7 +102,7 @@ export class Dispatcher {
 
     // 3. Claim both the job and the worker slot.
     this._queue.splice(jobIndex, 1);
-    const jobDispatcher = new JobDispatcher(job, this._reporter, this._failureTracker, () => this.stop().catch(() => {}));
+    const jobDispatcher = new JobDispatcher(job, this._config, this._reporter, this._failureTracker, () => this.stop().catch(() => {}));
     this._workerSlots[workerIndex].busy = true;
     this._workerSlots[workerIndex].jobDispatcher = jobDispatcher;
 
@@ -258,6 +262,12 @@ export class Dispatcher {
       const producedEnv = this._producedEnvByProjectId.get(testGroup.projectId) || {};
       this._producedEnvByProjectId.set(testGroup.projectId, { ...producedEnv, ...worker.producedEnv() });
     });
+    worker.onRequest('cloneStorage', async (params: ipc.CloneStoragePayload) => {
+      return await Storage.clone(params.storageFile, outputDir);
+    });
+    worker.onRequest('upstreamStorage', async (params: ipc.UpstreamStoragePayload) => {
+      await Storage.upstream(params.storageFile, params.storageOutFile);
+    });
     return worker;
   }
 
@@ -278,6 +288,7 @@ class JobDispatcher {
   jobResult = new ManualPromise<{ newJob?: TestGroup, didFail: boolean }>();
 
   readonly job: TestGroup;
+  private _config: FullConfigInternal;
   private _reporter: ReporterV2;
   private _failureTracker: FailureTracker;
   private _stopCallback: () => void;
@@ -290,8 +301,9 @@ class JobDispatcher {
   private _workerIndex = 0;
   private _currentlyRunning: { test: TestCase, result: TestResult } | undefined;
 
-  constructor(job: TestGroup, reporter: ReporterV2, failureTracker: FailureTracker, stopCallback: () => void) {
+  constructor(job: TestGroup, config: FullConfigInternal, reporter: ReporterV2, failureTracker: FailureTracker, stopCallback: () => void) {
     this.job = job;
+    this._config = config;
     this._reporter = reporter;
     this._failureTracker = failureTracker;
     this._stopCallback = stopCallback;
@@ -574,9 +586,42 @@ class JobDispatcher {
       eventsHelper.addEventListener(worker, 'stepBegin', this._onStepBegin.bind(this)),
       eventsHelper.addEventListener(worker, 'stepEnd', this._onStepEnd.bind(this)),
       eventsHelper.addEventListener(worker, 'attach', this._onAttach.bind(this)),
+      eventsHelper.addEventListener(worker, 'testPaused', this._onTestPaused.bind(this, worker)),
       eventsHelper.addEventListener(worker, 'done', this._onDone.bind(this)),
       eventsHelper.addEventListener(worker, 'exit', this.onExit.bind(this)),
     ];
+  }
+
+  private _onTestPaused(worker: WorkerHost, params: TestPausedPayload) {
+    const data = this._dataByTestId.get(params.testId);
+    if (!data)
+      return;
+
+    const { result, test } = data;
+
+    const sendMessage = async (message: { request: any }) => {
+      try {
+        if (this.jobResult.isDone())
+          throw new Error('Test has already stopped');
+        const response = await worker.sendCustomMessage({ testId: test.id, request: message.request });
+        if (response.error)
+          addLocationAndSnippetToError(this._config.config, response.error);
+        return response;
+      } catch (e) {
+        const error = serializeError(e);
+        addLocationAndSnippetToError(this._config.config, error);
+        return { response: undefined, error };
+      }
+    };
+
+    result.status = params.status;
+    result.errors = params.errors;
+    result.error = result.errors[0];
+
+    void this._reporter.onTestPaused?.(test, result).then(() => {
+      worker.sendResume({});
+    });
+    this._failureTracker.onTestPaused?.({ ...params, sendMessage });
   }
 
   skipWholeJob(): boolean {
@@ -593,6 +638,8 @@ class JobDispatcher {
         const result = test._appendTestResult();
         this._reporter.onTestBegin?.(test, result);
         result.status = 'skipped';
+        // This must mirror _onTestEnd() above
+        result.annotations = [...test.annotations];
         this._reportTestEnd(test, result);
       }
       return true;

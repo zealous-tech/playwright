@@ -38,7 +38,7 @@ export const generate_locator = defineTabTool({
         const refForLocator = ref.startsWith('###checkLocator')
           ? ref.substring('###checkLocator'.length)
           : ref;
-        const locator = await tab.refLocator({ ref: refForLocator, element });
+        const { locator } = await tab.refLocator({ ref: refForLocator, element });
 
         // Always generate locator first
         let generatedLocator = await generateLocator(locator);
@@ -72,7 +72,7 @@ export const generate_locator = defineTabTool({
           },
         };
 
-        response.addResult(JSON.stringify(payload, null, 2));
+        response.addTextResult(JSON.stringify(payload, null, 2));
       });
     } catch (error) {
       const errorPayload = {
@@ -86,7 +86,7 @@ export const generate_locator = defineTabTool({
       };
 
       console.error('Generate locator error:', errorPayload);
-      response.addResult(JSON.stringify(errorPayload, null, 2));
+      response.addTextResult(JSON.stringify(errorPayload, null, 2));
     }
   },
 });

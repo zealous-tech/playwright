@@ -21,10 +21,11 @@ import './networkTab.css';
 import { NetworkResourceDetails } from './networkResourceDetails';
 import { bytesToString, msToString } from '@web/uiUtils';
 import { PlaceholderPanel } from './placeholderPanel';
-import { context, type MultiTraceModel } from './modelUtil';
+import { context } from '@isomorphic/trace/traceModel';
+import type { TraceModel } from '@isomorphic/trace/traceModel';
 import { GridView, type RenderedGridCell } from '@web/components/gridView';
 import { SplitView } from '@web/components/splitView';
-import type { ContextEntry } from '../types/entries';
+import type { ContextEntry } from '@isomorphic/trace/entries';
 import { NetworkFilters, defaultFilterState, type FilterState, type ResourceType } from './networkFilters';
 import type { Language } from '@isomorphic/locatorGenerators';
 
@@ -34,6 +35,7 @@ type NetworkTabModel = {
 };
 
 type RenderedEntry = {
+  ordinal: number,
   name: { name: string, url: string },
   method: string,
   status: { code: number, text: string },
@@ -44,13 +46,12 @@ type RenderedEntry = {
   route: string,
   resource: Entry,
   contextId: string,
-  frameref: string | undefined,
 };
 type ColumnName = keyof RenderedEntry;
 type Sorting = { by: ColumnName, negate: boolean};
 const NetworkGridView = GridView<RenderedEntry>;
 
-export function useNetworkTabModel(model: MultiTraceModel | undefined, selectedTime: Boundaries | undefined): NetworkTabModel {
+export function useNetworkTabModel(model: TraceModel | undefined, selectedTime: Boundaries | undefined): NetworkTabModel {
   const resources = React.useMemo(() => {
     const resources = model?.resources || [];
     const filtered = resources.filter(resource => {
@@ -67,35 +68,29 @@ export function useNetworkTabModel(model: MultiTraceModel | undefined, selectedT
 export const NetworkTab: React.FunctionComponent<{
   boundaries: Boundaries,
   networkModel: NetworkTabModel,
-  onEntryHovered?: (entry: Entry | undefined) => void,
+  onResourceHovered?: (ordinal: number | undefined) => void,
   sdkLanguage: Language,
-}> = ({ boundaries, networkModel, onEntryHovered, sdkLanguage }) => {
+}> = ({ boundaries, networkModel, onResourceHovered, sdkLanguage }) => {
   const [sorting, setSorting] = React.useState<Sorting | undefined>(undefined);
-  const [selectedEntryKey, setSelectedEntryKey] = React.useState<string | undefined>(undefined);
+  const [selectedEntry, setSelectedEntry] = React.useState<RenderedEntry | undefined>(undefined);
   const [filterState, setFilterState] = React.useState(defaultFilterState);
 
-  const { renderedEntries, renderedEntryMap } = React.useMemo(() => {
-    const renderedEntries = networkModel.resources.map(entry => renderEntry(entry, boundaries, networkModel.contextIdMap)).filter(filterEntry(filterState));
+  const visibleSelectedEntry = React.useMemo(() => (selectedEntry && networkModel.resources.includes(selectedEntry.resource)) ? selectedEntry : undefined, [selectedEntry, networkModel.resources]);
+
+  const { renderedEntries } = React.useMemo(() => {
+    const renderedEntries = networkModel.resources.map((entry, i) => renderEntry(entry, boundaries, networkModel.contextIdMap, i)).filter(filterEntry(filterState));
     if (sorting)
       sort(renderedEntries, sorting);
-    const renderedEntryMap = new Map(renderedEntries.map((entry, i) => [`${entry.frameref}:${i}`, entry]));
-    return { renderedEntries, renderedEntryMap };
+    return { renderedEntries };
   }, [networkModel.resources, networkModel.contextIdMap, filterState, sorting, boundaries]);
-
-  const selectedEntry = selectedEntryKey ? renderedEntryMap.get(selectedEntryKey) : undefined;
 
   const [columnWidths, setColumnWidths] = React.useState<Map<ColumnName, number>>(() => {
     return new Map(allColumns().map(column => [column, columnWidth(column)]));
   });
 
-  const onSelected = React.useCallback((item: RenderedEntry) => {
-    const index = renderedEntries.indexOf(item);
-    setSelectedEntryKey(index !== -1 ? `${item.frameref}:${index}` : undefined);
-  }, [renderedEntries]);
-
   const onFilterStateChange = React.useCallback((newFilterState: FilterState) => {
     setFilterState(newFilterState);
-    setSelectedEntryKey(undefined);
+    setSelectedEntry(undefined);
   }, []);
 
   if (!networkModel.resources.length)
@@ -105,10 +100,10 @@ export const NetworkTab: React.FunctionComponent<{
     name='network'
     ariaLabel='Network requests'
     items={renderedEntries}
-    selectedItem={selectedEntry}
-    onSelected={onSelected}
-    onHighlighted={item => onEntryHovered?.(item?.resource)}
-    columns={visibleColumns(!!selectedEntry, renderedEntries)}
+    selectedItem={visibleSelectedEntry}
+    onSelected={item => setSelectedEntry(item)}
+    onHighlighted={item => onResourceHovered?.(item?.ordinal)}
+    columns={visibleColumns(!!visibleSelectedEntry, renderedEntries)}
     columnTitle={columnTitle}
     columnWidths={columnWidths}
     setColumnWidths={setColumnWidths}
@@ -120,14 +115,14 @@ export const NetworkTab: React.FunctionComponent<{
   />;
   return <>
     <NetworkFilters filterState={filterState} onFilterStateChange={onFilterStateChange} />
-    {!selectedEntry && grid}
-    {selectedEntry &&
+    {!visibleSelectedEntry && grid}
+    {visibleSelectedEntry &&
       <SplitView
         sidebarSize={columnWidths.get('name')!}
         sidebarIsFirst={true}
         orientation='horizontal'
         settingName='networkResourceDetails'
-        main={<NetworkResourceDetails resource={selectedEntry.resource} sdkLanguage={sdkLanguage} startTimeOffset={selectedEntry.start} onClose={() => setSelectedEntryKey(undefined)} />}
+        main={<NetworkResourceDetails resource={visibleSelectedEntry.resource} sdkLanguage={sdkLanguage} startTimeOffset={visibleSelectedEntry.start} onClose={() => setSelectedEntry(undefined)} />}
         sidebar={grid}
       />}
   </>;
@@ -226,7 +221,7 @@ class ContextIdMap {
   private _lastPageId = 0;
   private _lastApiRequestContextId = 0;
 
-  constructor(model: MultiTraceModel | undefined) {}
+  constructor(model: TraceModel | undefined) {}
 
   contextId(resource: Entry): string {
     if (resource.pageref)
@@ -270,7 +265,7 @@ function hasMultipleContexts(renderedEntries: RenderedEntry[]): boolean {
   return false;
 }
 
-const renderEntry = (resource: Entry, boundaries: Boundaries, contextIdGenerator: ContextIdMap): RenderedEntry => {
+const renderEntry = (resource: Entry, boundaries: Boundaries, contextIdGenerator: ContextIdMap, ordinal: number): RenderedEntry => {
   const routeStatus = formatRouteStatus(resource);
   let resourceName: string;
   try {
@@ -289,6 +284,7 @@ const renderEntry = (resource: Entry, boundaries: Boundaries, contextIdGenerator
     contentType = charset[1];
 
   return {
+    ordinal,
     name: { name: resourceName, url: resource.request.url },
     method: resource.request.method,
     status: { code: resource.response.status, text: resource.response.statusText },
@@ -299,7 +295,6 @@ const renderEntry = (resource: Entry, boundaries: Boundaries, contextIdGenerator
     route: routeStatus,
     resource,
     contextId: contextIdGenerator.contextId(resource),
-    frameref: resource._frameref,
   };
 };
 
@@ -370,7 +365,6 @@ function comparator(sortBy: ColumnName) {
 }
 
 const resourceTypePredicates: Record<ResourceType, (contentType: string) => boolean> = {
-  'All': () => true,
   'Fetch': contentType => contentType === 'application/json',
   'HTML': contentType => contentType === 'text/html',
   'CSS': contentType => contentType === 'text/css',
@@ -379,10 +373,9 @@ const resourceTypePredicates: Record<ResourceType, (contentType: string) => bool
   'Image': contentType => contentType.includes('image'),
 };
 
-function filterEntry({ searchValue, resourceType }: FilterState) {
+function filterEntry({ searchValue, resourceTypes }: FilterState) {
   return (entry: RenderedEntry) => {
-    const typePredicate = resourceTypePredicates[resourceType];
-
-    return typePredicate(entry.contentType) && entry.name.url.toLowerCase().includes(searchValue.toLowerCase());
+    const isRightType = resourceTypes.size === 0 || Array.from(resourceTypes).some(type => resourceTypePredicates[type](entry.contentType));
+    return isRightType && entry.name.url.toLowerCase().includes(searchValue.toLowerCase());
   };
 }

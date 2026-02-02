@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { expect } from '@zealous-tech/playwright/test';
+import { expect } from '@playwright/test';
 import { defineTabTool } from '../../tool';
 import { buildValidationErrorPayload, buildValidationPayload, createValidationEvidence, generateLocatorString, parseValidationResult } from '../helpers/helpers';
 import { ELEMENT_ATTACHED_TIMEOUT, executeDataValidation, parseDataInput } from '../helpers/utils';
@@ -49,7 +49,7 @@ export const default_validation = defineTabTool({
 
         const payload = buildValidationPayload('data', jsCode, validationResult, evidence, { dataPreview });
         console.log('Default validation (data mode) executed:', payload);
-        response.addResult(JSON.stringify(payload, null, 2));
+        response.addTextResult(JSON.stringify(payload, null, 2));
         return;
 
       } catch (error) {
@@ -58,7 +58,7 @@ export const default_validation = defineTabTool({
 
         const evidence = [createValidationEvidence('data', jsCode, errorMessage)];
         const payload = buildValidationErrorPayload('data', jsCode, errorMessage, evidence);
-        response.addResult(JSON.stringify(payload, null, 2));
+        response.addTextResult(JSON.stringify(payload, null, 2));
         return;
       }
     }
@@ -70,13 +70,13 @@ export const default_validation = defineTabTool({
       const errorMessage = 'Missing required parameters: provide either "data" for data validation, or "ref" + "element" for element validation.';
       const evidence = [createValidationEvidence('element', jsCode, 'Either "data" parameter OR both "ref" and "element" parameters are required.')];
       const payload = buildValidationErrorPayload('element', jsCode, errorMessage, evidence);
-      response.addResult(JSON.stringify(payload, null, 2));
+      response.addTextResult(JSON.stringify(payload, null, 2));
       return;
     }
 
     await tab.waitForCompletion(async () => {
       try {
-        const locator = await tab.refLocator({ ref, element });
+        const { locator } = await tab.refLocator({ ref, element });
 
         // Check if element is attached to DOM
         try {
@@ -87,7 +87,7 @@ export const default_validation = defineTabTool({
           const evidence = [createValidationEvidence('element', jsCode, errorMessage, { element, locatorString })];
           const payload = buildValidationErrorPayload('element', jsCode, 'UI element not found', evidence, { ref, element });
           console.log('Default validation - UI element not found:', payload);
-          response.addResult(JSON.stringify(payload, null, 2));
+          response.addTextResult(JSON.stringify(payload, null, 2));
           return;
         }
 
@@ -128,12 +128,12 @@ export const default_validation = defineTabTool({
 
         const payload = buildValidationPayload('element', jsCode, validationResult, evidence, { ref, element });
         console.log('Default validation executed:', payload);
-        response.addResult(JSON.stringify(payload, null, 2));
+        response.addTextResult(JSON.stringify(payload, null, 2));
 
       } catch (error) {
         let locatorString = '';
         try {
-          const locator = await tab.refLocator({ ref, element });
+          const { locator } = await tab.refLocator({ ref, element });
           locatorString = await generateLocatorString(ref, locator);
         } catch { /* ignore */ }
 
@@ -143,7 +143,7 @@ export const default_validation = defineTabTool({
         const evidence = [createValidationEvidence('element', jsCode, errorMessage, { element, locatorString })];
         const payload = buildValidationErrorPayload('element', jsCode, error instanceof Error ? error.message : String(error), evidence, { ref, element });
         console.error('Default validation error:', payload);
-        response.addResult(JSON.stringify(payload, null, 2));
+        response.addTextResult(JSON.stringify(payload, null, 2));
       }
     });
   },

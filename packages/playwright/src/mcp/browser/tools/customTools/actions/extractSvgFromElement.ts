@@ -31,7 +31,7 @@ export const extract_svg_from_element = defineTabTool({
     const { ref, element, extractMethod, includeStyles, minifyOutput } = elementSvgSchema.parse(params);
     const result = { ref, element };
 
-    const locator = await tab.refLocator(result);
+    const { locator } = await tab.refLocator(result);
 
     await tab.waitForCompletion(async () => {
       try {
@@ -102,12 +102,12 @@ export const extract_svg_from_element = defineTabTool({
 
         response.addCode(`// Extract SVG content from ${params.element}`);
         const svgContent = await locator.evaluate(extractSvgFunction, { extractMethod, includeStyles, minifyOutput });
-        response.addResult(svgContent.svgContent);
+        response.addTextResult(svgContent.svgContent);
 
       } catch (error) {
         response.addCode(`// Failed to extract SVG from ${params.element}`);
         const errorMessage = `Failed to extract SVG from ${element}. Error: ${error instanceof Error ? error.message : String(error)}`;
-        response.addResult(errorMessage);
+        response.addTextResult(errorMessage);
       }
     });
   },
