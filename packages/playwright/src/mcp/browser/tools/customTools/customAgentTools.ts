@@ -17,12 +17,14 @@ import { z } from 'playwright-core/lib/mcpBundle';
 //@ZEALOUS UPDATE
 import * as jp from 'jsonpath';
 import { defineTabTool, defineTool } from '../tool.js';
-import { getAllComputedStylesDirect, pickActualValue, parseRGBColor, isColorInRange,runCommandClean, compareValues, checkElementVisibilityUnique, checkTextExistenceInAllFrames, getElementErrorMessage, generateLocatorString, getAssertionMessage, getAssertionEvidence, getXPathCode, collectAllFrames, parseDataInput, executeDataValidation, parseValidationResult, createValidationEvidence, buildValidationPayload, buildValidationErrorPayload } from './helperFunctions.js';
 import { generateLocator } from '../utils.js';
 import validateIcon from './validateIcon';
 import { expect } from '@playwright/test';
 import { asLocator } from 'playwright-core/lib/utils';
 import type * as playwright from '@playwright';
+import { getAllComputedStylesDirect, runCommandClean, compareValues, checkElementVisibilityUnique, checkTextExistenceInAllFrames, generateLocatorString, getAssertionEvidence, parseValidationResult, createValidationEvidence, buildValidationPayload, buildValidationErrorPayload } from './helpers/helpers.js';
+import { pickActualValue, parseRGBColor, isColorInRange, getElementErrorMessage, getAssertionMessage, getXPathCode, parseDataInput, executeDataValidation } from './helpers/utils.js';
+
 
 // Global timeout for element attachment validation (in milliseconds)
 const ELEMENT_ATTACHED_TIMEOUT = 15000;
@@ -44,13 +46,13 @@ function stringToRegExp(str: string): string | RegExp {
 
 // Helper function to convert string values to RegExp in objects
 function convertStringToRegExp(obj: any): any {
-  if (typeof obj === 'string') {
+  if (typeof obj === 'string')
     return stringToRegExp(obj);
-  }
 
-  if (Array.isArray(obj)) {
+
+  if (Array.isArray(obj))
     return obj.map(convertStringToRegExp);
-  }
+
 
   if (obj && typeof obj === 'object') {
     const converted: any = {};
@@ -58,11 +60,11 @@ function convertStringToRegExp(obj: any): any {
       // Convert specific fields that can contain RegExp values
       if (key === 'expected' || key === 'value' || key === 'values' ||
           key === 'name' || key === 'description' || key === 'errorMessage' ||
-          key === 'id' || key === 'role') {
+          key === 'id' || key === 'role')
         converted[key] = convertStringToRegExp(value);
-      } else {
+      else
         converted[key] = value;
-      }
+
     }
     return converted;
   }
@@ -204,7 +206,7 @@ const extract_svg_from_element = defineTabTool({
           if (options.minifyOutput)
             extractedContent = extractedContent.replace(/\s+/g, ' ').trim();
 
-          //console.dir(extractedContent, { depth: null });
+          // console.dir(extractedContent, { depth: null });
           return {
             svgContent: extractedContent,
             elementInfo: {
@@ -500,7 +502,7 @@ const validate_computed_styles = defineTabTool({
 
       // Helper function to create evidence command
       const createEvidenceCommand = (locatorString: string, property: string, operator: string, expected?: any) => JSON.stringify({
-        description: "Evidence showing how validation was performed",
+        description: 'Evidence showing how validation was performed',
         toolName: 'validate_computed_styles',
         locator: locatorString,
         arguments: {
@@ -517,7 +519,7 @@ const validate_computed_styles = defineTabTool({
         // If element not found, generate payload with error and return early
         // Generate locator string for evidence (even if element not found, try to get locator string)
         let locatorString = '';
-        
+
         locatorString = await generateLocatorString(ref, locator);
 
         const evidence = checks.map(check => ({
@@ -560,75 +562,75 @@ const validate_computed_styles = defineTabTool({
         // If getting styles fails, use empty object (element is confirmed to exist from toBeAttached check)
         allStyles = {};
       }
-      //console.log("All Computed Styles:", allStyles);
+      // console.log("All Computed Styles:", allStyles);
       // 2) Validate rules
       const results = checks.map(c => {
-            const actual = pickActualValue(allStyles, c.name);
+        const actual = pickActualValue(allStyles, c.name);
 
-            let passed: boolean;
-            if (c.operator === 'isEqual') {
-              // isEqual operator: strict equality only
-              if (typeof c.expected === 'string' && (c.name.toLowerCase().includes('color') || c.name.toLowerCase().includes('background'))) {
-                // For color properties, check if expected is in RGB format
-                const expectedRGB = parseRGBColor(c.expected);
-                const actualRGB = parseRGBColor(actual || '');
+        let passed: boolean;
+        if (c.operator === 'isEqual') {
+          // isEqual operator: strict equality only
+          if (typeof c.expected === 'string' && (c.name.toLowerCase().includes('color') || c.name.toLowerCase().includes('background'))) {
+            // For color properties, check if expected is in RGB format
+            const expectedRGB = parseRGBColor(c.expected);
+            const actualRGB = parseRGBColor(actual || '');
 
-                if (expectedRGB && actualRGB) {
-                  // Compare RGB values with some tolerance for minor variations
-                  const tolerance = 5; // Allow small variations in RGB values
-                  passed = Math.abs(expectedRGB.r - actualRGB.r) <= tolerance &&
+            if (expectedRGB && actualRGB) {
+              // Compare RGB values with some tolerance for minor variations
+              const tolerance = 5; // Allow small variations in RGB values
+              passed = Math.abs(expectedRGB.r - actualRGB.r) <= tolerance &&
                           Math.abs(expectedRGB.g - actualRGB.g) <= tolerance &&
                           Math.abs(expectedRGB.b - actualRGB.b) <= tolerance;
-                } else {
-                  // Fallback to strict equality if RGB parsing fails
-                  passed = actual === c.expected;
-                }
-              } else {
-                // For non-color properties: strict equality
-                passed = actual === c.expected;
-              }
-            } else if (c.operator === 'notEqual') {
-              // notEqual operator: strict inequality
-              passed = actual !== c.expected;
-            } else if (c.operator === 'inRange') {
-              // inRange operator: check if value is in list or RGB color is within range
-              if (Array.isArray(c.expected)) {
-                // For inRange with array: any matching value passes
-                passed = actual !== undefined && c.expected.includes(actual);
-              } else if (typeof c.expected === 'object' && 'minR' in c.expected) {
-                // For inRange with RGB range object: check if color is within range
-                passed = actual !== undefined && isColorInRange(actual, c.expected as { minR: number; maxR: number; minG: number; maxG: number; minB: number; maxB: number });
-              } else {
-                passed = false; // Invalid expected value - inRange only supports arrays and RGB range objects
-              }
             } else {
-              passed = false; // Unknown operator
+              // Fallback to strict equality if RGB parsing fails
+              passed = actual === c.expected;
             }
+          } else {
+            // For non-color properties: strict equality
+            passed = actual === c.expected;
+          }
+        } else if (c.operator === 'notEqual') {
+          // notEqual operator: strict inequality
+          passed = actual !== c.expected;
+        } else if (c.operator === 'inRange') {
+          // inRange operator: check if value is in list or RGB color is within range
+          if (Array.isArray(c.expected)) {
+            // For inRange with array: any matching value passes
+            passed = actual !== undefined && c.expected.includes(actual);
+          } else if (typeof c.expected === 'object' && 'minR' in c.expected) {
+            // For inRange with RGB range object: check if color is within range
+            passed = actual !== undefined && isColorInRange(actual, c.expected as { minR: number; maxR: number; minG: number; maxG: number; minB: number; maxB: number });
+          } else {
+            passed = false; // Invalid expected value - inRange only supports arrays and RGB range objects
+          }
+        } else {
+          passed = false; // Unknown operator
+        }
 
-            return {
-              style: c.name,
-              operator: c.operator,
-              expected: c.expected,
-              actual,
-              result: passed ? 'pass' : 'fail',
-            };
-          });
+        return {
+          style: c.name,
+          operator: c.operator,
+          expected: c.expected,
+          actual,
+          result: passed ? 'pass' : 'fail',
+        };
+      });
 
 
       const passedCount = results.filter(r => r.result === 'pass').length;
 
       // Generate evidence as array of objects
       const evidence = results.map(result => {
-            const expectedValue = typeof result.expected === 'object' ? JSON.stringify(result.expected) : result.expected;
-            const message = result.result === 'pass'
-              ? `CSS Property "${result.style}" validation passed: actual value "${result.actual}" ${result.operator === 'isEqual' ? 'equals' : result.operator === 'notEqual' ? 'does not equal' : 'is in range'} expected "${expectedValue}"`
-              : `CSS Property "${result.style}" validation failed: actual value "${result.actual}" ${result.operator === 'isEqual' ? 'does not equal' : result.operator === 'notEqual' ? 'equals' : 'is not in range'} expected "${expectedValue}"`;
-            
-            return {
-              command: createEvidenceCommand(locatorString, result.style, result.operator, result.expected),
-              message
-            };
-          });
+        const expectedValue = typeof result.expected === 'object' ? JSON.stringify(result.expected) : result.expected;
+        const message = result.result === 'pass'
+          ? `CSS Property "${result.style}" validation passed: actual value "${result.actual}" ${result.operator === 'isEqual' ? 'equals' : result.operator === 'notEqual' ? 'does not equal' : 'is in range'} expected "${expectedValue}"`
+          : `CSS Property "${result.style}" validation failed: actual value "${result.actual}" ${result.operator === 'isEqual' ? 'does not equal' : result.operator === 'notEqual' ? 'equals' : 'is not in range'} expected "${expectedValue}"`;
+
+        return {
+          command: createEvidenceCommand(locatorString, result.style, result.operator, result.expected),
+          message
+        };
+      });
 
       // 3) Answer
       const payload = {
@@ -847,8 +849,6 @@ const toMatchAriaSnapshotOptionsArgsSchema = z.object({
 });
 
 
-
-
 // Union schema for all assertion arguments
 const assertionArgumentsSchema = z.discriminatedUnion('assertionType', [
   z.object({ assertionType: z.literal('toBeAttached'), ...toBeAttachedArgsSchema.shape }),
@@ -913,24 +913,24 @@ const validate_dom_assertions = defineTabTool({
 
       for (const check of checks) {
         const { negate, assertion: args } = check;
-        if (!args || !args.assertionType) {
+        if (!args || !args.assertionType)
           throw new Error('Each check must have assertion with assertionType');
-        }
+
         // Convert string RegExp patterns to actual RegExp objects
         const convertedArgs = convertStringToRegExp(args);
-        //console.log('convertedArgs', convertedArgs);
+        // console.log('convertedArgs', convertedArgs);
         const { assertionType: name } = convertedArgs;
         // Get message for current assertion with element description
-        const message : string = getAssertionMessage(name, element, negate);
+        const message: string = getAssertionMessage(name, element, negate);
         // Prepare final args - separate main arguments from options
         const { options, ...mainArgs } = convertedArgs;
         const finalOptions = { ...options, timeout: ELEMENT_ATTACHED_TIMEOUT };
-        
-        let result = {
+
+        const result = {
           assertion: name,
           negate,
           result: 'fail' as 'pass' | 'fail',
-          evidence: {message: '', command: ''},
+          evidence: { message: '', command: '' },
           error: '',
           actual: '',
           arguments: args,
@@ -938,7 +938,7 @@ const validate_dom_assertions = defineTabTool({
 
         let locatorString: string = '';
         const createEvidenceCommand = (locatorStr: string) => JSON.stringify({
-          description: "Evidence showing how validation was performed",
+          description: 'Evidence showing how validation was performed',
           assertion: name,
           locator: locatorStr,
           arguments: Object.keys(mainArgs).length > 1 ? mainArgs : {},
@@ -946,32 +946,32 @@ const validate_dom_assertions = defineTabTool({
         });
         try {
           // Create the assertion with message
-          const assertion = message 
+          const assertion = message
             ? (negate ? expect(locator, message).not : expect(locator, message))
             : (negate ? expect(locator).not : expect(locator));
 
           // Helper function to create evidence command
-          
+
 
           // Execute the specific assertion by calling the method dynamically
           let assertionResult;
           switch (name) {
             case 'toBeEnabled':
-              if (!convertedArgs || convertedArgs.assertionType !== 'toBeEnabled') {
+              if (!convertedArgs || convertedArgs.assertionType !== 'toBeEnabled')
                 throw new Error('toBeEnabled requires proper arguments structure');
-              }
+
               assertionResult = await assertion.toBeEnabled(finalOptions);
               result.actual = 'enabled';
-              
+
               locatorString = await generateLocatorString(ref, locator);
               result.evidence.message = getAssertionEvidence(name, negate, locatorString, element, mainArgs, options);
               result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
             case 'toBeDisabled':
-              if (!args || args.assertionType !== 'toBeDisabled') {
+              if (!args || args.assertionType !== 'toBeDisabled')
                 throw new Error('toBeDisabled requires proper arguments structure');
-              }
+
               assertionResult = await assertion.toBeDisabled(finalOptions);
               result.actual = 'disabled';
               locatorString = await generateLocatorString(ref, locator);
@@ -980,9 +980,9 @@ const validate_dom_assertions = defineTabTool({
               break;
 
             case 'toBeVisible':
-              if (!args || args.assertionType !== 'toBeVisible') {
+              if (!args || args.assertionType !== 'toBeVisible')
                 throw new Error('toBeVisible requires proper arguments structure');
-              }
+
               assertionResult = await assertion.toBeVisible(finalOptions);
               result.actual = 'visible';
               locatorString = await generateLocatorString(ref, locator);
@@ -991,9 +991,9 @@ const validate_dom_assertions = defineTabTool({
               break;
 
             case 'toBeHidden':
-              if (!args || args.assertionType !== 'toBeHidden') {
+              if (!args || args.assertionType !== 'toBeHidden')
                 throw new Error('toBeHidden requires proper arguments structure');
-              }
+
               assertionResult = await assertion.toBeHidden(finalOptions);
               result.actual = 'hidden';
               locatorString = await generateLocatorString(ref, locator);
@@ -1002,9 +1002,9 @@ const validate_dom_assertions = defineTabTool({
               break;
 
             case 'toBeInViewport':
-              if (!args || args.assertionType !== 'toBeInViewport') {
+              if (!args || args.assertionType !== 'toBeInViewport')
                 throw new Error('toBeInViewport requires proper arguments structure');
-              }
+
               assertionResult = await assertion.toBeInViewport(finalOptions);
               result.actual = 'in viewport';
               locatorString = await generateLocatorString(ref, locator);
@@ -1013,9 +1013,9 @@ const validate_dom_assertions = defineTabTool({
               break;
 
             case 'toBeChecked':
-              if (!args || args.assertionType !== 'toBeChecked') {
+              if (!args || args.assertionType !== 'toBeChecked')
                 throw new Error('toBeChecked requires proper arguments structure');
-              }
+
               assertionResult = await assertion.toBeChecked(finalOptions);
               result.actual = 'checked';
               locatorString = await generateLocatorString(ref, locator);
@@ -1025,9 +1025,9 @@ const validate_dom_assertions = defineTabTool({
 
 
             case 'toBeFocused':
-              if (!args || args.assertionType !== 'toBeFocused') {
+              if (!args || args.assertionType !== 'toBeFocused')
                 throw new Error('toBeFocused requires proper arguments structure');
-              }
+
               assertionResult = await assertion.toBeFocused(finalOptions);
               result.actual = 'focused';
               locatorString = await generateLocatorString(ref, locator);
@@ -1036,9 +1036,9 @@ const validate_dom_assertions = defineTabTool({
               break;
 
             case 'toBeEditable':
-              if (!args || args.assertionType !== 'toBeEditable') {
+              if (!args || args.assertionType !== 'toBeEditable')
                 throw new Error('toBeEditable requires proper arguments structure');
-              }
+
               assertionResult = await assertion.toBeEditable(finalOptions);
               result.actual = 'editable';
               locatorString = await generateLocatorString(ref, locator);
@@ -1047,9 +1047,9 @@ const validate_dom_assertions = defineTabTool({
               break;
 
             case 'toBeEmpty':
-              if (!args || args.assertionType !== 'toBeEmpty') {
+              if (!args || args.assertionType !== 'toBeEmpty')
                 throw new Error('toBeEmpty requires proper arguments structure');
-              }
+
               assertionResult = await assertion.toBeEmpty(finalOptions);
               result.actual = 'empty';
               locatorString = await generateLocatorString(ref, locator);
@@ -1058,9 +1058,9 @@ const validate_dom_assertions = defineTabTool({
               break;
 
             case 'toBeAttached':
-              if (!args || args.assertionType !== 'toBeAttached') {
+              if (!args || args.assertionType !== 'toBeAttached')
                 throw new Error('toBeAttached requires proper arguments structure');
-              }
+
               assertionResult = await assertion.toBeAttached(finalOptions);
               result.actual = 'attached';
               locatorString = await generateLocatorString(ref, locator);
@@ -1069,13 +1069,13 @@ const validate_dom_assertions = defineTabTool({
               break;
 
             case 'toHaveAttribute':
-              if (!args || args.assertionType !== 'toHaveAttribute') {
+              if (!args || args.assertionType !== 'toHaveAttribute')
                 throw new Error('toHaveAttribute requires proper arguments structure');
-              }
+
               const { name: attrName, value: attrValue } = mainArgs;
-              if (!attrName) {
+              if (!attrName)
                 throw new Error('toHaveAttribute requires "name" argument (string)');
-              }
+
               // If value is provided, check attribute with value; otherwise, just check existence
               // ignoreCase option is only applicable when checking value, so exclude it when value is not provided
               let attributeOptions = finalOptions;
@@ -1094,7 +1094,7 @@ const validate_dom_assertions = defineTabTool({
               result.evidence.message = getAssertionEvidence(name, negate, locatorString, element, mainArgs);
               // Use attributeOptions (which excludes ignoreCase when value is not provided) for evidence
               result.evidence.command = JSON.stringify({
-                description: "Evidence showing how validation was performed",
+                description: 'Evidence showing how validation was performed',
                 assertion: name,
                 locator: locatorString,
                 arguments: Object.keys(mainArgs).length > 1 ? mainArgs : {},
@@ -1103,13 +1103,13 @@ const validate_dom_assertions = defineTabTool({
               break;
 
             case 'toHaveText':
-              if (!args || args.assertionType !== 'toHaveText') {
+              if (!args || args.assertionType !== 'toHaveText')
                 throw new Error('toHaveText requires proper arguments structure');
-              }
+
               const { expected: textExpected } = mainArgs;
-              if (!textExpected) {
+              if (!textExpected)
                 throw new Error('toHaveText requires "expected" argument (string, RegExp, or Array<string | RegExp>)');
-              }
+
               assertionResult = await assertion.toHaveText(textExpected, finalOptions);
               result.actual = `text "${Array.isArray(textExpected) ? textExpected.join(', ') : textExpected}"`;
               locatorString = await generateLocatorString(ref, locator);
@@ -1118,13 +1118,13 @@ const validate_dom_assertions = defineTabTool({
               break;
 
             case 'toContainText':
-              if (!args || args.assertionType !== 'toContainText') {
+              if (!args || args.assertionType !== 'toContainText')
                 throw new Error('toContainText requires proper arguments structure');
-              }
+
               const { expected: containExpected } = mainArgs;
-              if (!containExpected) {
+              if (!containExpected)
                 throw new Error('toContainText requires "expected" argument (string, RegExp, or Array<string | RegExp>)');
-              }
+
               assertionResult = await assertion.toContainText(containExpected, finalOptions);
               result.actual = `contains text "${Array.isArray(containExpected) ? containExpected.join(', ') : containExpected}"`;
               locatorString = await generateLocatorString(ref, locator);
@@ -1133,13 +1133,13 @@ const validate_dom_assertions = defineTabTool({
               break;
 
             case 'toHaveValue':
-              if (!args || args.assertionType !== 'toHaveValue') {
+              if (!args || args.assertionType !== 'toHaveValue')
                 throw new Error('toHaveValue requires proper arguments structure');
-              }
+
               const { value: valueExpected } = mainArgs;
-              if (valueExpected === undefined) {
+              if (valueExpected === undefined)
                 throw new Error('toHaveValue requires "value" argument (string or RegExp)');
-              }
+
               assertionResult = await assertion.toHaveValue(valueExpected, finalOptions);
               result.actual = `value "${valueExpected}"`;
               locatorString = await generateLocatorString(ref, locator);
@@ -1148,13 +1148,13 @@ const validate_dom_assertions = defineTabTool({
               break;
 
             case 'toHaveValues':
-              if (!args || args.assertionType !== 'toHaveValues') {
+              if (!args || args.assertionType !== 'toHaveValues')
                 throw new Error('toHaveValues requires proper arguments structure');
-              }
+
               const { values: valuesExpected } = mainArgs;
-              if (!valuesExpected || !Array.isArray(valuesExpected)) {
+              if (!valuesExpected || !Array.isArray(valuesExpected))
                 throw new Error('toHaveValues requires "values" argument (Array<string | RegExp>)');
-              }
+
               assertionResult = await assertion.toHaveValues(valuesExpected, finalOptions);
               result.actual = `values [${valuesExpected.join(', ')}]`;
               locatorString = await generateLocatorString(ref, locator);
@@ -1163,13 +1163,13 @@ const validate_dom_assertions = defineTabTool({
               break;
 
             case 'selectHasValue':
-              if (!args || args.assertionType !== 'selectHasValue') {
+              if (!args || args.assertionType !== 'selectHasValue')
                 throw new Error('selectHasValue requires proper arguments structure');
-              }
+
               const { value: selectValueExpected } = mainArgs;
-              if (selectValueExpected === undefined) {
+              if (selectValueExpected === undefined)
                 throw new Error('selectHasValue requires "value" argument (string)');
-              }
+
               const normalizedExpected = normalizeValue(selectValueExpected);
 
               // Use expect.poll to retry the assertion with timeout
@@ -1218,9 +1218,9 @@ const validate_dom_assertions = defineTabTool({
 
                   if (negate) {
                     // For negated assertions, values should NOT match
-                    if (normalizedExpected === normalizedActual) {
+                    if (normalizedExpected === normalizedActual)
                       throw new Error(`Expected select value to not be "${selectValueExpected}" (normalized: "${normalizedExpected}"), but got "${actualValue}" (normalized: "${normalizedActual}")`);
-                    }
+
                     // Values don't match, assertion passes
                     break;
                   } else {
@@ -1238,8 +1238,8 @@ const validate_dom_assertions = defineTabTool({
                   try {
                     // workground for hot fix to check select value in deep
                     const { rawValue, displayText } = await pollFnDeep();
-                    let normalizedRawValue = normalizeValue(rawValue);
-                    let normalizedDisplayText = normalizeValue(displayText);
+                    const normalizedRawValue = normalizeValue(rawValue);
+                    const normalizedDisplayText = normalizeValue(displayText);
                     if (normalizedExpected === normalizedRawValue || normalizedExpected === normalizedDisplayText) {
                       found = true;
                       break;
@@ -1258,14 +1258,14 @@ const validate_dom_assertions = defineTabTool({
                 }
               }
 
-              if (!found) {
+              if (!found)
                 throw lastError;
-              }
+
 
               // If we get here and it's a negated assertion that didn't throw, it means values matched when they shouldn't
-              if (negate && normalizedExpected === lastNormalizedActual) {
+              if (negate && normalizedExpected === lastNormalizedActual)
                 throw new Error(`Expected select value to not be "${selectValueExpected}" (normalized: "${normalizedExpected}"), but got "${lastActualValue}" (normalized: "${lastNormalizedActual}")`);
-              }
+
 
               // Use a simple assertion that always passes when values match (or don't match for negated)
               assertionResult = await assertion.toBeAttached(finalOptions);
@@ -1276,13 +1276,13 @@ const validate_dom_assertions = defineTabTool({
               break;
 
             case 'toMatchAriaSnapshot':
-              if (!args || args.assertionType !== 'toMatchAriaSnapshot') {
+              if (!args || args.assertionType !== 'toMatchAriaSnapshot')
                 throw new Error('toMatchAriaSnapshot requires proper arguments structure');
-              }
+
               const { expected: ariaSnapshotExpected } = mainArgs;
-              if (!ariaSnapshotExpected) {
+              if (!ariaSnapshotExpected)
                 throw new Error('toMatchAriaSnapshot requires "expected" argument (string)');
-              }
+
               assertionResult = await assertion.toMatchAriaSnapshot(ariaSnapshotExpected, finalOptions);
               result.actual = `aria snapshot "${ariaSnapshotExpected}"`;
               locatorString = await generateLocatorString(ref, locator);
@@ -1291,9 +1291,9 @@ const validate_dom_assertions = defineTabTool({
               break;
 
             case 'toMatchAriaSnapshotOptions':
-              if (!args || args.assertionType !== 'toMatchAriaSnapshotOptions') {
+              if (!args || args.assertionType !== 'toMatchAriaSnapshotOptions')
                 throw new Error('toMatchAriaSnapshotOptions requires proper arguments structure');
-              }
+
               assertionResult = await assertion.toMatchAriaSnapshot(finalOptions);
               result.actual = 'aria snapshot (with options)';
               locatorString = await generateLocatorString(ref, locator);
@@ -1302,13 +1302,13 @@ const validate_dom_assertions = defineTabTool({
               break;
 
             case 'toContainClass':
-              if (!args || args.assertionType !== 'toContainClass') {
+              if (!args || args.assertionType !== 'toContainClass')
                 throw new Error('toContainClass requires proper arguments structure');
-              }
+
               const { expected: containClassExpected } = mainArgs;
-              if (!containClassExpected) {
+              if (!containClassExpected)
                 throw new Error('toContainClass requires "expected" argument (string or Array<string>)');
-              }
+
               assertionResult = await assertion.toContainClass(containClassExpected, finalOptions);
               result.actual = `contains class "${Array.isArray(containClassExpected) ? containClassExpected.join(' ') : containClassExpected}"`;
               locatorString = await generateLocatorString(ref, locator);
@@ -1317,13 +1317,13 @@ const validate_dom_assertions = defineTabTool({
               break;
 
             case 'toHaveClass':
-              if (!args || args.assertionType !== 'toHaveClass') {
+              if (!args || args.assertionType !== 'toHaveClass')
                 throw new Error('toHaveClass requires proper arguments structure');
-              }
+
               const { expected: classExpected } = mainArgs;
-              if (!classExpected) {
+              if (!classExpected)
                 throw new Error('toHaveClass requires "expected" argument (string, RegExp, or Array<string | RegExp>)');
-              }
+
               assertionResult = await assertion.toHaveClass(classExpected, finalOptions);
               result.actual = `class "${Array.isArray(classExpected) ? classExpected.join(' ') : classExpected}"`;
               locatorString = await generateLocatorString(ref, locator);
@@ -1332,13 +1332,13 @@ const validate_dom_assertions = defineTabTool({
               break;
 
             case 'toHaveCount':
-              if (!args || args.assertionType !== 'toHaveCount') {
+              if (!args || args.assertionType !== 'toHaveCount')
                 throw new Error('toHaveCount requires proper arguments structure');
-              }
+
               const { count } = mainArgs;
-              if (count === undefined) {
+              if (count === undefined)
                 throw new Error('toHaveCount requires "count" argument (number)');
-              }
+
               assertionResult = await assertion.toHaveCount(count, finalOptions);
               result.actual = `count ${count}`;
               locatorString = await generateLocatorString(ref, locator);
@@ -1347,13 +1347,13 @@ const validate_dom_assertions = defineTabTool({
               break;
 
             case 'toHaveCSS':
-              if (!args || args.assertionType !== 'toHaveCSS') {
+              if (!args || args.assertionType !== 'toHaveCSS')
                 throw new Error('toHaveCSS requires proper arguments structure');
-              }
+
               const { name: cssName, value: cssValue } = mainArgs;
-              if (!cssName || !cssValue) {
+              if (!cssName || !cssValue)
                 throw new Error('toHaveCSS requires "name" and "value" arguments');
-              }
+
               assertionResult = await assertion.toHaveCSS(cssName, cssValue, finalOptions);
               result.actual = `CSS ${cssName}="${cssValue}"`;
               locatorString = await generateLocatorString(ref, locator);
@@ -1362,13 +1362,13 @@ const validate_dom_assertions = defineTabTool({
               break;
 
             case 'toHaveId':
-              if (!args || args.assertionType !== 'toHaveId') {
+              if (!args || args.assertionType !== 'toHaveId')
                 throw new Error('toHaveId requires proper arguments structure');
-              }
+
               const { id } = mainArgs;
-              if (!id) {
+              if (!id)
                 throw new Error('toHaveId requires "id" argument (string or RegExp)');
-              }
+
               assertionResult = await assertion.toHaveId(id, finalOptions);
               result.actual = `id "${id}"`;
               locatorString = await generateLocatorString(ref, locator);
@@ -1377,13 +1377,13 @@ const validate_dom_assertions = defineTabTool({
               break;
 
             case 'toHaveJSProperty':
-              if (!args || args.assertionType !== 'toHaveJSProperty') {
+              if (!args || args.assertionType !== 'toHaveJSProperty')
                 throw new Error('toHaveJSProperty requires proper arguments structure');
-              }
+
               const { name: jsPropertyName, value: jsPropertyValue } = mainArgs;
-              if (!jsPropertyName || jsPropertyValue === undefined) {
+              if (!jsPropertyName || jsPropertyValue === undefined)
                 throw new Error('toHaveJSProperty requires "name" and "value" arguments');
-              }
+
               assertionResult = await assertion.toHaveJSProperty(jsPropertyName, jsPropertyValue, finalOptions);
               result.actual = `JS property ${jsPropertyName}="${JSON.stringify(jsPropertyValue)}"`;
               locatorString = await generateLocatorString(ref, locator);
@@ -1392,13 +1392,13 @@ const validate_dom_assertions = defineTabTool({
               break;
 
             case 'toHaveRole':
-              if (!args || args.assertionType !== 'toHaveRole') {
+              if (!args || args.assertionType !== 'toHaveRole')
                 throw new Error('toHaveRole requires proper arguments structure');
-              }
+
               const { role } = mainArgs;
-              if (!role) {
+              if (!role)
                 throw new Error('toHaveRole requires "role" argument (ARIA role)');
-              }
+
               assertionResult = await assertion.toHaveRole(role, finalOptions);
               result.actual = `role "${role}"`;
               locatorString = await generateLocatorString(ref, locator);
@@ -1407,9 +1407,9 @@ const validate_dom_assertions = defineTabTool({
               break;
 
             case 'toHaveScreenshot':
-              if (!args || args.assertionType !== 'toHaveScreenshot') {
+              if (!args || args.assertionType !== 'toHaveScreenshot')
                 throw new Error('toHaveScreenshot requires proper arguments structure');
-              }
+
               const { name: screenshotName } = mainArgs;
               // If name is provided, check screenshot with name; otherwise, check with options only
               if (screenshotName !== undefined) {
@@ -1426,13 +1426,13 @@ const validate_dom_assertions = defineTabTool({
 
 
             case 'toHaveAccessibleDescription':
-              if (!args || args.assertionType !== 'toHaveAccessibleDescription') {
+              if (!args || args.assertionType !== 'toHaveAccessibleDescription')
                 throw new Error('toHaveAccessibleDescription requires proper arguments structure');
-              }
+
               const { description } = mainArgs;
-              if (!description) {
+              if (!description)
                 throw new Error('toHaveAccessibleDescription requires "description" argument');
-              }
+
               assertionResult = await assertion.toHaveAccessibleDescription(description, finalOptions);
               result.actual = `accessible description "${description}"`;
               locatorString = await generateLocatorString(ref, locator);
@@ -1441,13 +1441,13 @@ const validate_dom_assertions = defineTabTool({
               break;
 
             case 'toHaveAccessibleErrorMessage':
-              if (!args || args.assertionType !== 'toHaveAccessibleErrorMessage') {
+              if (!args || args.assertionType !== 'toHaveAccessibleErrorMessage')
                 throw new Error('toHaveAccessibleErrorMessage requires proper arguments structure');
-              }
+
               const { errorMessage } = mainArgs;
-              if (!errorMessage) {
+              if (!errorMessage)
                 throw new Error('toHaveAccessibleErrorMessage requires "errorMessage" argument (string or RegExp)');
-              }
+
               assertionResult = await assertion.toHaveAccessibleErrorMessage(errorMessage, finalOptions);
               result.actual = `accessible error message "${errorMessage}"`;
               locatorString = await generateLocatorString(ref, locator);
@@ -1456,13 +1456,13 @@ const validate_dom_assertions = defineTabTool({
               break;
 
             case 'toHaveAccessibleName':
-              if (!args || args.assertionType !== 'toHaveAccessibleName') {
+              if (!args || args.assertionType !== 'toHaveAccessibleName')
                 throw new Error('toHaveAccessibleName requires proper arguments structure');
-              }
+
               const { name: accessibleName } = mainArgs;
-              if (!accessibleName) {
+              if (!accessibleName)
                 throw new Error('toHaveAccessibleName requires "name" argument (string or RegExp)');
-              }
+
               assertionResult = await assertion.toHaveAccessibleName(accessibleName, finalOptions);
               result.actual = `accessible name "${accessibleName}"`;
               locatorString = await generateLocatorString(ref, locator);
@@ -1479,17 +1479,17 @@ const validate_dom_assertions = defineTabTool({
 
         } catch (error) {
           console.error('error in validate_dom_assertions', error);
-          
+
           // Handle assertion errors - set result and evidence
           result.result = 'fail';
           result.error = error instanceof Error ? error.message : String(error);
-          
+
           // Check if error indicates specific element issues (not found, multiple elements, etc.)
           const elementErrorMessage = getElementErrorMessage(error, element);
           const evidenceMessage = elementErrorMessage || getAssertionMessage(name, element, negate);
           locatorString = await generateLocatorString(ref, locator);
-          result.evidence = {message: evidenceMessage, command: createEvidenceCommand(locatorString)};
-         
+          result.evidence = { message: evidenceMessage, command: createEvidenceCommand(locatorString) };
+
         }
 
         results.push(result);
@@ -1502,9 +1502,9 @@ const validate_dom_assertions = defineTabTool({
       // Collect evidence from all results
       const evidence: {message: string, command: string}[] = [];
       for (const result of results) {
-        if (result.evidence) {
+        if (result.evidence)
           evidence.push(result.evidence);
-        }
+
       }
 
       // Generate payload
@@ -1642,7 +1642,7 @@ const validate_alert_in_snapshot = defineTabTool({
       response.addResult(resultString);
     } catch (error) {
       const errorMessage = `Failed to check alert dialog in snapshot.`;
-      console.log(`Failed to check alert dialog in snapshot. Error: ${error instanceof Error ? error.message : String(error)}`)
+      console.log(`Failed to check alert dialog in snapshot. Error: ${error instanceof Error ? error.message : String(error)}`);
       const errorEvidence = [{
         command: {
           toolName: 'validate_alert_in_snapshot',
@@ -2068,8 +2068,8 @@ const generate_locator = defineTabTool({
       await tab.waitForCompletion(async () => {
         // Get locator from ref
         // If ref starts with ###checkLocator, remove the prefix before passing to refLocator
-        const refForLocator = ref.startsWith('###checkLocator') 
-          ? ref.substring('###checkLocator'.length) 
+        const refForLocator = ref.startsWith('###checkLocator')
+          ? ref.substring('###checkLocator'.length)
           : ref;
         const { locator } = await tab.refLocator({ ref: refForLocator, element });
 
@@ -2432,11 +2432,11 @@ const validate_text_in_whole_page = defineTabTool({
 
     await tab.waitForCompletion(async () => {
       // Get locator for whole page and generate locator string
-      const locatorString = 'page.locator("body")'
+      const locatorString = 'page.locator("body")';
 
       // Helper function to create evidence command
       const createEvidenceCommand = () => JSON.stringify({
-        description: "Evidence showing how validation was performed",
+        description: 'Evidence showing how validation was performed',
         toolName: 'validate_text_in_whole_page',
         locator: locatorString,
         args: {
@@ -2537,11 +2537,11 @@ const validate_element_in_whole_page = defineTabTool({
 
     await tab.waitForCompletion(async () => {
       // Get locator for whole page and generate locator string
-      const locatorString = 'page.locator("body")'
+      const locatorString = 'page.locator("body")';
 
       // Helper function to create evidence command
       const createEvidenceCommand = () => JSON.stringify({
-        description: "Evidence showing how validation was performed",
+        description: 'Evidence showing how validation was performed',
         toolName: 'validate_element_in_whole_page',
         locator: locatorString,
         arguments: {
@@ -2662,7 +2662,7 @@ const validate_element_in_whole_page = defineTabTool({
 //         searchLocation = 'target-element';
 
 //       } catch (error) {
-        
+
 //         // If target element doesn't have the attribute, search in related elements
 //         try {
 //           const locator = await tab.refLocator({ ref, element });
@@ -2846,9 +2846,6 @@ const data_extraction = defineTabTool({
 });
 
 
-
-
-
 const waitSchema = z.object({
   seconds: z.number().positive().describe('Duration to wait in seconds'),
 });
@@ -2923,7 +2920,7 @@ const validate_element_position = defineTabTool({
           // Generate locator strings for both elements
           const locatorString1 = await generateLocatorString(missingRef, missingLocator);
           const locatorString2 = await generateLocatorString(otherRef, otherLocator);
-         
+
           const evidenceArray = [{
             command: JSON.stringify({
               toolName: 'validate_element_position',
@@ -2998,12 +2995,12 @@ const validate_element_position = defineTabTool({
         const box1 = await locator1.boundingBox();
         const box2 = await locator2.boundingBox();
 
-        if (!box1) {
+        if (!box1)
           throw new Error(`Could not get bounding box for element1: "${element1}"`);
-        }
-        if (!box2) {
+
+        if (!box2)
           throw new Error(`Could not get bounding box for element2: "${element2}"`);
-        }
+
 
         // Calculate center points for more accurate comparison
         center1 = {
@@ -3027,10 +3024,14 @@ const validate_element_position = defineTabTool({
 
         // Build actual relationship description
         const relationships: string[] = [];
-        if (isLeft) relationships.push('left');
-        if (isRight) relationships.push('right');
-        if (isUp) relationships.push('up');
-        if (isDown) relationships.push('down');
+        if (isLeft)
+          relationships.push('left');
+        if (isRight)
+          relationships.push('right');
+        if (isUp)
+          relationships.push('up');
+        if (isDown)
+          relationships.push('down');
 
         actualRelationship = relationships.length > 0 ? relationships.join(', ') : 'overlapping';
 
@@ -3169,9 +3170,9 @@ const validate_element_order = defineTabTool({
       const locators: Array<{ element: string; locatorString: string }> = [];
 
       try {
-        if (elements.length < 2) {
+        if (elements.length < 2)
           throw new Error('At least 2 elements are required to validate order');
-        }
+
 
         // Helper function to generate payload when element is not found
         const generateElementNotFoundPayload = async (missingElement: string) => {
@@ -3245,10 +3246,10 @@ const validate_element_order = defineTabTool({
         for (const { element, ref, locator } of elementLocators) {
           const box = await locator.boundingBox();
           boxes.push({ element, ref, box });
-          
-          if (!box) {
+
+          if (!box)
             throw new Error(`Could not get bounding box for element: "${element}"`);
-          }
+
         }
 
         // Calculate center points for all elements
@@ -3272,9 +3273,9 @@ const validate_element_order = defineTabTool({
           const yDiff = a.y - b.y;
           // Use a threshold to account for elements on the same "row" (within 10px)
           const rowThreshold = 10;
-          if (Math.abs(yDiff) > rowThreshold) {
+          if (Math.abs(yDiff) > rowThreshold)
             return yDiff;
-          }
+
           // If roughly on the same row, compare by x (left-to-right)
           return a.x - b.x;
         };
@@ -3288,10 +3289,10 @@ const validate_element_order = defineTabTool({
           const next = elementData[i + 1];
           const comparison = compareReadingOrder(current, next);
           const isInOrder = comparison <= 0;
-          
+
           const currentPos = `(x: ${Math.round(current.x)}, y: ${Math.round(current.y)})`;
           const nextPos = `(x: ${Math.round(next.x)}, y: ${Math.round(next.y)})`;
-          
+
           checks.push({
             property: 'reading-order',
             operator: 'before-or-equal',
@@ -3415,9 +3416,9 @@ const dynamic_switch = defineTabTool({
     }
 
     // Use default case if no match found
-    if (matchedIndex === -1 && defaultCase) {
+    if (matchedIndex === -1 && defaultCase)
       chosenTool = { toolName: defaultCase.toolName, params: defaultCase.params, readyForCaching: defaultCase.readyForCaching };
-    }
+
 
     const payload = {
       flagName,
@@ -3466,56 +3467,56 @@ const custom_wait = defineTool({
     // Returns information about which frame the text was found in
     const waitForTextInFrames = async (text: string, state: 'visible' | 'hidden') => {
       const shouldBeVisible = state === 'visible';
-      
+
       const result = await tab.page.waitForFunction(
-        ({ searchText, checkVisible }) => {
+          ({ searchText, checkVisible }) => {
           // Recursive function to search in window and all nested frames
           // Returns frame info if found, null if not found
-          const searchInWindow = (win: Window, path: string): { success: true; frameName: string } | null => {
-            try {
+            const searchInWindow = (win: Window, path: string): { success: true; frameName: string } | null => {
+              try {
               // Check current window's document
-              const doc = win.document;
-              const bodyText = doc && doc.body ? doc.body.innerText : '';
-              if (bodyText.includes(searchText)) {
+                const doc = win.document;
+                const bodyText = doc && doc.body ? doc.body.innerText : '';
+                if (bodyText.includes(searchText)) {
                 // Build frame identifier
-                const frameName = path || 'main';
-                return { success: true, frameName };
-              }
-              
-              // Recursively check all child frames (including dynamically added ones)
-              const frames = win.frames;
-              for (let i = 0; i < frames.length; i++) {
-                try {
-                  const childPath = path ? `${path} > iframe[${i}]` : `iframe[${i}]`;
-                  const childResult = searchInWindow(frames[i], childPath);
-                  if (childResult) {
-                    return childResult;
-                  }
-                } catch {
-                  // Cross-origin iframe - can't access, skip
+                  const frameName = path || 'main';
+                  return { success: true, frameName };
                 }
+
+                // Recursively check all child frames (including dynamically added ones)
+                const frames = win.frames;
+                for (let i = 0; i < frames.length; i++) {
+                  try {
+                    const childPath = path ? `${path} > iframe[${i}]` : `iframe[${i}]`;
+                    const childResult = searchInWindow(frames[i], childPath);
+                    if (childResult)
+                      return childResult;
+
+                  } catch {
+                  // Cross-origin iframe - can't access, skip
+                  }
+                }
+
+                return null;
+              } catch {
+                return null;
               }
-              
-              return null;
-            } catch {
-              return null;
-            }
-          };
-          
-          const searchResult = searchInWindow(window, '');
-          
-          if (checkVisible) {
+            };
+
+            const searchResult = searchInWindow(window, '');
+
+            if (checkVisible) {
             // For visible: return frame info when text IS found
-            return searchResult;
-          } else {
+              return searchResult;
+            } else {
             // For hidden: return success when text is NOT found anywhere
-            return searchResult === null ? { success: true, frameName: 'none (text gone)' } : null;
-          }
-        },
-        { searchText: text, checkVisible: shouldBeVisible },
-        { timeout: actionTimeout }
+              return searchResult === null ? { success: true, frameName: 'none (text gone)' } : null;
+            }
+          },
+          { searchText: text, checkVisible: shouldBeVisible },
+          { timeout: actionTimeout }
       );
-      
+
       // Extract the result from the JSHandle
       const frameInfo = await result.jsonValue() as { success: boolean; frameName: string };
       return { success: true, frame: frameInfo.frameName };
@@ -3549,7 +3550,7 @@ export default [
   validate_element_in_whole_page,
   validate_dom_assertions,
   validate_alert_in_snapshot,
-  //validate_expanded,
+  // validate_expanded,
   validate_element_position,
   validate_element_order,
   default_validation,

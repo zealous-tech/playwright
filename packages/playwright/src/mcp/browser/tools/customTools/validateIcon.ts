@@ -1,18 +1,18 @@
 /**
  * ICON VALIDATION TOOL
- * 
+ *
  * This tool provides two modes of operation:
- * 
+ *
  * 1. EXTRACTION MODE (no expectedIcon provided):
  *    - Extracts current icon data from the page element
  *    - Returns icon metadata for LLM analysis
  *    - LLM decides if icon matches requirements and calls again in validation mode
- * 
+ *
  * 2. VALIDATION MODE (expectedIcon provided):
  *    - Compares current icon data with expected/cached icon data
  *    - Returns pass/fail result with comparison details
  *    - Validates: icon type, icon data (URL/SVG/font), and optionally colors
- * 
+ *
  * ARCHITECTURE:
  * - extractIconFunction: Browser-side function that extracts icon data from DOM
  * - compareIcons: Compares extracted icon with expected icon
@@ -25,6 +25,7 @@ import { z } from 'playwright-core/lib/mcpBundle';
 import { defineTabTool } from '../tool.js';
 import { generateLocatorString } from './helperFunctions.js';
 import { expect } from '@playwright/test';
+
 
 // Global timeout for element attachment validation (in milliseconds)
 const ELEMENT_ATTACHED_TIMEOUT = 15000;
