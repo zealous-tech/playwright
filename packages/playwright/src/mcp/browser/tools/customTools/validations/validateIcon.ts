@@ -694,7 +694,7 @@ async function handleValidationError(
   response.addTextResult(JSON.stringify(errorPayload, null, 2));
 }
 
-export const validateIcon = defineTabTool({
+export const validate_icon = defineTabTool({
   capability: 'core',
   schema: {
     name: 'validate_icon',

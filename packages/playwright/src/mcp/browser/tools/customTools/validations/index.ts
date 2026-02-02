@@ -20,7 +20,7 @@ export { validate_dom_assertions } from './validateDomAssertions';
 export { validate_element_in_whole_page } from './validateElementInWholePage';
 export { validate_element_order } from './validateElementOrder';
 export { validate_element_position } from './validateElementPosition';
-export { validateIcon } from './validateIcon';
+export { validate_icon } from './validateIcon';
 export { validate_response } from './validateResponse';
 export { validate_tab_exist } from './validateTabExist';
 export { validate_text_in_whole_page } from './validateTextInWholePage';

@@ -25,7 +25,7 @@ import {
   validate_response,
   validate_tab_exist,
   default_validation,
-  validateIcon,
+  validate_icon,
 } from './validations';
 import {
   get_computed_styles,
@@ -54,7 +54,7 @@ export default [
   default_validation,
   validate_response,
   validate_tab_exist,
-  validateIcon,
+  validate_icon,
   generate_locator,
   make_request,
   data_extraction,
