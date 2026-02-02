@@ -13,17 +13,18 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { z } from 'zod';
-// @ZEALOUS UPDATE
+import { z } from 'playwright-core/lib/mcpBundle';
+//@ZEALOUS UPDATE
 import * as jp from 'jsonpath';
-import { expect } from '@zealous-tech/playwright/test';
-import { asLocator } from 'playwright-core/lib/utils';
 import { defineTabTool, defineTool } from '../tool.js';
-import { getAllComputedStylesDirect, runCommandClean, compareValues, checkElementVisibilityUnique, checkTextExistenceInAllFrames, generateLocatorString, getAssertionEvidence, parseValidationResult, createValidationEvidence, buildValidationPayload, buildValidationErrorPayload } from './helpers/helpers.js';
-import { pickActualValue, parseRGBColor, isColorInRange, getElementErrorMessage, getAssertionMessage, getXPathCode, parseDataInput, executeDataValidation } from './helpers/utils.js';
 import { generateLocator } from '../utils.js';
 import validateIcon from './validateIcon';
-import type * as playwright from '@zealous-tech/playwright';
+import { expect } from '@playwright/test';
+import { asLocator } from 'playwright-core/lib/utils';
+import type * as playwright from '@playwright';
+import { getAllComputedStylesDirect, runCommandClean, compareValues, checkElementVisibilityUnique, checkTextExistenceInAllFrames, generateLocatorString, getAssertionEvidence, parseValidationResult, createValidationEvidence, buildValidationPayload, buildValidationErrorPayload } from './helpers/helpers.js';
+import { pickActualValue, parseRGBColor, isColorInRange, getElementErrorMessage, getAssertionMessage, getXPathCode, parseDataInput, executeDataValidation } from './helpers/utils.js';
+
 
 // Global timeout for element attachment validation (in milliseconds)
 const ELEMENT_ATTACHED_TIMEOUT = 15000;
@@ -113,7 +114,7 @@ const get_computed_styles = defineTabTool({
     const { ref, element } = elementStyleSchema.parse(params);
     const result = { ref, element };
 
-    const locator = await tab.refLocator(result);
+    const { locator } = await tab.refLocator(result);
 
     await tab.waitForCompletion(async () => {
       const getStylesFunction = (element: Element, props?: string[]) => {
@@ -130,7 +131,7 @@ const get_computed_styles = defineTabTool({
       response.addCode(`// Get computed styles for ${params.element}`);
       const computedStyles = await locator.evaluate(getStylesFunction, params.propertyNames);
       console.log('Requested Computed Styles : ', computedStyles);
-      response.addResult(JSON.stringify(computedStyles, null, 2) || 'Couldn\'t get requested styles');
+      response.addTextResult(JSON.stringify(computedStyles, null, 2) || 'Couldn\'t get requested styles');
     });
   },
 });
@@ -150,7 +151,7 @@ const extract_svg_from_element = defineTabTool({
     const { ref, element, extractMethod, includeStyles, minifyOutput } = elementSvgSchema.parse(params);
     const result = { ref, element };
 
-    const locator = await tab.refLocator(result);
+    const { locator } = await tab.refLocator(result);
 
     await tab.waitForCompletion(async () => {
       try {
@@ -249,7 +250,7 @@ const extract_image_urls = defineTabTool({
     const result = { ref, element };
 
     let locator: playwright.Locator | undefined;
-    locator = await tab.refLocator(result);
+    ({ locator } = await tab.refLocator(result));
 
     await tab.waitForCompletion(async () => {
       try {
@@ -427,7 +428,7 @@ const extract_image_urls = defineTabTool({
                 (img.title ? `\n   Title: ${img.title}` : '')
             ).join('\n\n');
 
-        response.addResult(JSON.stringify(imageData));
+        response.addTextResult(JSON.stringify(imageData));
 
       } catch (error) {
         response.addCode(`// Failed to extract image URLs from ${params.element}`);
@@ -497,7 +498,7 @@ const validate_computed_styles = defineTabTool({
 
     await tab.waitForCompletion(async () => {
       // Get locator
-      const locator = await tab.refLocator({ ref, element });
+      const { locator } = await tab.refLocator({ ref, element });
 
       // Helper function to create evidence command
       const createEvidenceCommand = (locatorString: string, property: string, operator: string, expected?: any) => JSON.stringify({
@@ -546,7 +547,7 @@ const validate_computed_styles = defineTabTool({
         };
 
         console.log('Validate Computed Styles (element not found):', payload);
-        response.addResult(JSON.stringify(payload, null, 2));
+        response.addTextResult(JSON.stringify(payload, null, 2));
         return;
       }
 
@@ -646,7 +647,7 @@ const validate_computed_styles = defineTabTool({
       };
 
       console.log('Validate Computed Styles:', payload);
-      response.addResult(JSON.stringify(payload, null, 2));
+      response.addTextResult(JSON.stringify(payload, null, 2));
     });
   },
 });
@@ -717,7 +718,7 @@ const toContainClassArgsSchema = z.object({
 });
 
 const toContainTextArgsSchema = z.object({
-  expected: z.union([z.string(), z.instanceof(RegExp), z.array(z.union([z.string(), z.instanceof(RegExp)]))]).describe('Expected substring or RegExp or a list of those'),
+  expected: z.union([z.string(), z.string(), z.array(z.union([z.string(), z.string()]))]).describe('Expected substring or RegExp or a list of those'),
   options: z.object({
     ignoreCase: z.boolean().optional().describe('Whether to perform case-insensitive match. ignoreCase option takes precedence over the corresponding regular expression flag if specified'),
     useInnerText: z.boolean().optional().describe('Whether to use element.innerText instead of element.textContent when retrieving DOM node text'),
@@ -725,21 +726,21 @@ const toContainTextArgsSchema = z.object({
 });
 
 const toHaveAccessibleDescriptionArgsSchema = z.object({
-  description: z.union([z.string(), z.instanceof(RegExp)]).describe('Expected accessible description'),
+  description: z.union([z.string(), z.string()]).describe('Expected accessible description'),
   options: z.object({
     ignoreCase: z.boolean().optional().describe('Whether to perform case-insensitive match. ignoreCase option takes precedence over the corresponding regular expression flag if specified'),
   }).optional(),
 });
 
 const toHaveAccessibleErrorMessageArgsSchema = z.object({
-  errorMessage: z.union([z.string(), z.instanceof(RegExp)]).describe('Expected accessible error message'),
+  errorMessage: z.union([z.string(), z.string()]).describe('Expected accessible error message'),
   options: z.object({
     ignoreCase: z.boolean().optional().describe('Whether to perform case-insensitive match. ignoreCase option takes precedence over the corresponding regular expression flag if specified'),
   }).optional(),
 });
 
 const toHaveAccessibleNameArgsSchema = z.object({
-  name: z.union([z.string(), z.instanceof(RegExp)]).describe('Expected accessible name'),
+  name: z.union([z.string(), z.string()]).describe('Expected accessible name'),
   options: z.object({
     ignoreCase: z.boolean().optional().describe('Whether to perform case-insensitive match. ignoreCase option takes precedence over the corresponding regular expression flag if specified'),
   }).optional(),
@@ -747,14 +748,14 @@ const toHaveAccessibleNameArgsSchema = z.object({
 
 const toHaveAttributeArgsSchema = z.object({
   name: z.string().describe('Attribute name'),
-  value: z.union([z.string(), z.instanceof(RegExp)]).optional().describe('Expected attribute value. If not provided, only checks that attribute exists'),
+  value: z.union([z.string(), z.string()]).optional().describe('Expected attribute value. If not provided, only checks that attribute exists'),
   options: z.object({
     ignoreCase: z.boolean().optional().describe('Whether to perform case-insensitive match when checking attribute value. Only applicable when "value" is provided. Ignored if "value" is not specified. ignoreCase option takes precedence over the corresponding regular expression flag if specified'),
   }).optional(),
 });
 
 const toHaveClassArgsSchema = z.object({
-  expected: z.union([z.string(), z.instanceof(RegExp), z.array(z.union([z.string(), z.instanceof(RegExp)]))]).describe('Expected class or RegExp or a list of those'),
+  expected: z.union([z.string(), z.string(), z.array(z.union([z.string(), z.string()]))]).describe('Expected class or RegExp or a list of those'),
   options: z.object({
   }).optional(),
 });
@@ -767,13 +768,13 @@ const toHaveCountArgsSchema = z.object({
 
 const toHaveCSSArgsSchema = z.object({
   name: z.string().describe('CSS property name'),
-  value: z.union([z.string(), z.instanceof(RegExp)]).describe('CSS property value'),
+  value: z.union([z.string(), z.string()]).describe('CSS property value'),
   options: z.object({
   }).optional(),
 });
 
 const toHaveIdArgsSchema = z.object({
-  id: z.union([z.string(), z.instanceof(RegExp)]).describe('Element id'),
+  id: z.union([z.string(), z.string()]).describe('Element id'),
   options: z.object({
   }).optional(),
 });
@@ -809,7 +810,7 @@ const toHaveScreenshotArgsSchema = z.object({
 
 
 const toHaveTextArgsSchema = z.object({
-  expected: z.union([z.string(), z.instanceof(RegExp), z.array(z.union([z.string(), z.instanceof(RegExp)]))]).describe('Expected string or RegExp or a list of those'),
+  expected: z.union([z.string(), z.string(), z.array(z.union([z.string(), z.string()]))]).describe('Expected string or RegExp or a list of those'),
   options: z.object({
     ignoreCase: z.boolean().optional().describe('Whether to perform case-insensitive match. ignoreCase option takes precedence over the corresponding regular expression flag if specified'),
     useInnerText: z.boolean().optional().describe('Whether to use element.innerText instead of element.textContent when retrieving DOM node text'),
@@ -818,13 +819,13 @@ const toHaveTextArgsSchema = z.object({
 
 
 const toHaveValueArgsSchema = z.object({
-  value: z.union([z.string(), z.instanceof(RegExp)]).describe('Expected value'),
+  value: z.union([z.string(), z.string()]).describe('Expected value'),
   options: z.object({
   }).optional(),
 });
 
 const toHaveValuesArgsSchema = z.object({
-  values: z.array(z.union([z.string(), z.instanceof(RegExp)])).describe('Expected options currently selected'),
+  values: z.array(z.union([z.string(), z.string()])).describe('Expected options currently selected'),
   options: z.object({
   }).optional(),
 });
@@ -907,7 +908,7 @@ const validate_dom_assertions = defineTabTool({
     const { ref, element, checks } = validateDomAssertionsSchema.parse(rawParams);
 
     await tab.waitForCompletion(async () => {
-      const locator = await tab.refLocator({ ref, element });
+      const { locator } = await tab.refLocator({ ref, element });
       const results = [];
 
       for (const check of checks) {
@@ -1522,7 +1523,7 @@ const validate_dom_assertions = defineTabTool({
 
       console.log('Validate DOM Assertions:');
       console.log(payload);
-      response.addResult(JSON.stringify(payload, null, 2));
+      response.addTextResult(JSON.stringify(payload, null, 2));
     });
   },
 });
@@ -1711,7 +1712,7 @@ const default_validation = defineTabTool({
 
         const payload = buildValidationPayload('data', jsCode, validationResult, evidence, { dataPreview });
         console.log('Default validation (data mode) executed:', payload);
-        response.addResult(JSON.stringify(payload, null, 2));
+        response.addTextResult(JSON.stringify(payload, null, 2));
         return;
 
       } catch (error) {
@@ -1720,7 +1721,7 @@ const default_validation = defineTabTool({
 
         const evidence = [createValidationEvidence('data', jsCode, errorMessage)];
         const payload = buildValidationErrorPayload('data', jsCode, errorMessage, evidence);
-        response.addResult(JSON.stringify(payload, null, 2));
+        response.addTextResult(JSON.stringify(payload, null, 2));
         return;
       }
     }
@@ -1732,13 +1733,13 @@ const default_validation = defineTabTool({
       const errorMessage = 'Missing required parameters: provide either "data" for data validation, or "ref" + "element" for element validation.';
       const evidence = [createValidationEvidence('element', jsCode, 'Either "data" parameter OR both "ref" and "element" parameters are required.')];
       const payload = buildValidationErrorPayload('element', jsCode, errorMessage, evidence);
-      response.addResult(JSON.stringify(payload, null, 2));
+      response.addTextResult(JSON.stringify(payload, null, 2));
       return;
     }
 
     await tab.waitForCompletion(async () => {
       try {
-        const locator = await tab.refLocator({ ref, element });
+        const { locator } = await tab.refLocator({ ref, element });
 
         // Check if element is attached to DOM
         try {
@@ -1749,7 +1750,7 @@ const default_validation = defineTabTool({
           const evidence = [createValidationEvidence('element', jsCode, errorMessage, { element, locatorString })];
           const payload = buildValidationErrorPayload('element', jsCode, 'UI element not found', evidence, { ref, element });
           console.log('Default validation - UI element not found:', payload);
-          response.addResult(JSON.stringify(payload, null, 2));
+          response.addTextResult(JSON.stringify(payload, null, 2));
           return;
         }
 
@@ -1790,12 +1791,12 @@ const default_validation = defineTabTool({
 
         const payload = buildValidationPayload('element', jsCode, validationResult, evidence, { ref, element });
         console.log('Default validation executed:', payload);
-        response.addResult(JSON.stringify(payload, null, 2));
+        response.addTextResult(JSON.stringify(payload, null, 2));
 
       } catch (error) {
         let locatorString = '';
         try {
-          const locator = await tab.refLocator({ ref, element });
+          const { locator } = await tab.refLocator({ ref, element });
           locatorString = await generateLocatorString(ref, locator);
         } catch { /* ignore */ }
 
@@ -1805,7 +1806,7 @@ const default_validation = defineTabTool({
         const evidence = [createValidationEvidence('element', jsCode, errorMessage, { element, locatorString })];
         const payload = buildValidationErrorPayload('element', jsCode, error instanceof Error ? error.message : String(error), evidence, { ref, element });
         console.error('Default validation error:', payload);
-        response.addResult(JSON.stringify(payload, null, 2));
+        response.addTextResult(JSON.stringify(payload, null, 2));
       }
     });
   },
@@ -1878,7 +1879,7 @@ const default_validation = defineTabTool({
 //       };
 
 //       console.log('Validate cURL response regex:', payload);
-//       response.addResult(JSON.stringify(payload, null, 2));
+//       response.addTextResult(JSON.stringify(payload, null, 2));
 
 //     } catch (error) {
 //       const errorPayload = {
@@ -1904,7 +1905,7 @@ const default_validation = defineTabTool({
 //       };
 
 //       console.error('Validate cURL response regex error:', errorPayload);
-//       response.addResult(JSON.stringify(errorPayload, null, 2));
+//       response.addTextResult(JSON.stringify(errorPayload, null, 2));
 //     }
 //   },
 // });
@@ -1966,7 +1967,7 @@ const validate_response = defineTabTool({
       };
 
       console.error('Validate response JSON parse error:', errorPayload);
-      response.addResult(JSON.stringify(errorPayload, null, 2));
+      response.addTextResult(JSON.stringify(errorPayload, null, 2));
       return;
     }
 
@@ -2044,7 +2045,7 @@ const validate_response = defineTabTool({
     };
 
     console.log('Validate response JSON path:', payload);
-    response.addResult(JSON.stringify(payload, null, 2));
+    response.addTextResult(JSON.stringify(payload, null, 2));
   },
 });
 
@@ -2070,7 +2071,7 @@ const generate_locator = defineTabTool({
         const refForLocator = ref.startsWith('###checkLocator')
           ? ref.substring('###checkLocator'.length)
           : ref;
-        const locator = await tab.refLocator({ ref: refForLocator, element });
+        const { locator } = await tab.refLocator({ ref: refForLocator, element });
 
         // Always generate locator first
         let generatedLocator = await generateLocator(locator);
@@ -2104,7 +2105,7 @@ const generate_locator = defineTabTool({
           },
         };
 
-        response.addResult(JSON.stringify(payload, null, 2));
+        response.addTextResult(JSON.stringify(payload, null, 2));
       });
     } catch (error) {
       const errorPayload = {
@@ -2118,7 +2119,7 @@ const generate_locator = defineTabTool({
       };
 
       console.error('Generate locator error:', errorPayload);
-      response.addResult(JSON.stringify(errorPayload, null, 2));
+      response.addTextResult(JSON.stringify(errorPayload, null, 2));
     }
   },
 });
@@ -2280,7 +2281,7 @@ const validate_tab_exist = defineTabTool({
         })),
       };
       console.log('Validate tab exist:', payload);
-      response.addResult(JSON.stringify(payload, null, 2));
+      response.addTextResult(JSON.stringify(payload, null, 2));
 
     } catch (error) {
       const errorMessage = `Failed to validate tab existence.`;
@@ -2315,7 +2316,7 @@ const validate_tab_exist = defineTabTool({
         error: error instanceof Error ? error.message : String(error),
       };
       console.error('Validate tab exist error:', errorPayload);
-      response.addResult(JSON.stringify(errorPayload, null, 2));
+      response.addTextResult(JSON.stringify(errorPayload, null, 2));
     }
   },
 });
@@ -2374,7 +2375,7 @@ const make_request = defineTabTool({
       };
     }
 
-    response.addResult(JSON.stringify(toolResult, null, 2));
+    response.addTextResult(JSON.stringify(toolResult, null, 2));
   },
 });
 
@@ -2517,7 +2518,7 @@ const validate_text_in_whole_page = defineTabTool({
       };
 
       console.log('Validate text in whole page:', payload);
-      response.addResult(JSON.stringify(payload, null, 2));
+      response.addTextResult(JSON.stringify(payload, null, 2));
     });
   },
 });
@@ -2627,7 +2628,7 @@ const validate_element_in_whole_page = defineTabTool({
       };
 
       console.log('Validate element in whole page:', payload);
-      response.addResult(JSON.stringify(payload, null, 2));
+      response.addTextResult(JSON.stringify(payload, null, 2));
     });
   },
 });
@@ -2781,7 +2782,7 @@ const validate_element_in_whole_page = defineTabTool({
 //       };
 
 //       console.log('Validate expanded:', payload);
-//       response.addResult(JSON.stringify(payload, null, 2));
+//       response.addTextResult(JSON.stringify(payload, null, 2));
 //     });
 //   },
 // });
@@ -2806,7 +2807,7 @@ const data_extraction = defineTabTool({
       try {
         parsedResponseData = JSON.parse(data);
       } catch (error) {
-        response.addResult(JSON.stringify({
+        response.addTextResult(JSON.stringify({
           success: false,
           error: `Failed to parse data as JSON: ${error.message}`,
           extractedData: null
@@ -2819,7 +2820,7 @@ const data_extraction = defineTabTool({
         const queryResult = jp.query(parsedResponseData, normalizedPath);
         extractedValue = queryResult.length === 0 ? null : queryResult.length === 1 ? queryResult[0] : queryResult;
       } catch (error) {
-        response.addResult(JSON.stringify({
+        response.addTextResult(JSON.stringify({
           success: false,
           error: `Failed to extract value using JSON path "${jsonPath}": ${error.message}`,
           extractedData: null
@@ -2840,7 +2841,7 @@ const data_extraction = defineTabTool({
       },
       data: parsedResponseData,
     };
-    response.addResult(JSON.stringify(toolResult, null, 2));
+    response.addTextResult(JSON.stringify(toolResult, null, 2));
   },
 });
 
@@ -2904,8 +2905,8 @@ const validate_element_position = defineTabTool({
       let locatorString2 = '';
 
       try {
-        const locator1 = await tab.refLocator({ ref: ref1, element: element1 });
-        const locator2 = await tab.refLocator({ ref: ref2, element: element2 });
+        const { locator: locator1 } = await tab.refLocator({ ref: ref1, element: element1 });
+        const { locator: locator2 } = await tab.refLocator({ ref: ref2, element: element2 });
 
         // Helper function to generate payload when element is not found
         const generateElementNotFoundPayload = async (
@@ -2972,7 +2973,7 @@ const validate_element_position = defineTabTool({
           // Element1 not found, generate payload and return early
           const payload = await generateElementNotFoundPayload(element1, ref1, locator1, element2, ref2, locator2);
           console.log('Validate element position - UI element not found:', payload);
-          response.addResult(JSON.stringify(payload, null, 2));
+          response.addTextResult(JSON.stringify(payload, null, 2));
           return;
         }
 
@@ -2982,7 +2983,7 @@ const validate_element_position = defineTabTool({
           // Element2 not found, generate payload and return early
           const payload = await generateElementNotFoundPayload(element2, ref2, locator2, element1, ref1, locator1);
           console.log('Validate element position - UI element not found:', payload);
-          response.addResult(JSON.stringify(payload, null, 2));
+          response.addTextResult(JSON.stringify(payload, null, 2));
           return;
         }
 
@@ -3072,14 +3073,14 @@ const validate_element_position = defineTabTool({
 
         // Generate locator strings for error case (try to generate even if execution failed)
         try {
-          const locator1 = await tab.refLocator({ ref: ref1, element: element1 });
+          const { locator: locator1 } = await tab.refLocator({ ref: ref1, element: element1 });
           locatorString1 = await generateLocatorString(ref1, locator1);
         } catch {
           locatorString1 = 'The UI Element not found';
         }
 
         try {
-          const locator2 = await tab.refLocator({ ref: ref2, element: element2 });
+          const { locator: locator2 } = await tab.refLocator({ ref: ref2, element: element2 });
           locatorString2 = await generateLocatorString(ref2, locator2);
         } catch {
           locatorString2 = 'The UI Element not found';
@@ -3137,7 +3138,7 @@ const validate_element_position = defineTabTool({
       };
 
       console.log('Validate element position:', payload);
-      response.addResult(JSON.stringify(payload, null, 2));
+      response.addTextResult(JSON.stringify(payload, null, 2));
     });
   },
 });
@@ -3179,7 +3180,7 @@ const validate_element_order = defineTabTool({
           const allLocators: Array<{ element: string; locatorString: string }> = [];
           for (const { element, ref } of elements) {
             try {
-              const locator = await tab.refLocator({ ref, element });
+              const { locator } = await tab.refLocator({ ref, element });
               const locatorString = await generateLocatorString(ref, locator);
               allLocators.push({ element, locatorString });
             } catch {
@@ -3217,7 +3218,7 @@ const validate_element_order = defineTabTool({
         // Get locators for all elements and check if they are attached
         const elementLocators: Array<{ element: string; ref: string; locator: any }> = [];
         for (const { element, ref } of elements) {
-          const locator = await tab.refLocator({ ref, element });
+          const { locator } = await tab.refLocator({ ref, element });
           elementLocators.push({ element, ref, locator });
         }
 
@@ -3229,7 +3230,7 @@ const validate_element_order = defineTabTool({
             // Element not found, generate payload and return early
             const payload = await generateElementNotFoundPayload(element);
             console.log('Validate element order - UI element not found:', payload);
-            response.addResult(JSON.stringify(payload, null, 2));
+            response.addTextResult(JSON.stringify(payload, null, 2));
             return;
           }
         }
@@ -3365,7 +3366,7 @@ const validate_element_order = defineTabTool({
       };
 
       console.log('Validate element order:', payload);
-      response.addResult(JSON.stringify(payload, null, 2));
+      response.addTextResult(JSON.stringify(payload, null, 2));
     });
   },
 });
@@ -3434,7 +3435,7 @@ const dynamic_switch = defineTabTool({
       actions: chosenTool && chosenTool.readyForCaching ? [{ type: 'invoke_tool', toolName: chosenTool.toolName, params: chosenTool.params }] : []
     };
 
-    response.addResult(JSON.stringify(payload, null, 2));
+    response.addTextResult(JSON.stringify(payload, null, 2));
   },
 });
 
@@ -3555,7 +3556,7 @@ export default [
   default_validation,
   validate_response,
   validate_tab_exist,
-  validateIcon,
+  ...validateIcon,
   generate_locator,
   make_request,
   data_extraction,

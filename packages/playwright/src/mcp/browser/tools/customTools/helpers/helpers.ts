@@ -14,8 +14,9 @@
  * limitations under the License.
  */
 import { promisify } from 'util';
+import type * as playwright from 'playwright';
+import { expect } from '@playwright/test';
 import { execFile } from 'child_process';
-import { expect } from '@zealous-tech/playwright/test';
 import { generateLocator } from '../../utils.js';
 import { applyArrayFilter, compareValues, parseCurlStderr } from './utils.js';
 import { ParsedCurlResponse, ValidationPayload, ValidationResult } from '../common/common.js';
@@ -25,7 +26,7 @@ async function getAllComputedStylesDirect(
   ref: string,
   element: string
 ): Promise<Record<string, string>> {
-  const locator = await tab.refLocator({ ref, element });
+  const { locator } = await tab.refLocator({ ref, element });
 
   const allStyles: Record<string, string> = await locator.evaluate(
       (el: Element) => {

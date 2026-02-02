@@ -123,6 +123,18 @@ Options `--test-list` and `--test-list-invert` accept a path to a test list file
 # This is a test list file.
 # It can include comments and empty lines.
 
+# Run ALL tests in a file:
+path/to/example.spec.ts
+
+# Run all tests in a file for a specific project:
+[chromium] › path/to/example.spec.ts
+
+# Run all tests in a specific group/suite:
+path/to/example.spec.ts › suite name
+
+# Run all tests in a nested group:
+path/to/example.spec.ts › outer suite › inner suite
+
 # Fully qualified test with a project:
 [chromium] › path/to/example.spec.ts:3:9 › suite › nested suite › example test
 
@@ -254,12 +266,15 @@ Analyze and view test traces for debugging. [Read more about Trace Viewer](./tra
 #### Syntax
 
 ```bash
-npx playwright show-trace [options] <trace>
+npx playwright show-trace [options] [trace]
 ```
 
 #### Examples
 
 ```bash
+# Open trace viewer without a specific trace (can load traces via UI)
+npx playwright show-trace
+
 # View a trace file
 npx playwright show-trace trace.zip
 

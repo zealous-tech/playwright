@@ -15,7 +15,6 @@
  * limitations under the License.
  */
 
-import * as accessibility from './accessibility';
 import { BrowserContext } from './browserContext';
 import { ConsoleMessage } from './console';
 import { TargetClosedError, TimeoutError } from './errors';
@@ -35,8 +34,11 @@ import { ManualPromise } from '../utils/isomorphic/manualPromise';
 import { parseEvaluationResultValue } from '../utils/isomorphic/utilityScriptSerializers';
 import { compressCallLog } from './callLog';
 import * as rawBindingsControllerSource from '../generated/bindingsControllerSource';
+import { Screencast } from './screencast';
 
 import type { Artifact } from './artifact';
+import type { BrowserContextEventMap } from './browserContext';
+import type { Download } from './download';
 import type * as dom from './dom';
 import type * as network from './network';
 import type { Progress } from './progress';
@@ -79,9 +81,9 @@ export interface PageDelegate {
   getBoundingBox(handle: dom.ElementHandle): Promise<types.Rect | null>;
   getFrameElement(frame: frames.Frame): Promise<dom.ElementHandle>;
   scrollRectIntoViewIfNeeded(handle: dom.ElementHandle, rect?: types.Rect): Promise<'error:notvisible' | 'error:notconnected' | 'done'>;
-  setScreencastOptions(options: { width: number, height: number, quality: number } | null): Promise<void>;
+  startScreencast(options: { width: number, height: number, quality: number }): Promise<void>;
+  stopScreencast(): Promise<void>;
 
-  getAccessibilityTree(needle?: dom.ElementHandle): Promise<{tree: accessibility.AXNode, needle: accessibility.AXNode | null}>;
   pdf?: (options: channels.PagePdfParams) => Promise<Buffer>;
   coverage?: () => any;
 
@@ -117,22 +119,40 @@ type ExpectScreenshotOptions = ImageComparatorOptions & ScreenshotOptions & {
   },
 };
 
-export class Page extends SdkObject {
-  static Events = {
-    Close: 'close',
-    Crash: 'crash',
-    Download: 'download',
-    EmulatedSizeChanged: 'emulatedsizechanged',
-    FileChooser: 'filechooser',
-    FrameAttached: 'frameattached',
-    FrameDetached: 'framedetached',
-    InternalFrameNavigatedToNewDocument: 'internalframenavigatedtonewdocument',
-    LocatorHandlerTriggered: 'locatorhandlertriggered',
-    ScreencastFrame: 'screencastframe',
-    Video: 'video',
-    WebSocket: 'websocket',
-    Worker: 'worker',
-  };
+const PageEvent = {
+  Close: 'close',
+  Crash: 'crash',
+  Download: 'download',
+  EmulatedSizeChanged: 'emulatedsizechanged',
+  FileChooser: 'filechooser',
+  FrameAttached: 'frameattached',
+  FrameDetached: 'framedetached',
+  InternalFrameNavigatedToNewDocument: 'internalframenavigatedtonewdocument',
+  LocatorHandlerTriggered: 'locatorhandlertriggered',
+  ScreencastFrame: 'screencastframe',
+  Video: 'video',
+  WebSocket: 'websocket',
+  Worker: 'worker',
+} as const;
+
+export type PageEventMap = {
+  [PageEvent.Close]: [];
+  [PageEvent.Crash]: [];
+  [PageEvent.Download]: [download: Download];
+  [PageEvent.EmulatedSizeChanged]: [];
+  [PageEvent.FileChooser]: [fileChooser: FileChooser];
+  [PageEvent.FrameAttached]: [frame: frames.Frame];
+  [PageEvent.FrameDetached]: [frame: frames.Frame];
+  [PageEvent.InternalFrameNavigatedToNewDocument]: [frame: frames.Frame];
+  [PageEvent.LocatorHandlerTriggered]: [uid: number];
+  [PageEvent.ScreencastFrame]: [frame: types.ScreencastFrame];
+  [PageEvent.Video]: [artifact: Artifact];
+  [PageEvent.WebSocket]: [webSocket: network.WebSocket];
+  [PageEvent.Worker]: [worker: Worker];
+};
+
+export class Page extends SdkObject<PageEventMap> {
+  static Events = PageEvent;
 
   private _closedState: 'open' | 'closing' | 'closed' = 'open';
   private _closedPromise = new ManualPromise<void>();
@@ -155,7 +175,6 @@ export class Page extends SdkObject {
   initScripts: InitScript[] = [];
   readonly screenshotter: Screenshotter;
   readonly frameManager: frames.FrameManager;
-  readonly accessibility: accessibility.Accessibility;
   private _workers = new Map<string, Worker>();
   readonly pdf: ((options: channels.PagePdfParams) => Promise<Buffer>) | undefined;
   readonly coverage: any;
@@ -168,23 +187,20 @@ export class Page extends SdkObject {
   private _locatorHandlerRunningCounter = 0;
   private _networkRequests: network.Request[] = [];
 
-  // Aiming at 25 fps by default - each frame is 40ms, but we give some slack with 35ms.
-  // When throttling for tracing, 200ms between frames, except for 10 frames around the action.
-  private _frameThrottler = new FrameThrottler(10, 35, 200);
-  closeReason: string | undefined;
-  lastSnapshotFrameIds: string[] = [];
+  readonly screencast: Screencast;
+  _closeReason: string | undefined;
 
   constructor(delegate: PageDelegate, browserContext: BrowserContext) {
     super(browserContext, 'page');
     this.attribution.page = this;
     this.delegate = delegate;
     this.browserContext = browserContext;
-    this.accessibility = new accessibility.Accessibility(delegate.getAccessibilityTree.bind(delegate));
     this.keyboard = new input.Keyboard(delegate.rawKeyboard, this);
     this.mouse = new input.Mouse(delegate.rawMouse, this);
     this.touchscreen = new input.Touchscreen(delegate.rawTouchscreen, this);
     this.screenshotter = new Screenshotter(this);
     this.frameManager = new frames.FrameManager(this);
+    this.screencast = new Screencast(this);
     if (delegate.pdf)
       this.pdf = delegate.pdf.bind(delegate);
     this.coverage = delegate.coverage ? delegate.coverage() : null;
@@ -237,10 +253,10 @@ export class Page extends SdkObject {
     return this._initializedPromise;
   }
 
-  emitOnContext(event: string | symbol, ...args: any[]) {
+  emitOnContext<K extends keyof BrowserContextEventMap>(event: K, ...args: BrowserContextEventMap[K]) {
     if (this.isStorageStatePage)
       return;
-    this.browserContext.emit(event, ...args);
+    this.browserContext.emit(event, ...args as any);
   }
 
   async resetForReuse(progress: Progress) {
@@ -261,18 +277,18 @@ export class Page extends SdkObject {
 
   _didClose() {
     this.frameManager.dispose();
-    this._frameThrottler.dispose();
+    this.screencast.stopFrameThrottler();
     assert(this._closedState !== 'closed', 'Page closed twice');
     this._closedState = 'closed';
     this.emit(Page.Events.Close);
     this._closedPromise.resolve();
     this.instrumentation.onPageClose(this);
-    this.openScope.close(new TargetClosedError());
+    this.openScope.close(new TargetClosedError(this.closeReason()));
   }
 
   _didCrash() {
     this.frameManager.dispose();
-    this._frameThrottler.dispose();
+    this.screencast.stopFrameThrottler();
     this.emit(Page.Events.Crash);
     this._crashed = true;
     this.instrumentation.onPageClose(this);
@@ -366,8 +382,8 @@ export class Page extends SdkObject {
     await PageBinding.dispatch(this, payload, context);
   }
 
-  addConsoleMessage(type: string, args: js.JSHandle[], location: types.ConsoleMessageLocation, text?: string) {
-    const message = new ConsoleMessage(this, type, text, args, location);
+  addConsoleMessage(worker: Worker | null, type: string, args: js.JSHandle[], location: types.ConsoleMessageLocation, text?: string) {
+    const message = new ConsoleMessage(this, worker, type, text, args, location);
     const intercepted = this.frameManager.interceptConsoleMessage(message);
     if (intercepted) {
       args.forEach(arg => arg.dispose());
@@ -490,6 +506,8 @@ export class Page extends SdkObject {
   }
 
   private async _performWaitForNavigationCheck(progress: Progress) {
+    if (process.env.PLAYWRIGHT_SKIP_NAVIGATION_CHECK)
+      return;
     const mainFrame = this.frameManager.mainFrame();
     if (!mainFrame || !mainFrame.pendingDocument())
       return;
@@ -752,10 +770,12 @@ export class Page extends SdkObject {
     if (this._closedState === 'closed')
       return;
     if (options.reason)
-      this.closeReason = options.reason;
+      this._closeReason = options.reason;
     const runBeforeUnload = !!options.runBeforeUnload;
     if (this._closedState !== 'closing') {
-      this._closedState = 'closing';
+      // If runBeforeUnload is true, we don't know if we will close, so don't modify the state
+      if (!runBeforeUnload)
+        this._closedState = 'closing';
       // This might throw if the browser context containing the page closes
       // while we are trying to close the page.
       await this.delegate.closePage(runBeforeUnload).catch(e => debugLogger.log('error', e));
@@ -828,20 +848,6 @@ export class Page extends SdkObject {
     return this._pageBindings.get(name) || this.browserContext._pageBindings.get(name);
   }
 
-  setScreencastOptions(options: { width: number, height: number, quality: number } | null) {
-    this.delegate.setScreencastOptions(options).catch(e => debugLogger.log('error', e));
-    this._frameThrottler.setThrottlingEnabled(!!options);
-  }
-
-  throttleScreencastFrameAck(ack: () => void) {
-    // Don't ack immediately, tracing has smart throttling logic that is implemented here.
-    this._frameThrottler.ack(ack);
-  }
-
-  temporarilyDisableTracingScreencastThrottling() {
-    this._frameThrottler.recharge();
-  }
-
   async safeNonStallingEvaluateInAllFrames(expression: string, world: types.World, options: { throwOnJSErrors?: boolean } = {}) {
     await Promise.all(this.frames().map(async frame => {
       try {
@@ -857,35 +863,45 @@ export class Page extends SdkObject {
     await Promise.all(this.frames().map(frame => frame.hideHighlight().catch(() => {})));
   }
 
-  async snapshotForAI(progress: Progress): Promise<string> {
-    this.lastSnapshotFrameIds = [];
-    const snapshot = await snapshotFrameForAI(progress, this.mainFrame(), 0, this.lastSnapshotFrameIds);
-    return snapshot.join('\n');
+  async snapshotForAI(progress: Progress, options: { track?: string, doNotRenderActive?: boolean } = {}): Promise<{ full: string, incremental?: string }> {
+    const snapshot = await snapshotFrameForAI(progress, this.mainFrame(), options);
+    return { full: snapshot.full.join('\n'), incremental: snapshot.incremental?.join('\n') };
   }
 }
 
-export class Worker extends SdkObject {
-  static Events = {
-    Close: 'close',
-  };
+export const WorkerEvent = {
+  Close: 'close',
+} as const;
+
+export type WorkerEventMap = {
+  [WorkerEvent.Close]: [worker: Worker];
+};
+
+export class Worker extends SdkObject<WorkerEventMap> {
+  static Events = WorkerEvent;
 
   readonly url: string;
-  private _executionContextPromise: Promise<js.ExecutionContext>;
-  private _executionContextCallback: (value: js.ExecutionContext) => void;
+  private _executionContextPromise = new ManualPromise<js.ExecutionContext>();
+  private _workerScriptLoaded = false;
   existingExecutionContext: js.ExecutionContext | null = null;
   readonly openScope = new LongStandingScope();
 
   constructor(parent: SdkObject, url: string) {
     super(parent, 'worker');
     this.url = url;
-    this._executionContextCallback = () => {};
-    this._executionContextPromise = new Promise(x => this._executionContextCallback = x);
   }
 
   createExecutionContext(delegate: js.ExecutionContextDelegate) {
     this.existingExecutionContext = new js.ExecutionContext(this, delegate, 'worker');
-    this._executionContextCallback(this.existingExecutionContext);
+    if (this._workerScriptLoaded)
+      this._executionContextPromise.resolve(this.existingExecutionContext);
     return this.existingExecutionContext;
+  }
+
+  workerScriptLoaded() {
+    this._workerScriptLoaded = true;
+    if (this.existingExecutionContext)
+      this._executionContextPromise.resolve(this.existingExecutionContext);
   }
 
   didClose() {
@@ -969,84 +985,19 @@ export class InitScript {
   }
 }
 
-class FrameThrottler {
-  private _acks: (() => void)[] = [];
-  private _defaultInterval: number;
-  private _throttlingInterval: number;
-  private _nonThrottledFrames: number;
-  private _budget: number;
-  private _throttlingEnabled = false;
-  private _timeoutId: NodeJS.Timeout | undefined;
 
-  constructor(nonThrottledFrames: number, defaultInterval: number, throttlingInterval: number) {
-    this._nonThrottledFrames = nonThrottledFrames;
-    this._budget = nonThrottledFrames;
-    this._defaultInterval = defaultInterval;
-    this._throttlingInterval = throttlingInterval;
-    this._tick();
-  }
-
-  dispose() {
-    if (this._timeoutId) {
-      clearTimeout(this._timeoutId);
-      this._timeoutId = undefined;
-    }
-  }
-
-  setThrottlingEnabled(enabled: boolean) {
-    this._throttlingEnabled = enabled;
-  }
-
-  recharge() {
-    // Send all acks, reset budget.
-    for (const ack of this._acks)
-      ack();
-    this._acks = [];
-    this._budget = this._nonThrottledFrames;
-    if (this._timeoutId) {
-      clearTimeout(this._timeoutId);
-      this._tick();
-    }
-  }
-
-  ack(ack: () => void) {
-    if (!this._timeoutId) {
-      // Already disposed.
-      ack();
-      return;
-    }
-    this._acks.push(ack);
-  }
-
-  private _tick() {
-    const ack = this._acks.shift();
-    if (ack) {
-      --this._budget;
-      ack();
-    }
-
-    if (this._throttlingEnabled && this._budget <= 0) {
-      // Non-throttled frame budget is exceeded. Next ack will be throttled.
-      this._timeoutId = setTimeout(() => this._tick(), this._throttlingInterval);
-    } else {
-      // Either not throttling, or still under budget. Next ack will be after the default timeout.
-      this._timeoutId = setTimeout(() => this._tick(), this._defaultInterval);
-    }
-  }
-}
-
-async function snapshotFrameForAI(progress: Progress, frame: frames.Frame, frameOrdinal: number, frameIds: string[]): Promise<string[]> {
+async function snapshotFrameForAI(progress: Progress, frame: frames.Frame, options: { track?: string, doNotRenderActive?: boolean } = {}): Promise<{ full: string[], incremental?: string[] }> {
   // Only await the topmost navigations, inner frames will be empty when racing.
   const snapshot = await frame.retryWithProgressAndTimeouts(progress, [1000, 2000, 4000, 8000], async continuePolling => {
     try {
       const context = await progress.race(frame._utilityContext());
       const injectedScript = await progress.race(context.injectedScript());
-      const snapshotOrRetry = await progress.race(injectedScript.evaluate((injected, refPrefix) => {
+      const snapshotOrRetry = await progress.race(injectedScript.evaluate((injected, options) => {
         const node = injected.document.body;
         if (!node)
           return true;
-        return injected.ariaSnapshot(node, { mode: 'ai', refPrefix });
-      }, frameOrdinal ? 'f' + frameOrdinal : ''));
+        return injected.incrementalAriaSnapshot(node, { mode: 'ai', ...options });
+      }, { refPrefix: frame.seq ? 'f' + frame.seq : '', track: options.track, doNotRenderActive: options.doNotRenderActive }));
       if (snapshotOrRetry === true)
         return continuePolling;
       return snapshotOrRetry;
@@ -1057,34 +1008,51 @@ async function snapshotFrameForAI(progress: Progress, frame: frames.Frame, frame
     }
   });
 
-  const lines = snapshot.split('\n');
-  const result = [];
-  for (const line of lines) {
+  const childSnapshotPromises = snapshot.iframeRefs.map(ref => snapshotFrameRefForAI(progress, frame, ref, options));
+  const childSnapshots = await Promise.all(childSnapshotPromises);
+
+  const full = [];
+  let incremental: string[] | undefined;
+
+  if (snapshot.incremental !== undefined) {
+    incremental = snapshot.incremental.split('\n');
+    for (let i = 0; i < snapshot.iframeRefs.length; i++) {
+      const childSnapshot = childSnapshots[i];
+      if (childSnapshot.incremental)
+        incremental.push(...childSnapshot.incremental);
+      else if (childSnapshot.full.length)
+        incremental.push('- <changed> iframe [ref=' + snapshot.iframeRefs[i] + ']:', ...childSnapshot.full.map(l => '  ' + l));
+    }
+  }
+
+  for (const line of snapshot.full.split('\n')) {
     const match = line.match(/^(\s*)- iframe (?:\[active\] )?\[ref=([^\]]*)\]/);
     if (!match) {
-      result.push(line);
+      full.push(line);
       continue;
     }
 
     const leadingSpace = match[1];
     const ref = match[2];
-    const frameSelector = `aria-ref=${ref} >> internal:control=enter-frame`;
-    const frameBodySelector = `${frameSelector} >> body`;
-    const child = await progress.race(frame.selectors.resolveFrameForSelector(frameBodySelector, { strict: true }));
-    if (!child) {
-      result.push(line);
-      continue;
-    }
-    const frameOrdinal = frameIds.length + 1;
-    frameIds.push(child.frame._id);
-    try {
-      const childSnapshot = await snapshotFrameForAI(progress, child.frame, frameOrdinal, frameIds);
-      result.push(line + ':', ...childSnapshot.map(l => leadingSpace + '  ' + l));
-    } catch {
-      result.push(line);
-    }
+    const childSnapshot = childSnapshots[snapshot.iframeRefs.indexOf(ref)] ?? { full: [] };
+    full.push(childSnapshot.full.length ? line + ':' : line);
+    full.push(...childSnapshot.full.map(l => leadingSpace + '  ' + l));
   }
-  return result;
+
+  return { full, incremental };
+}
+
+async function snapshotFrameRefForAI(progress: Progress, parentFrame: frames.Frame, frameRef: string, options: { track?: string, mode?: 'full' | 'incremental' }): Promise<{ full: string[], incremental?: string[] }> {
+  const frameSelector = `aria-ref=${frameRef} >> internal:control=enter-frame`;
+  const frameBodySelector = `${frameSelector} >> body`;
+  const child = await progress.race(parentFrame.selectors.resolveFrameForSelector(frameBodySelector, { strict: true }));
+  if (!child)
+    return { full: [] };
+  try {
+    return await snapshotFrameForAI(progress, child.frame, options);
+  } catch {
+    return { full: [] };
+  }
 }
 
 function ensureArrayLimit<T>(array: T[], limit: number): T[] {

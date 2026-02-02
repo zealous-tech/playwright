@@ -17,6 +17,10 @@
 import { spawnSync } from 'child_process';
 import { test, expect, mcpServerPath } from './fixtures';
 
+test.describe.configure({
+  retries: 1,
+});
+
 test('cdp server', async ({ cdpServer, startClient, server }) => {
   await cdpServer.start();
   const { client } = await startClient({ args: [`--cdp-endpoint=${cdpServer.endpoint}`] });
@@ -24,7 +28,7 @@ test('cdp server', async ({ cdpServer, startClient, server }) => {
     name: 'browser_navigate',
     arguments: { url: server.HELLO_WORLD },
   })).toHaveResponse({
-    pageState: expect.stringContaining(`- generic [active] [ref=e1]: Hello, world!`),
+    snapshot: expect.stringContaining(`- generic [active] [ref=e1]: Hello, world!`),
   });
 });
 
@@ -42,19 +46,18 @@ test('cdp server reuse tab', async ({ cdpServer, startClient, server }) => {
       ref: 'f0',
     },
   })).toHaveResponse({
-    result: `Error: Ref f0 not found in the current page snapshot. Try capturing new snapshot.`,
+    error: `Error: Ref f0 not found in the current page snapshot. Try capturing new snapshot.`,
     isError: true,
   });
 
   expect(await client.callTool({
     name: 'browser_snapshot',
   })).toHaveResponse({
-    pageState: expect.stringContaining(`- Page URL: ${server.HELLO_WORLD}
-- Page Title: Title
-- Page Snapshot:
-\`\`\`yaml
+    page: `- Page URL: ${server.HELLO_WORLD}
+- Page Title: Title`,
+    snapshot: `\`\`\`yaml
 - generic [active] [ref=e1]: Hello, world!
-\`\`\``),
+\`\`\``,
   });
 });
 
@@ -70,7 +73,7 @@ test('should throw connection error and allow re-connecting', async ({ cdpServer
     name: 'browser_navigate',
     arguments: { url: server.PREFIX },
   })).toHaveResponse({
-    result: expect.stringContaining(`Error: browserType.connectOverCDP: connect ECONNREFUSED`),
+    error: expect.stringContaining(`Error: browserType.connectOverCDP: connect ECONNREFUSED`),
     isError: true,
   });
   await cdpServer.start();
@@ -78,7 +81,7 @@ test('should throw connection error and allow re-connecting', async ({ cdpServer
     name: 'browser_navigate',
     arguments: { url: server.PREFIX },
   })).toHaveResponse({
-    pageState: expect.stringContaining(`- generic [active] [ref=e1]: Hello, world!`),
+    snapshot: expect.stringContaining(`- generic [active] [ref=e1]: Hello, world!`),
   });
 });
 

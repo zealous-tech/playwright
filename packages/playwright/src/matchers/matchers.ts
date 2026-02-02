@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import { constructURLBasedOnBaseURL, isRegExp, isString, isTextualMimeType, pollAgainstDeadline, serializeExpectedTextValues } from 'playwright-core/lib/utils';
+import { asLocatorDescription, constructURLBasedOnBaseURL, isRegExp, isString, isTextualMimeType, pollAgainstDeadline, serializeExpectedTextValues, formatMatcherMessage } from 'playwright-core/lib/utils';
 import { colors } from 'playwright-core/lib/utils';
 
 import { expectTypes } from '../util';
@@ -22,19 +22,26 @@ import { toBeTruthy } from './toBeTruthy';
 import { toEqual } from './toEqual';
 import { toHaveURLWithPredicate } from './toHaveURL';
 import { toMatchText } from './toMatchText';
+import { toHaveScreenshotStepTitle } from './toMatchSnapshot';
 import { takeFirst } from '../common/config';
 import { currentTestInfo } from '../common/globals';
 import { TestInfoImpl } from '../worker/testInfo';
-import { formatMatcherMessage } from './matcherHint';
+import { MatcherResult } from './matcherHint';
 
 import type { ExpectMatcherState } from '../../types/test';
 import type { TestStepInfoImpl } from '../worker/testInfo';
 import type { APIResponse, Locator, Frame, Page } from 'playwright-core';
 import type { FrameExpectParams } from 'playwright-core/lib/client/types';
+import type { ExpectMatcherUtils } from '../../types/test';
+import type { InternalMatcherUtils } from 'playwright-core/lib/utils';
 
-export type ExpectMatcherStateInternal = ExpectMatcherState & { _stepInfo?: TestStepInfoImpl };
+export type ExpectMatcherStateInternal = Omit<ExpectMatcherState, 'utils'> & {
+  _stepInfo?: TestStepInfoImpl;
+  utils: ExpectMatcherUtils & InternalMatcherUtils;
+};
 
 export interface LocatorEx extends Locator {
+  _selector: string;
   _expect(expression: string, options: FrameExpectParams): Promise<{ matches: boolean, received?: any, log?: string[], timedOut?: boolean, errorMessage?: string }>;
 }
 
@@ -47,7 +54,7 @@ interface APIResponseEx extends APIResponse {
 }
 
 export function toBeAttached(
-  this: ExpectMatcherState,
+  this: ExpectMatcherStateInternal,
   locator: LocatorEx,
   options?: { attached?: boolean, timeout?: number },
 ) {
@@ -60,7 +67,7 @@ export function toBeAttached(
 }
 
 export function toBeChecked(
-  this: ExpectMatcherState,
+  this: ExpectMatcherStateInternal,
   locator: LocatorEx,
   options?: { checked?: boolean, indeterminate?: boolean, timeout?: number },
 ) {
@@ -85,7 +92,7 @@ export function toBeChecked(
 }
 
 export function toBeDisabled(
-  this: ExpectMatcherState,
+  this: ExpectMatcherStateInternal,
   locator: LocatorEx,
   options?: { timeout?: number },
 ) {
@@ -95,7 +102,7 @@ export function toBeDisabled(
 }
 
 export function toBeEditable(
-  this: ExpectMatcherState,
+  this: ExpectMatcherStateInternal,
   locator: LocatorEx,
   options?: { editable?: boolean, timeout?: number },
 ) {
@@ -108,7 +115,7 @@ export function toBeEditable(
 }
 
 export function toBeEmpty(
-  this: ExpectMatcherState,
+  this: ExpectMatcherStateInternal,
   locator: LocatorEx,
   options?: { timeout?: number },
 ) {
@@ -118,7 +125,7 @@ export function toBeEmpty(
 }
 
 export function toBeEnabled(
-  this: ExpectMatcherState,
+  this: ExpectMatcherStateInternal,
   locator: LocatorEx,
   options?: { enabled?: boolean, timeout?: number },
 ) {
@@ -131,7 +138,7 @@ export function toBeEnabled(
 }
 
 export function toBeFocused(
-  this: ExpectMatcherState,
+  this: ExpectMatcherStateInternal,
   locator: LocatorEx,
   options?: { timeout?: number },
 ) {
@@ -141,7 +148,7 @@ export function toBeFocused(
 }
 
 export function toBeHidden(
-  this: ExpectMatcherState,
+  this: ExpectMatcherStateInternal,
   locator: LocatorEx,
   options?: { timeout?: number },
 ) {
@@ -151,7 +158,7 @@ export function toBeHidden(
 }
 
 export function toBeVisible(
-  this: ExpectMatcherState,
+  this: ExpectMatcherStateInternal,
   locator: LocatorEx,
   options?: { visible?: boolean, timeout?: number },
 ) {
@@ -164,7 +171,7 @@ export function toBeVisible(
 }
 
 export function toBeInViewport(
-  this: ExpectMatcherState,
+  this: ExpectMatcherStateInternal,
   locator: LocatorEx,
   options?: { timeout?: number, ratio?: number },
 ) {
@@ -174,7 +181,7 @@ export function toBeInViewport(
 }
 
 export function toContainText(
-  this: ExpectMatcherState,
+  this: ExpectMatcherStateInternal,
   locator: LocatorEx,
   expected: string | RegExp | (string | RegExp)[],
   options: { timeout?: number, useInnerText?: boolean, ignoreCase?: boolean } = {},
@@ -193,7 +200,7 @@ export function toContainText(
 }
 
 export function toHaveAccessibleDescription(
-  this: ExpectMatcherState,
+  this: ExpectMatcherStateInternal,
   locator: LocatorEx,
   expected: string | RegExp,
   options?: { timeout?: number, ignoreCase?: boolean },
@@ -205,7 +212,7 @@ export function toHaveAccessibleDescription(
 }
 
 export function toHaveAccessibleName(
-  this: ExpectMatcherState,
+  this: ExpectMatcherStateInternal,
   locator: LocatorEx,
   expected: string | RegExp,
   options?: { timeout?: number, ignoreCase?: boolean },
@@ -217,7 +224,7 @@ export function toHaveAccessibleName(
 }
 
 export function toHaveAccessibleErrorMessage(
-  this: ExpectMatcherState,
+  this: ExpectMatcherStateInternal,
   locator: LocatorEx,
   expected: string | RegExp,
   options?: { timeout?: number; ignoreCase?: boolean },
@@ -229,7 +236,7 @@ export function toHaveAccessibleErrorMessage(
 }
 
 export function toHaveAttribute(
-  this: ExpectMatcherState,
+  this: ExpectMatcherStateInternal,
   locator: LocatorEx,
   name: string,
   expected: string | RegExp | undefined | { timeout?: number },
@@ -254,7 +261,7 @@ export function toHaveAttribute(
 }
 
 export function toHaveClass(
-  this: ExpectMatcherState,
+  this: ExpectMatcherStateInternal,
   locator: LocatorEx,
   expected: string | RegExp | (string | RegExp)[],
   options?: { timeout?: number },
@@ -273,7 +280,7 @@ export function toHaveClass(
 }
 
 export function toContainClass(
-  this: ExpectMatcherState,
+  this: ExpectMatcherStateInternal,
   locator: LocatorEx,
   expected: string | string[],
   options?: { timeout?: number },
@@ -296,7 +303,7 @@ export function toContainClass(
 }
 
 export function toHaveCount(
-  this: ExpectMatcherState,
+  this: ExpectMatcherStateInternal,
   locator: LocatorEx,
   expected: number,
   options?: { timeout?: number },
@@ -306,8 +313,9 @@ export function toHaveCount(
   }, expected, options);
 }
 
+export function toHaveCSS(this: ExpectMatcherStateInternal, locator: LocatorEx, name: string, expected: string | RegExp, options?: { timeout?: number }): Promise<MatcherResult<any, any>>;
 export function toHaveCSS(
-  this: ExpectMatcherState,
+  this: ExpectMatcherStateInternal,
   locator: LocatorEx,
   name: string,
   expected: string | RegExp,
@@ -320,7 +328,7 @@ export function toHaveCSS(
 }
 
 export function toHaveId(
-  this: ExpectMatcherState,
+  this: ExpectMatcherStateInternal,
   locator: LocatorEx,
   expected: string | RegExp,
   options?: { timeout?: number },
@@ -332,7 +340,7 @@ export function toHaveId(
 }
 
 export function toHaveJSProperty(
-  this: ExpectMatcherState,
+  this: ExpectMatcherStateInternal,
   locator: LocatorEx,
   name: string,
   expected: any,
@@ -344,7 +352,7 @@ export function toHaveJSProperty(
 }
 
 export function toHaveRole(
-  this: ExpectMatcherState,
+  this: ExpectMatcherStateInternal,
   locator: LocatorEx,
   expected: string,
   options?: { timeout?: number, ignoreCase?: boolean },
@@ -358,7 +366,7 @@ export function toHaveRole(
 }
 
 export function toHaveText(
-  this: ExpectMatcherState,
+  this: ExpectMatcherStateInternal,
   locator: LocatorEx,
   expected: string | RegExp | (string | RegExp)[],
   options: { timeout?: number, useInnerText?: boolean, ignoreCase?: boolean } = {},
@@ -377,7 +385,7 @@ export function toHaveText(
 }
 
 export function toHaveValue(
-  this: ExpectMatcherState,
+  this: ExpectMatcherStateInternal,
   locator: LocatorEx,
   expected: string | RegExp,
   options?: { timeout?: number },
@@ -389,7 +397,7 @@ export function toHaveValue(
 }
 
 export function toHaveValues(
-  this: ExpectMatcherState,
+  this: ExpectMatcherStateInternal,
   locator: LocatorEx,
   expected: (string | RegExp)[],
   options?: { timeout?: number },
@@ -401,7 +409,7 @@ export function toHaveValues(
 }
 
 export function toHaveTitle(
-  this: ExpectMatcherState,
+  this: ExpectMatcherStateInternal,
   page: Page,
   expected: string | RegExp,
   options: { timeout?: number } = {},
@@ -413,7 +421,7 @@ export function toHaveTitle(
 }
 
 export function toHaveURL(
-  this: ExpectMatcherState,
+  this: ExpectMatcherStateInternal,
   page: Page,
   expected: string | RegExp | ((url: URL) => boolean),
   options?: { ignoreCase?: boolean; timeout?: number },
@@ -431,7 +439,7 @@ export function toHaveURL(
 }
 
 export async function toBeOK(
-  this: ExpectMatcherState,
+  this: ExpectMatcherStateInternal,
   response: APIResponseEx
 ) {
   const matcherName = 'toBeOK';
@@ -444,7 +452,9 @@ export async function toBeOK(
     isTextEncoding ? response.text() : null
   ]) : [];
 
-  const message = () => formatMatcherMessage(this, {
+  const message = () => formatMatcherMessage(this.utils, {
+    isNot: this.isNot,
+    promise: this.promise,
     matcherName,
     receiver: 'response',
     expectation: '',
@@ -489,4 +499,18 @@ export async function toPass(
     return { message: () => message, pass: !!this.isNot };
   }
   return { pass: !this.isNot, message: () => '' };
+}
+
+export function computeMatcherTitleSuffix(matcherName: string, receiver: any, args: any[]): { short?: string, long?: string } {
+  if (matcherName === 'toHaveScreenshot') {
+    const title = toHaveScreenshotStepTitle(...args);
+    return { short: title ? `(${title})` : '' };
+  }
+  if (receiver && typeof receiver === 'object' && receiver.constructor?.name === 'Locator') {
+    try {
+      return { long: ' ' + asLocatorDescription('javascript', (receiver as LocatorEx)._selector) };
+    } catch {
+    }
+  }
+  return {};
 }

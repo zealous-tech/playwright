@@ -51,7 +51,7 @@ test('addLocatorHandler should throw when page closes', async ({ page, server })
   await page.goto(server.PREFIX + '/input/handle-locator.html');
 
   await page.addLocatorHandler(page.getByText('This interstitial covers the button'), async () => {
-    await page.close();
+    await page.close({ reason: 'custom reason' });
   });
 
   await page.locator('#aside').hover();
@@ -60,7 +60,7 @@ test('addLocatorHandler should throw when page closes', async ({ page, server })
     (window as any).setupAnnoyingInterstitial('mouseover', 1);
   });
   const error = await page.locator('#target').click().catch(e => e);
-  expect(error.message).toContain(kTargetClosedErrorMessage);
+  expect(error.message).toContain('custom reason');
 });
 
 test('should reject all promises when page is closed', async ({ page }) => {
@@ -140,7 +140,7 @@ test('should not throw UnhandledPromiseRejection when page closes', async ({ pag
   ]).catch(e => {});
 });
 
-test('interrupt request.response() and request.allHeaders() on page.close', async ({ page, server, browserName }) => {
+test('interrupt request.response() and request.allHeaders() on page.close', async ({ page, server, browserName, channel }) => {
   test.info().annotations.push({ type: 'issue', description: 'https://github.com/microsoft/playwright/issues/27227' });
   server.setRoute('/one-style.css', (req, res) => {
     res.setHeader('Content-Type', 'text/css');
@@ -153,7 +153,7 @@ test('interrupt request.response() and request.allHeaders() on page.close', asyn
   await page.close();
   expect((await respPromise).message).toContain(kTargetClosedErrorMessage);
   // All headers are the same as "provisional" headers in Firefox.
-  if (browserName === 'firefox' || browserName as any === '_bidiFirefox')
+  if (browserName === 'firefox')
     expect((await headersPromise)['user-agent']).toBeTruthy();
   else
     expect((await headersPromise).message).toContain(kTargetClosedErrorMessage);

@@ -71,7 +71,9 @@ export class FrameSelectors {
     if (!resolved)
       throw new Error(`Failed to find frame for selector "${selector}"`);
     return await resolved.injected.evaluateHandle((injected, { info, scope }) => {
-      return injected.querySelectorAll(info.parsed, scope || document);
+      const elements = injected.querySelectorAll(info.parsed, scope || document);
+      injected.checkDeprecatedSelectorUsage(info.parsed, elements);
+      return elements;
     }, { info: resolved.info, scope: resolved.scope });
   }
 
@@ -82,7 +84,9 @@ export class FrameSelectors {
       throw new Error(`Failed to find frame for selector "${selector}"`);
     await options.__testHookBeforeQuery?.();
     return await resolved.injected.evaluate((injected, { info }) => {
-      return injected.querySelectorAll(info.parsed, document).length;
+      const elements = injected.querySelectorAll(info.parsed, document);
+      injected.checkDeprecatedSelectorUsage(info.parsed, elements);
+      return elements.length;
     }, { info: resolved.info });
   }
 
@@ -92,7 +96,9 @@ export class FrameSelectors {
     if (!resolved)
       return [];
     const arrayHandle = await resolved.injected.evaluateHandle((injected, { info, scope }) => {
-      return injected.querySelectorAll(info.parsed, scope || document);
+      const elements = injected.querySelectorAll(info.parsed, scope || document);
+      injected.checkDeprecatedSelectorUsage(info.parsed, elements);
+      return elements;
     }, { info: resolved.info, scope: resolved.scope });
 
     const properties = await arrayHandle.getProperties();
@@ -119,10 +125,8 @@ export class FrameSelectors {
     const match = body.match(/^f(\d+)e\d+$/);
     if (!match)
       return frame;
-    const frameIndex = +match[1];
-    const page = this.frame._page;
-    const frameId = page.lastSnapshotFrameIds[frameIndex - 1];
-    const jumptToFrame = frameId ? page.frameManager.frame(frameId) : null;
+    const frameSeq = +match[1];
+    const jumptToFrame = this.frame._page.frameManager.frames().find(frame => frame.seq === frameSeq);
     if (!jumptToFrame)
       throw new InvalidSelectorError(`Invalid frame in aria-ref selector "${selector}"`);
     return jumptToFrame;

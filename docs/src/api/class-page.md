@@ -557,13 +557,6 @@ Emitted when [WebSocket] request is sent.
 Emitted when a dedicated [WebWorker](https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API) is spawned by the
 page.
 
-## property: Page.accessibility
-* since: v1.8
-* langs: csharp, js, python
-* deprecated: This property is discouraged. Please use other libraries such as
-  [Axe](https://www.deque.com/axe/) if you need to test page accessibility. See our Node.js [guide](https://playwright.dev/docs/accessibility-testing) for integration with Axe.
-- type: <[Accessibility]>
-
 ## async method: Page.addInitScript
 * since: v1.8
 
@@ -715,6 +708,61 @@ current working directory.
 - `content` <[string]>
 
 Raw CSS content to be injected into frame.
+
+## async method: Page.agent
+* since: v1.58
+* langs: js
+* hidden
+- returns: <[PageAgent]>
+
+Initialize page agent with the llm provider and cache.
+
+### option: Page.agent.cache
+* since: v1.58
+* hidden
+- `cache` <[Object]>
+  - `cacheFile` ?<[string]> Cache file to use/generate code for performed actions into. Cache is not used if not specified (default).
+  - `cacheOutFile` ?<[string]> When specified, generated entries are written into the `cacheOutFile` instead of updating the `cacheFile`.
+
+### option: Page.agent.expect
+* since: v1.58
+* hidden
+- `expect` <[Object]>
+  - `timeout` ?<[int]> Default timeout for expect calls in milliseconds, defaults to 5000ms.
+
+### option: Page.agent.limits
+* since: v1.58
+* hidden
+- `limits` <[Object]>
+  - `maxTokens` ?<[int]> Maximum number of tokens to consume. The agentic loop will stop after input + output tokens exceed this value. Defaults to unlimited.
+  - `maxActions` ?<[int]> Maximum number of agentic actions to generate, defaults to 10.
+  - `maxActionRetries` ?<[int]> Maximum number retries per action, defaults to 3.
+
+Limits to use for the agentic loop.
+
+### option: Page.agent.provider
+* since: v1.58
+* hidden
+- `provider` <[Object]>
+  - `api` <[PageAgentAPI]<"openai"|"openai-compatible"|"anthropic"|"google">> API to use.
+  - `apiEndpoint` ?<[string]> Endpoint to use if different from default.
+  - `apiKey` <[string]> API key for the LLM provider.
+  - `apiTimeout` ?<[int]> Amount of time to wait for the provider to respond to each request.
+  - `model` <[string]> Model identifier within the provider. Required in non-cache mode.
+
+### option: Page.agent.secrets
+* since: v1.58
+* hidden
+- `secrets` ?<[Object]<[string], [string]>>
+
+Secrets to hide from the LLM.
+
+### option: Page.agent.systemPrompt
+* since: v1.58
+* hidden
+- `systemPrompt` <[string]>
+
+System prompt for the agent's loop.
 
 ## async method: Page.bringToFront
 * since: v1.8
@@ -1108,6 +1156,9 @@ await Page.DragAndDropAsync("#source", "#target", new()
 
 ### option: Page.dragAndDrop.targetPosition = %%-input-target-position-%%
 * since: v1.14
+
+### option: Page.dragAndDrop.steps = %%-input-drag-steps-%%
+* since: v1.57
 
 ## async method: Page.emulateMedia
 * since: v1.8
@@ -3000,6 +3051,7 @@ Whether or not to generate tagged (accessible) PDF. Defaults to `false`.
 - `outline` <[boolean]>
 
 Whether or not to embed the document outline into the PDF. Defaults to `false`.
+
 
 ## async method: Page.press
 * since: v1.8

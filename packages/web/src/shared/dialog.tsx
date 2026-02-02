@@ -46,9 +46,9 @@ export const Dialog: React.FC<React.PropsWithChildren<DialogProps>> = ({
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [_, setRecalculateDimensionsCount] = React.useState(0);
-  const dialogMeasure = useMeasureForRef(dialogRef);
-  const anchorMeasure = useMeasureForRef(anchor);
-  const position = dialogPosition(dialogMeasure, anchorMeasure, verticalOffset);
+  const [dialogMeasure] = useMeasureForRef(dialogRef);
+  const [anchorMeasure, recalculateAnchorMeasure] = useMeasureForRef(anchor);
+  const position = anchor ? dialogPosition(dialogMeasure, anchorMeasure, verticalOffset) : undefined;
 
   React.useEffect(() => {
     const onClick = (event: MouseEvent) => {
@@ -77,6 +77,8 @@ export const Dialog: React.FC<React.PropsWithChildren<DialogProps>> = ({
     return () => {};
   }, [open, requestClose]);
 
+  React.useLayoutEffect(() => recalculateAnchorMeasure(), [open, recalculateAnchorMeasure]);
+
   React.useEffect(() => {
     const onResize = () => setRecalculateDimensionsCount(count => count + 1);
 
@@ -104,10 +106,10 @@ export const Dialog: React.FC<React.PropsWithChildren<DialogProps>> = ({
   return (
     <dialog ref={dialogRef} style={{
       position: 'fixed',
-      margin: 0,
+      margin: position ? 0 : undefined,
       zIndex: 110,  // on top of split view resizer
-      top: position.top,
-      left: position.left,
+      top: position?.top,
+      left: position?.left,
       minWidth: minWidth || 0,
       ...externalStyle,
     }} className={className} data-testid={dataTestId}>

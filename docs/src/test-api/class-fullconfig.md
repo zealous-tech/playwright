@@ -104,6 +104,16 @@ See [`property: TestConfig.reportSlowTests`].
 
 Base directory for all relative paths used in the reporters.
 
+## property: FullConfig.runAgents
+* since: v1.58
+* hidden
+- type: <['RunAgentsMode]<"all"|"missing"|"none">>
+
+Whether to run LLM agent for [PageAgent]:
+* "all" disregards existing cache and performs all actions via LLM
+* "missing" only performs actions that don't have generated cache actions
+* "none" does not talk to LLM at all, relies on the cached actions (default)
+
 ## property: FullConfig.shard
 * since: v1.10
 - type: <[null]|[Object]>
@@ -111,6 +121,12 @@ Base directory for all relative paths used in the reporters.
   - `current` <[int]> The index of the shard to execute, one-based.
 
 See [`property: TestConfig.shard`].
+
+## property: FullConfig.tags
+* since: v1.57
+- type: <[Array]<[string]>>
+
+Resolved global tags. See [`property: TestConfig.tag`].
 
 ## property: FullConfig.updateSnapshots
 * since: v1.10

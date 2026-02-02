@@ -184,11 +184,12 @@ export async function createRootSuite(testRun: TestRun, errors: TestError[], sho
     for (const projectSuite of rootSuite.suites) {
       // Split beforeAll-grouped tests into "config.shard.total" groups when needed.
       // Later on, we'll re-split them between workers by using "config.workers" instead.
-      testGroups.push(...createTestGroups(projectSuite, config.config.shard.total));
+      for (const group of createTestGroups(projectSuite, config.config.shard.total))
+        testGroups.push(group);
     }
 
     // Shard test groups.
-    const testGroupsInThisShard = filterForShard(config.config.shard, testGroups);
+    const testGroupsInThisShard = filterForShard(config.config.shard, config.configCLIOverrides.shardWeights, testGroups);
     const testsInThisShard = new Set<TestCase>();
     for (const group of testGroupsInThisShard) {
       for (const test of group.tests)
@@ -373,7 +374,7 @@ export async function loadTestList(config: FullConfigInternal, filePath: string)
       const relativeFile = toPosixPath(path.relative(config.config.rootDir, test.location.file));
       if (relativeFile !== d.file)
         return false;
-      return d.titlePath.length === titles.length && d.titlePath.every((_, index) => titles[index] === d.titlePath[index]);
+      return d.titlePath.length <= titles.length && d.titlePath.every((_, index) => titles[index] === d.titlePath[index]);
     });
   } catch (e) {
     throw errorWithFile(filePath, 'Cannot read test list file: ' + e.message);

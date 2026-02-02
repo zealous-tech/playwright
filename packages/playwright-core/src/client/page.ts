@@ -15,7 +15,6 @@
  * limitations under the License.
  */
 
-import { Accessibility } from './accessibility';
 import { Artifact } from './artifact';
 import { ChannelOwner } from './channelOwner';
 import { evaluationScript } from './clientHelper';
@@ -42,6 +41,7 @@ import { urlMatches, urlMatchesEqual } from '../utils/isomorphic/urlMatch';
 import { LongStandingScope } from '../utils/isomorphic/manualPromise';
 import { isObject, isRegExp, isString } from '../utils/isomorphic/rtti';
 import { ConsoleMessage } from './consoleMessage';
+import { PageAgent } from './pageAgent';
 
 import type { BrowserContext } from './browserContext';
 import type { Clock } from './clock';
@@ -89,7 +89,6 @@ export class Page extends ChannelOwner<channels.PageChannel> implements api.Page
   _routes: RouteHandler[] = [];
   _webSocketRoutes: WebSocketRouteHandler[] = [];
 
-  readonly accessibility: Accessibility;
   readonly coverage: Coverage;
   readonly keyboard: Keyboard;
   readonly mouse: Mouse;
@@ -118,10 +117,10 @@ export class Page extends ChannelOwner<channels.PageChannel> implements api.Page
 
   constructor(parent: ChannelOwner, type: string, guid: string, initializer: channels.PageInitializer) {
     super(parent, type, guid, initializer);
+    this._instrumentation.onPage(this);
     this._browserContext = parent as unknown as BrowserContext;
     this._timeoutSettings = new TimeoutSettings(this._platform, this._browserContext._timeoutSettings);
 
-    this.accessibility = new Accessibility(this._channel);
     this.keyboard = new Keyboard(this);
     this.mouse = new Mouse(this);
     this.request = this._browserContext.request;
@@ -632,7 +631,8 @@ export class Page extends ChannelOwner<channels.PageChannel> implements api.Page
 
   async close(options: { runBeforeUnload?: boolean, reason?: string } = {}) {
     this._closeReason = options.reason;
-    this._closeWasCalled = true;
+    if (!options.runBeforeUnload)
+      this._closeWasCalled = true;
     try {
       if (this._ownedContext)
         await this._ownedContext.close();
@@ -671,7 +671,7 @@ export class Page extends ChannelOwner<channels.PageChannel> implements api.Page
 
   async consoleMessages(): Promise<ConsoleMessage[]> {
     const { messages } = await this._channel.consoleMessages();
-    return messages.map(message => new ConsoleMessage(this._platform, message, this));
+    return messages.map(message => new ConsoleMessage(this._platform, message, this, null));
   }
 
   async pageErrors(): Promise<Error[]> {
@@ -847,9 +847,33 @@ export class Page extends ChannelOwner<channels.PageChannel> implements api.Page
     return result.pdf;
   }
 
-  async _snapshotForAI(options: TimeoutOptions = {}): Promise<string> {
-    const result = await this._channel.snapshotForAI({ timeout: this._timeoutSettings.timeout(options) });
-    return result.snapshot;
+  // @ts-expect-error agents are hidden
+  async agent(options: Parameters<api.Page['agent']>[0] = {}) {
+    const params: channels.PageAgentParams = {
+      api: options.provider?.api,
+      apiEndpoint: options.provider?.apiEndpoint,
+      apiKey: options.provider?.apiKey,
+      apiTimeout: options.provider?.apiTimeout,
+      apiCacheFile: (options.provider as any)?._apiCacheFile,
+      doNotRenderActive: (options as any)._doNotRenderActive,
+      model: options.provider?.model,
+      cacheFile: options.cache?.cacheFile,
+      cacheOutFile: options.cache?.cacheOutFile,
+      maxTokens: options.limits?.maxTokens,
+      maxActions: options.limits?.maxActions,
+      maxActionRetries: options.limits?.maxActionRetries,
+      // @ts-expect-error runAgents is hidden
+      secrets: options.secrets ? Object.entries(options.secrets).map(([name, value]) => ({ name, value })) : undefined,
+      systemPrompt: options.systemPrompt,
+    };
+    const { agent } = await this._channel.agent(params);
+    const pageAgent = PageAgent.from(agent);
+    pageAgent._expectTimeout = options?.expect?.timeout;
+    return pageAgent;
+  }
+
+  async _snapshotForAI(options: TimeoutOptions & { track?: string } = {}): Promise<{ full: string, incremental?: string }> {
+    return await this._channel.snapshotForAI({ timeout: this._timeoutSettings.timeout(options), track: options.track });
   }
 }
 

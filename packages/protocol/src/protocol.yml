@@ -162,50 +162,6 @@ SelectorEngine:
     contentScript: boolean?
 
 
-AXNode:
-  type: object
-  properties:
-    role: string
-    name: string
-    valueString: string?
-    valueNumber: float?
-    description: string?
-    keyshortcuts: string?
-    roledescription: string?
-    valuetext: string?
-    disabled: boolean?
-    expanded: boolean?
-    focused: boolean?
-    modal: boolean?
-    multiline: boolean?
-    multiselectable: boolean?
-    readonly: boolean?
-    required: boolean?
-    selected: boolean?
-    checked:
-      type: enum?
-      literals:
-      - checked
-      - unchecked
-      - mixed
-    pressed:
-      type: enum?
-      literals:
-      - pressed
-      - released
-      - mixed
-    level: int?
-    valuemin: float?
-    valuemax: float?
-    autocomplete: string?
-    haspopup: string?
-    invalid: string?
-    orientation: string?
-    children:
-      type: array?
-      items: AXNode
-
-
 SetNetworkCookie:
   type: object
   properties:
@@ -511,7 +467,6 @@ LaunchOptions:
       type: array?
       items: NameValue
     headless: boolean?
-    devtools: boolean?
     proxy:
       type: object?
       properties:
@@ -635,7 +590,6 @@ ContextOptions:
       items: SelectorEngine
     testIdAttributeName: string?
 
-
 LocalUtils:
   type: interface
 
@@ -753,6 +707,7 @@ LocalUtils:
       parameters:
         tracesDir: string?
         traceName: string
+        live: boolean?
       returns:
         stacksId: string
 
@@ -794,8 +749,6 @@ Playwright:
     chromium: BrowserType
     firefox: BrowserType
     webkit: BrowserType
-    _bidiChromium: BrowserType
-    _bidiFirefox: BrowserType
     android: Android
     electron: Electron
     utils: LocalUtils?
@@ -1036,6 +989,7 @@ BrowserType:
           items: NameValue
         slowMo: float?
         timeout: float
+        isLocal: boolean?
       returns:
         browser: Browser
         defaultContext: BrowserContext?
@@ -1385,6 +1339,9 @@ BrowserContext:
     disableRecorder:
       internal: true
 
+    exposeConsoleApi:
+      internal: true
+
     newCDPSession:
       title: Create CDP session
       group: configuration
@@ -1488,7 +1445,8 @@ BrowserContext:
     console:
       parameters:
         $mixin: ConsoleMessage
-        page: Page
+        page: Page?
+        worker: Worker?
 
     close:
 
@@ -1925,15 +1883,6 @@ Page:
         snapshot: true
         pausesBeforeAction: true
 
-    accessibilitySnapshot:
-      title: Accessibility snapshot
-      group: getter
-      parameters:
-        interestingOnly: boolean?
-        root: ElementHandle?
-      returns:
-        rootAXNode: AXNode?
-
     pageErrors:
       title: Get page errors
       group: getter
@@ -1979,9 +1928,12 @@ Page:
     snapshotForAI:
       internal: true
       parameters:
+        # When track is present, an incremental snapshot is returned when possible.
+        track: string?
         timeout: float
       returns:
-        snapshot: string
+        full: string
+        incremental: string?
 
     startJSCoverage:
       title: Start JS coverage
@@ -2060,6 +2012,28 @@ Page:
           - requestFinished
           - requestFailed
         enabled: boolean
+
+    agent:
+      internal: true
+      parameters:
+        api: string?
+        apiKey: string?
+        apiEndpoint: string?
+        apiTimeout: int?
+        apiCacheFile: string?
+        cacheFile: string?
+        cacheOutFile: string?
+        doNotRenderActive: boolean?
+        maxActions: int?
+        maxActionRetries: int?
+        maxTokens: int?
+        model: string?
+        secrets:
+          type: array?
+          items: NameValue
+        systemPrompt: string?
+      returns:
+        agent: PageAgent
 
   events:
 
@@ -2251,6 +2225,7 @@ Frame:
         clickCount: int?
         timeout: float
         trial: boolean?
+        steps: int?
       flags:
         slowMo: true
         snapshot: true
@@ -2275,6 +2250,7 @@ Frame:
         sourcePosition: Point?
         targetPosition: Point?
         strict: boolean?
+        steps: int?
       flags:
         slowMo: true
         snapshot: true
@@ -2306,6 +2282,7 @@ Frame:
           - middle
         timeout: float
         trial: boolean?
+        steps: int?
       flags:
         slowMo: true
         snapshot: true
@@ -2830,6 +2807,8 @@ Frame:
 Worker:
   type: interface
 
+  extends: EventTarget
+
   initializer:
     url: string
 
@@ -2852,6 +2831,15 @@ Worker:
         arg: SerializedArgument
       returns:
         handle: JSHandle
+
+    updateSubscription:
+      internal: true
+      parameters:
+        event:
+          type: enum
+          literals:
+          - console
+        enabled: boolean
 
   events:
 
@@ -3007,6 +2995,7 @@ ElementHandle:
         clickCount: int?
         timeout: float
         trial: boolean?
+        steps: int?
       flags:
         slowMo: true
         snapshot: true
@@ -3042,6 +3031,7 @@ ElementHandle:
           - middle
         timeout: float
         trial: boolean?
+        steps: int?
       flags:
         slowMo: true
         snapshot: true
@@ -4323,3 +4313,79 @@ JsonPipe:
     closed:
       parameters:
         reason: string?
+
+
+PageAgent:
+  type: interface
+  extends: EventTarget
+
+  initializer:
+    page: Page
+
+  commands:
+    perform:
+      title: 'Perform "{task}"'
+      parameters:
+        task: string
+        $mixin: PageAgentOptions
+
+      returns:
+        usage: AgentUsage
+
+    expect:
+      title: 'Expect "{expectation}"'
+      parameters:
+        expectation: string
+        $mixin: PageAgentOptions
+
+      returns:
+        usage: AgentUsage
+
+    extract:
+      title: 'Extract "{query}"'
+      parameters:
+        query: string
+        schema: json
+        $mixin: PageAgentOptions
+
+      returns:
+        result: json
+        usage: AgentUsage
+
+    dispose:
+      internal: true
+
+    usage:
+      title: 'Get agent usage'
+      group: configuration
+      returns:
+        usage: AgentUsage
+
+  events:
+
+    turn:
+      parameters:
+        role: string
+        message: string
+        usage:
+          type: object?
+          properties:
+            inputTokens: int
+            outputTokens: int
+
+
+PageAgentOptions:
+  type: mixin
+  properties:
+    maxActions: int?
+    maxActionRetries: int?
+    maxTokens: int?
+    cacheKey: string?
+    timeout: int?
+
+AgentUsage:
+  type: object
+  properties:
+    turns: int
+    inputTokens: int
+    outputTokens: int
