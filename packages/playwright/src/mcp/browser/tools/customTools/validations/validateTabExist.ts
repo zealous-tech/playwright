@@ -32,9 +32,17 @@ export const validate_tab_exist = defineTabTool({
       // Get all tabs information from context
       const context = tab.context;
       const allTabs = context.tabs();
-      const isUrlRegex =
-        url.startsWith('/') && url.endsWith('/') && url.length > 2;
-      const urlRegex = isUrlRegex ? new RegExp(url.slice(1, -1)) : null;
+
+      // Determine if url is a valid regex
+      let urlRegex: RegExp;
+      let isUrlRegex = false;
+
+      try {
+        urlRegex = new RegExp(url);
+        isUrlRegex = true;
+      } catch {
+        isUrlRegex = false;
+      }
 
       // Extract tab info using the correct page methods
       const tabsWithInfo = await Promise.all(
@@ -64,18 +72,16 @@ export const validate_tab_exist = defineTabTool({
 
       // Search for tab with matching URL
       foundTab = tabsWithInfo.find((tabInfo: any) => {
-        const urlMatch = isUrlRegex
-          ? urlRegex!.test(tabInfo.url)
-          : exactMatch
-            ? tabInfo.url === url
-            : tabInfo.url.includes(url) || url.includes(tabInfo.url);
-
         const titleMatch = title ? tabInfo.header === title : true;
-
-        return urlMatch && titleMatch;
+        if (exactMatch) {
+          searchType = 'exact';
+          return tabInfo.url === url && titleMatch;
+        }
+        const regexMatch = isUrlRegex ? urlRegex!.test(tabInfo.url) : false;
+        const includes = tabInfo.url.includes(url) || url.includes(tabInfo.url);
+        searchType = includes ? 'partial' : 'regex';
+        return (regexMatch || includes) && titleMatch;
       });
-
-      searchType = isUrlRegex ? 'regex' : exactMatch ? 'exact' : 'partial';
 
       const isFound = !!foundTab;
 
@@ -105,14 +111,13 @@ export const validate_tab_exist = defineTabTool({
           currentInfo = ` Found tab is ${isCurrentTab ? '' : 'not '}current tab. Expected: ${isCurrent ? 'current' : 'not current'}.`;
         else
           currentInfo = ` Current tab check: ${isCurrent ? 'expected current tab not found' : 'expected non-current tab not found'}.`;
-
       }
       const titleInfo = title ? `, title: "${title}"` : '';
       const titleMessage = title ? ` and TITLE "${title}"` : '';
 
       if (matchType === 'exist') {
         if (isFound && foundTab) {
-          evidence = `Found tab with ${searchType} URL match: "${(foundTab as any).url}" (index: ${(foundTab as any).index}, header: "${(foundTab as any).header}"${titleInfo})${currentInfo}`;
+          evidence = `Found tab with ${url} ${searchType} check URL match: "${(foundTab as any).url}" (index: ${(foundTab as any).index}, header: "${(foundTab as any).header}"${titleInfo})${currentInfo}`;
         } else {
           const availableUrls = tabsWithInfo.map((t: any) => (t as any).url).join(', ');
           evidence = `Tab with URL "${url}"${titleMessage} not found. Available tabs: ${availableUrls}${currentInfo}`;
