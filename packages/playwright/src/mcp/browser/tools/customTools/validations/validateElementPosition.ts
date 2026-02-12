@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { expect } from '@playwright/test';
+import { expect } from '@zealous-tech/playwright/test';
 import { defineTabTool } from '../../tool';
 import { generateLocatorString } from '../helpers/helpers';
 import { ELEMENT_ATTACHED_TIMEOUT } from '../helpers/utils';
