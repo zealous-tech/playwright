@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 import { promisify } from 'util';
-import { expect } from '@playwright/test';
+import { expect } from '@zealous-tech/playwright/test';
 import { execFile } from 'child_process';
 import { generateLocator } from '../../utils.js';
 import { applyArrayFilter, compareValues, parseCurlStderr } from './utils.js';

@@ -22,7 +22,7 @@
  */
 
 import { z } from 'playwright-core/lib/mcpBundle';
-import { expect } from '@playwright/test';
+import { expect } from '@zealous-tech/playwright/test';
 import { defineTabTool } from '../../tool';
 import { generateLocatorString } from '../helpers/helpers';
 import { ELEMENT_ATTACHED_TIMEOUT } from '../helpers/utils';
