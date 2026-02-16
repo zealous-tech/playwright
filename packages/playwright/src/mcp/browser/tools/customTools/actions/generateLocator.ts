@@ -13,10 +13,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { asLocator } from 'playwright-core/lib/utils';
 import { defineTabTool } from '../../tool';
 import { generateLocator } from '../../utils';
-import { getXPathCode } from '../helpers/utils';
 import { generateLocatorSchema } from '../helpers/schemas';
 
 export const generate_locator = defineTabTool({
@@ -33,31 +31,16 @@ export const generate_locator = defineTabTool({
 
     try {
       await tab.waitForCompletion(async () => {
-        // Get locator from ref
-        // If ref starts with ###checkLocator, remove the prefix before passing to refLocator
-        const refForLocator = ref.startsWith('###checkLocator')
+        const isCheckLocator = ref.startsWith('###checkLocator');
+        const refForLocator = isCheckLocator
           ? ref.substring('###checkLocator'.length)
           : ref;
         const { locator } = await tab.refLocator({ ref: refForLocator, element });
 
-        // Always generate locator first
-        let generatedLocator = await generateLocator(locator, preferCssSelector ?? false);
-        let locatorType = 'playwright-generated';
-
-        // If generated locator starts with getByText and ref has ###checkTextLocator prefix, use xpath instead
-        if (ref.startsWith('###checkLocator')) {
-          // Get xpath from element using getXPathCode from helperFunctions
-          const xpathCode = getXPathCode();
-          // Use evaluate with code from helperFunctions
-          const xpath = await locator.evaluate((el: Element, code: string) => {
-            const func = new Function('element', code);
-            return func(el);
-          }, xpathCode);
-          // Return XPath in Playwright locator format: locator('xpath=...')
-          const xpathSelector = `xpath=${xpath}`;
-          generatedLocator = asLocator('javascript', xpathSelector);
-          locatorType = 'xpath';
-        }
+        // When ###checkLocator or preferCssSelector, use CSS fallback logic
+        const useCss = isCheckLocator || (preferCssSelector ?? false);
+        const generatedLocator = await generateLocator(locator, useCss);
+        const locatorType = useCss ? 'custom-selector' : 'playwright-generated';
 
         const payload = {
           ref,

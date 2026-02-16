@@ -287,9 +287,7 @@ const checkAlertInSnapshotSchema = z.object({
 const defaultValidationSchema = z.object({
   ref: z.string().optional().describe('Element reference from the page snapshot. Required for element-based validation.'),
   element: z.string().optional().describe('Description of the specific element with the given ref. Required for element-based validation.'),
-  data: z.any().optional().describe('Extracted data to validate. Use variable like ${tableData} which will be substituted with data from browser_evaluate. For data-based validation.'),
   jsCode: z.string().describe('JavaScript code to execute. For element mode: receives "element" parameter (the DOM element). For data mode: receives "data" parameter (the extracted data object/array). Can return simple "pass"/"fail" OR rich object { result: "pass"|"fail", message: "Human readable description", expected: value, actual: value } for better evidence.'),
-  validation_index: z.number().optional().describe('Validation index for batch validations'),
 });
 
 const validateResponseSchema = z.object({
