@@ -38,8 +38,9 @@ export const generate_locator = defineTabTool({
         const { locator } = await tab.refLocator({ ref: refForLocator, element });
 
         // When ###checkLocator or preferCssSelector, use CSS fallback logic
+        // ###checkLocator forces CSS generation regardless of Playwright locator type
         const useCss = isCheckLocator || (preferCssSelector ?? false);
-        const generatedLocator = await generateLocator(locator, useCss);
+        const generatedLocator = await generateLocator(locator, useCss, isCheckLocator);
         const locatorType = useCss ? 'custom-selector' : 'playwright-generated';
 
         const payload = {

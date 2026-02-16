@@ -88,13 +88,14 @@ export function eventWaiter<T>(page: playwright.Page, event: string, timeout: nu
   };
 }
 
-export async function generateLocator(locator: playwright.Locator, preferCssSelector: boolean = false): Promise<string> {
+export async function generateLocator(locator: playwright.Locator, preferCssSelector: boolean = false, forceCss: boolean = false): Promise<string> {
   try {
     const { resolvedSelector } = await (locator as any)._resolveSelector();
     const generated = asLocator('javascript', resolvedSelector);
 
-    // For default_validation: fall back to a more stable CSS/xpath selector when getByText is generated
-    if (preferCssSelector && generated.startsWith('getByText(')) {
+    // forceCss: always generate CSS selector regardless of Playwright locator type (e.g. ###checkLocator)
+    // preferCssSelector: fall back to CSS only when getByText is generated (e.g. default_validation)
+    if (forceCss || (preferCssSelector && generated.startsWith('getByText('))) {
       const fallbackSelector = await locator.evaluate((el: Element) => {
         // 1. Best: id-based selector
         if (el.id)
