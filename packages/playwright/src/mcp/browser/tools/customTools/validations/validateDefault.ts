@@ -16,7 +16,7 @@
 import { expect } from '@zealous-tech/playwright/test';
 import { defineTabTool } from '../../tool';
 import { buildValidationErrorPayload, buildValidationPayload, createValidationEvidence, generateLocatorString, parseValidationResult } from '../helpers/helpers';
-import { ELEMENT_ATTACHED_TIMEOUT, executeDataValidation, parseDataInput } from '../helpers/utils';
+import { ELEMENT_ATTACHED_TIMEOUT} from '../helpers/utils';
 import { defaultValidationSchema } from '../helpers/schemas';
 
 export const default_validation = defineTabTool({
@@ -29,43 +29,7 @@ export const default_validation = defineTabTool({
     type: 'readOnly',
   },
   handle: async (tab, params, response) => {
-    const { ref, element, data, jsCode } = params;
-
-    // ============================================================
-    // MODE 1: DATA-BASED VALIDATION (when data is provided)
-    // ============================================================
-    if (data !== undefined) {
-      try {
-        const parsedData = parseDataInput(data);
-        const result = executeDataValidation(jsCode, parsedData);
-        const validationResult = parseValidationResult(result, 'Data');
-        const dataPreview = typeof parsedData === 'object' ? JSON.stringify(parsedData).substring(0, 200) + '...' : String(parsedData);
-
-        const evidence = [createValidationEvidence('data', jsCode, validationResult.evidenceMessage, {
-          expectedValue: validationResult.expectedValue,
-          actualValue: validationResult.actualValue,
-          dataType: Array.isArray(parsedData) ? 'array' : typeof parsedData,
-        })];
-
-        const payload = buildValidationPayload('data', jsCode, validationResult, evidence, { dataPreview });
-        console.log('Default validation (data mode) executed:', payload);
-        response.addTextResult(JSON.stringify(payload, null, 2));
-        return;
-
-      } catch (error) {
-        const errorMessage = `Failed to execute data validation: ${error instanceof Error ? error.message : String(error)}`;
-        console.error('Default validation (data mode) error:', errorMessage);
-
-        const evidence = [createValidationEvidence('data', jsCode, errorMessage)];
-        const payload = buildValidationErrorPayload('data', jsCode, errorMessage, evidence);
-        response.addTextResult(JSON.stringify(payload, null, 2));
-        return;
-      }
-    }
-
-    // ============================================================
-    // MODE 2: ELEMENT-BASED VALIDATION (when ref is provided)
-    // ============================================================
+    const { ref, element, jsCode } = params;
     if (!ref || !element) {
       const errorMessage = 'Missing required parameters: provide either "data" for data validation, or "ref" + "element" for element validation.';
       const evidence = [createValidationEvidence('element', jsCode, 'Either "data" parameter OR both "ref" and "element" parameters are required.')];
@@ -82,7 +46,7 @@ export const default_validation = defineTabTool({
         try {
           await expect(locator).toBeAttached({ timeout: ELEMENT_ATTACHED_TIMEOUT });
         } catch {
-          const locatorString = await generateLocatorString(ref, locator);
+          const locatorString = await generateLocatorString(ref, locator, true);
           const errorMessage = `The UI Element "${element}" not found`;
           const evidence = [createValidationEvidence('element', jsCode, errorMessage, { element, locatorString })];
           const payload = buildValidationErrorPayload('element', jsCode, 'UI element not found', evidence, { ref, element });
@@ -91,7 +55,7 @@ export const default_validation = defineTabTool({
           return;
         }
 
-        const locatorString = await generateLocatorString(ref, locator);
+        const locatorString = await generateLocatorString(ref, locator, true);
 
         // Execute JavaScript code on the element
         const result = await locator.evaluate((el: Element, code: string) => {
@@ -134,7 +98,7 @@ export const default_validation = defineTabTool({
         let locatorString = '';
         try {
           const { locator } = await tab.refLocator({ ref, element });
-          locatorString = await generateLocatorString(ref, locator);
+          locatorString = await generateLocatorString(ref, locator, true);
         } catch { /* ignore */ }
 
         const errorMessage = `Failed to execute JavaScript code on element "${element}".`;
