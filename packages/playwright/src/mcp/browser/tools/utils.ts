@@ -88,10 +88,74 @@ export function eventWaiter<T>(page: playwright.Page, event: string, timeout: nu
   };
 }
 
-export async function generateLocator(locator: playwright.Locator): Promise<string> {
+export async function generateLocator(locator: playwright.Locator, preferCssSelector: boolean = false): Promise<string> {
   try {
     const { resolvedSelector } = await (locator as any)._resolveSelector();
-    return asLocator('javascript', resolvedSelector);
+    const generated = asLocator('javascript', resolvedSelector);
+
+    // For default_validation: fall back to a more stable CSS/xpath selector when getByText is generated
+    if (preferCssSelector && generated.startsWith('getByText(')) {
+      const fallbackSelector = await locator.evaluate((el: Element) => {
+        // 1. Best: id-based selector
+        if (el.id)
+          return `#${CSS.escape(el.id)}`;
+
+        // 2. data-testid attribute
+        const testId = el.getAttribute('data-testid') || el.getAttribute('data-test-id') || el.getAttribute('data-test');
+        if (testId)
+          return `[data-testid="${testId}"]`;
+
+        // 3. Tag + unique combination of meaningful attributes (name, type, aria-label, role, href)
+        const tag = el.tagName.toLowerCase();
+        const attrs: string[] = [];
+        for (const attr of ['name', 'type', 'aria-label', 'role', 'href', 'for', 'value', 'placeholder', 'title', 'alt']) {
+          const val = el.getAttribute(attr);
+          if (val)
+            attrs.push(`[${attr}="${val}"]`);
+        }
+        if (attrs.length > 0) {
+          const candidate = `${tag}${attrs.join('')}`;
+          // Verify uniqueness in the document
+          if (document.querySelectorAll(candidate).length === 1)
+            return candidate;
+        }
+
+        // 4. Tag + class combination if unique
+        if (el.className && typeof el.className === 'string') {
+          const classes = el.className.trim().split(/\s+/).filter(c => c.length > 0);
+          if (classes.length > 0) {
+            const classSelector = `${tag}.${classes.map(c => CSS.escape(c)).join('.')}`;
+            if (document.querySelectorAll(classSelector).length === 1)
+              return classSelector;
+          }
+        }
+
+        // 5. Last resort: xpath
+        function getXPath(element: Element): string {
+          if (element.id !== '')
+            return '//*[@id="' + element.id + '"]';
+          if (element === document.body)
+            return '/html/body';
+          let ix = 0;
+          const siblings = element.parentNode ? Array.from(element.parentNode.children) : [];
+          for (let i = 0; i < siblings.length; i++) {
+            const sibling = siblings[i];
+            if (sibling === element)
+              return getXPath(element.parentNode as Element) + '/' + element.tagName.toLowerCase() + '[' + (ix + 1) + ']';
+            if (sibling.nodeType === 1 && sibling.tagName === element.tagName)
+              ix++;
+          }
+          return '';
+        }
+        return 'xpath=' + getXPath(el);
+      });
+
+      // If it's an xpath, wrap with the xpath= prefix for asLocator; otherwise treat as CSS
+      const selector = fallbackSelector.startsWith('xpath=') ? fallbackSelector : `css=${fallbackSelector}`;
+      return asLocator('javascript', selector);
+    }
+
+    return generated;
   } catch (e) {
     console.error('Ref not found, likely because element was removed. Use browser_snapshot to see what elements are currently on the page.', e);
     return "UI Element not found";

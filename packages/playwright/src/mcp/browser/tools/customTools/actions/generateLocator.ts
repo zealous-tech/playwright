@@ -29,7 +29,7 @@ export const generate_locator = defineTabTool({
     type: 'readOnly',
   },
   handle: async (tab, params, response) => {
-    const { ref, element } = params;
+    const { ref, element, preferCssSelector } = params;
 
     try {
       await tab.waitForCompletion(async () => {
@@ -41,7 +41,7 @@ export const generate_locator = defineTabTool({
         const { locator } = await tab.refLocator({ ref: refForLocator, element });
 
         // Always generate locator first
-        let generatedLocator = await generateLocator(locator);
+        let generatedLocator = await generateLocator(locator, preferCssSelector ?? false);
         let locatorType = 'playwright-generated';
 
         // If generated locator starts with getByText and ref has ###checkTextLocator prefix, use xpath instead

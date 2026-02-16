@@ -392,6 +392,7 @@ const validateTabExistSchema = z.object({
 const generateLocatorSchema = z.object({
   ref: z.string().describe('Element reference from page snapshot'),
   element: z.string().describe('Human-readable element description for logging'),
+  preferCssSelector: z.boolean().optional().describe('When true, prefer CSS/id-based selectors over Playwright semantic locators for getByText elements'),
 });
 
 const customWaitSchema = z.object({

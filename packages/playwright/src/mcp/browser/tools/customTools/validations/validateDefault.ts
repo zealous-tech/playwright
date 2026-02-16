@@ -82,7 +82,7 @@ export const default_validation = defineTabTool({
         try {
           await expect(locator).toBeAttached({ timeout: ELEMENT_ATTACHED_TIMEOUT });
         } catch {
-          const locatorString = await generateLocatorString(ref, locator);
+          const locatorString = await generateLocatorString(ref, locator, true);
           const errorMessage = `The UI Element "${element}" not found`;
           const evidence = [createValidationEvidence('element', jsCode, errorMessage, { element, locatorString })];
           const payload = buildValidationErrorPayload('element', jsCode, 'UI element not found', evidence, { ref, element });
@@ -91,7 +91,7 @@ export const default_validation = defineTabTool({
           return;
         }
 
-        const locatorString = await generateLocatorString(ref, locator);
+        const locatorString = await generateLocatorString(ref, locator, true);
 
         // Execute JavaScript code on the element
         const result = await locator.evaluate((el: Element, code: string) => {
@@ -134,7 +134,7 @@ export const default_validation = defineTabTool({
         let locatorString = '';
         try {
           const { locator } = await tab.refLocator({ ref, element });
-          locatorString = await generateLocatorString(ref, locator);
+          locatorString = await generateLocatorString(ref, locator, true);
         } catch { /* ignore */ }
 
         const errorMessage = `Failed to execute JavaScript code on element "${element}".`;

@@ -74,13 +74,13 @@ function getAlertDialogText(snapshotContent: string): string | null {
  * If ref starts with ###code, extracts the code directly
  * Otherwise, generates locator string using generateLocator
  */
-async function generateLocatorString(ref: string, locator: any): Promise<string> {
+async function generateLocatorString(ref: string, locator: any, preferCssSelector: boolean = false): Promise<string> {
   const isLocatorCode = ref && ref.startsWith('###code');
   if (isLocatorCode) {
     const locatorCode = ref.match(/###code(.+)/)?.[1]?.trim() || '';
     return locatorCode || '';
   }
-  return await generateLocator(locator);
+  return await generateLocator(locator, preferCssSelector);
 }
 
 
