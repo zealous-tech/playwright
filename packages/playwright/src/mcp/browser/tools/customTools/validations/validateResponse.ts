@@ -71,13 +71,25 @@ export const validate_response = defineTabTool({
       return;
     }
 
+    // jsonpath requires an object; for primitives (number, string, boolean), path $ = root value
+    const isPrimitive =
+      typeof parsedResponseData !== 'object' || parsedResponseData === null;
+
     // Perform all checks
     const results = checks.map(check => {
       try {
-        // Extract value using JSON path
         const normalizedPath = check.jsonPath.startsWith('$') ? check.jsonPath : `$.${check.jsonPath}`;
-        const queryResult = jp.query(parsedResponseData, normalizedPath);
-        const actualValue = queryResult.length === 1 ? queryResult[0] : queryResult;
+        let actualValue: unknown;
+        if (isPrimitive) {
+          // Primitive root: $ or $. returns the value itself
+          actualValue =
+            normalizedPath === '$' || normalizedPath === '$.'
+              ? parsedResponseData
+              : undefined;
+        } else {
+          const queryResult = jp.query(parsedResponseData, normalizedPath);
+          actualValue = queryResult.length === 1 ? queryResult[0] : queryResult;
+        }
 
         // Compare values if expected is provided
         let passed = true;
@@ -101,7 +113,7 @@ export const validate_response = defineTabTool({
           jsonPath: check.jsonPath,
           expected: check.expected,
           operator: check.operator,
-          actual: `ERROR: ${error.message}`,
+          actual: `ERROR: ${error instanceof Error ? error.message : String(error)}`,
           result: 'fail',
         };
       }
