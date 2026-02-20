@@ -17,7 +17,7 @@ import { promisify } from 'util';
 import { expect } from '@zealous-tech/playwright/test';
 import { execFile } from 'child_process';
 import { generateLocator } from '../../utils.js';
-import { applyArrayFilter, compareValues, parseCurlStderr } from './utils.js';
+import { applyArrayFilter, compareValues, parseCurlStderr, ELEMENT_ATTACHED_TIMEOUT } from './utils.js';
 import { ParsedCurlResponse, ValidationPayload, ValidationResult } from '../common/common.js';
 
 async function getAllComputedStylesDirect(
@@ -457,43 +457,89 @@ async function checkElementVisibilityUnique(page: any, role: string, accessibleN
 /**
  * Check text visibility with parallel recursive search across all frames
  * Returns all search results without counting logic
+ * Uses expect with timeout for autowait functionality
+ * Optimized: waits for first successful result from any frame and returns immediately
  */
-async function checkTextExistenceInAllFrames(page: any, text: string, matchType: 'exact' | 'contains' | 'not-contains' = 'contains') {
-  const searchPromises = [];
+type MatchType = 'exact' | 'contains' | 'not-contains';
 
-  const mainLocator =
+type FrameResult = {
+  found: boolean;
+  count: number;
+  frame: string;
+  level: number;
+};
+
+async function checkTextExistenceInAllFrames(
+  page: any,
+  text: string,
+  matchType: MatchType = 'contains',
+  timeout: number = ELEMENT_ATTACHED_TIMEOUT
+): Promise<FrameResult[]> {
+
+  const early = createEarlyResolve<FrameResult>();
+  const allChecks: Promise<FrameResult>[] = [];
+
+  const createLocator = (ctx: any) =>
     matchType === 'exact'
-      ? page.getByText(text, { exact: true })
-      : page.getByText(text);
+      ? ctx.getByText(text, { exact: true })
+      : ctx.getByText(text);
 
-  searchPromises.push(
-      mainLocator.count().then((count: number) => ({
-        found: count > 0,
-        count,
-        frame: 'main',
-        level: 0,
-      }))
-  );
+  const checkFrame = async (
+    locator: any,
+    frame: string,
+    level: number
+  ): Promise<FrameResult> => {
+    try {
+      if (matchType === 'not-contains') {
+        await expect(locator).toHaveCount(0, { timeout });
+        return { found: false, count: 0, frame, level };
+      }
 
-  const allFrames = await collectAllFrames(page, 0);
+      await expect(locator.first()).toBeVisible({ timeout });
+      const count = await locator.count();
 
-  for (const frameInfo of allFrames) {
-    const frameLocator =
-      matchType === 'exact'
-        ? frameInfo.frame.getByText(text, { exact: true })
-        : frameInfo.frame.getByText(text);
+      const result = { found: true, count, frame, level };
+      early.resolve(result); // immediate success
+      return result;
 
-    searchPromises.push(
-        frameLocator.count().then((count: number) => ({
-          found: count > 0,
-          count,
-          frame: frameInfo.name,
-          level: frameInfo.level,
-        }))
-    );
+    } catch {
+      const count = await locator.count().catch(() => 0);
+      return { found: false, count, frame, level };
+    }
+  };
+
+  // ---- Main frame ----
+  allChecks.push(checkFrame(createLocator(page), 'main', 0));
+
+  // ---- Child frames ----
+  const frames = await collectAllFrames(page, 0);
+
+  for (const { frame, name, level } of frames)
+    allChecks.push(checkFrame(createLocator(frame), name, level));
+
+  // ---- Early exit for contains/exact ----
+  if (matchType !== 'not-contains') {
+    const winner = await Promise.race([
+      early.promise,
+      Promise.all(allChecks).then(() => null)
+    ]);
+
+    if (winner)
+      return [winner];
   }
 
-  return Promise.all(searchPromises);
+  // ---- Fallback: wait for all ----
+  return Promise.all(allChecks);
+}
+
+function createEarlyResolve<T>() {
+  let resolve!: (value: T) => void;
+
+  const promise = new Promise<T>(res => {
+    resolve = res;
+  });
+
+  return { promise, resolve };
 }
 
 /**
