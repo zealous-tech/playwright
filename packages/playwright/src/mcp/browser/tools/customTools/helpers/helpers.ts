@@ -17,7 +17,7 @@ import { promisify } from 'util';
 import { expect } from '@zealous-tech/playwright/test';
 import { execFile } from 'child_process';
 import { generateLocator } from '../../utils.js';
-import { applyArrayFilter, compareValues, parseCurlStderr } from './utils.js';
+import { applyArrayFilter, compareValues, parseCurlStderr, ELEMENT_ATTACHED_TIMEOUT } from './utils.js';
 import { ParsedCurlResponse, ValidationPayload, ValidationResult } from '../common/common.js';
 
 async function getAllComputedStylesDirect(
@@ -457,24 +457,42 @@ async function checkElementVisibilityUnique(page: any, role: string, accessibleN
 /**
  * Check text visibility with parallel recursive search across all frames
  * Returns all search results without counting logic
+ * Uses expect with timeout for autowait functionality
+ * Optimized: waits for first successful result from any frame and returns immediately
  */
-async function checkTextExistenceInAllFrames(page: any, text: string, matchType: 'exact' | 'contains' | 'not-contains' = 'contains') {
-  const searchPromises = [];
+async function checkTextExistenceInAllFrames(page: any, text: string, matchType: 'exact' | 'contains' | 'not-contains' = 'contains', timeout: number = ELEMENT_ATTACHED_TIMEOUT) {
+  const searchPromises: Promise<{ found: boolean; count: number; frame: string; level: number }>[] = [];
 
   const mainLocator =
     matchType === 'exact'
       ? page.getByText(text, { exact: true })
       : page.getByText(text);
 
-  searchPromises.push(
-      mainLocator.count().then((count: number) => ({
-        found: count > 0,
-        count,
-        frame: 'main',
-        level: 0,
-      }))
-  );
+  // Create promise for main frame
+  if (matchType === 'not-contains') {
+    searchPromises.push(
+        expect(mainLocator).toHaveCount(0, { timeout })
+            .then(() => ({ found: false, count: 0, frame: 'main', level: 0 }))
+            .catch(async () => {
+              const count = await mainLocator.count();
+              return { found: true, count, frame: 'main', level: 0 };
+            })
+    );
+  } else {
+    searchPromises.push(
+        expect(mainLocator.first()).toBeVisible({ timeout })
+            .then(async () => {
+              const count = await mainLocator.count();
+              return { found: true, count, frame: 'main', level: 0 };
+            })
+            .catch(async () => {
+              const count = await mainLocator.count();
+              return { found: false, count, frame: 'main', level: 0 };
+            })
+    );
+  }
 
+  // Collect all frames and create promises for each
   const allFrames = await collectAllFrames(page, 0);
 
   for (const frameInfo of allFrames) {
@@ -483,17 +501,75 @@ async function checkTextExistenceInAllFrames(page: any, text: string, matchType:
         ? frameInfo.frame.getByText(text, { exact: true })
         : frameInfo.frame.getByText(text);
 
-    searchPromises.push(
-        frameLocator.count().then((count: number) => ({
-          found: count > 0,
-          count,
-          frame: frameInfo.name,
-          level: frameInfo.level,
-        }))
-    );
+    if (matchType === 'not-contains') {
+      searchPromises.push(
+          expect(frameLocator).toHaveCount(0, { timeout })
+              .then(() => ({ found: false, count: 0, frame: frameInfo.name, level: frameInfo.level }))
+              .catch(async () => {
+                const count = await frameLocator.count();
+                return { found: true, count, frame: frameInfo.name, level: frameInfo.level };
+              })
+      );
+    } else {
+      searchPromises.push(
+          expect(frameLocator.first()).toBeVisible({ timeout })
+              .then(async () => {
+                const count = await frameLocator.count();
+                return { found: true, count, frame: frameInfo.name, level: frameInfo.level };
+              })
+              .catch(async () => {
+                const count = await frameLocator.count();
+                return { found: false, count, frame: frameInfo.name, level: frameInfo.level };
+              })
+      );
+    }
   }
 
-  return Promise.all(searchPromises);
+  // Wait for first successful result from any frame
+  // For contains/exact: success = found === true (text found)
+  // For not-contains: success = found === true (text found when it shouldn't be)
+  const successCondition = (result: { found: boolean }) => result.found === true;
+
+  // Wrap promises to track first success
+  let firstSuccess: { found: boolean; count: number; frame: string; level: number } | null = null;
+  let successResolve: ((value: { found: boolean; count: number; frame: string; level: number }) => void) | null = null;
+  
+  const successPromise = new Promise<{ found: boolean; count: number; frame: string; level: number }>((resolve) => {
+    successResolve = resolve;
+  });
+
+  // Monitor all promises for first success
+  const monitoredPromises = searchPromises.map(promise => 
+    promise.then(result => {
+      if (successCondition(result) && successResolve && !firstSuccess) {
+        firstSuccess = result;
+        successResolve(result);
+      }
+      return result;
+    })
+  );
+
+  // Race between first success and all promises
+  try {
+    const result = await Promise.race([
+      successPromise,
+      Promise.all(monitoredPromises).then(results => {
+        // Check if any result is successful
+        const successfulResult = results.find(successCondition);
+        return successfulResult || null;
+      })
+    ]);
+
+    if (result) {
+      return [result];
+    }
+  } catch (error) {
+    // Fall through
+  }
+
+  // If no successful result found, return all results
+  const allResults = await Promise.all(searchPromises);
+  return allResults;
 }
 
 /**
