@@ -21,15 +21,44 @@ interface LogType {
     };
 }
 
+interface FieldFilter {
+    name: string;
+    value?: string;
+    matchType: 'is_equal' | 'contains' | 'exists';
+}
+
+interface BodyFieldFilter {
+    fieldPath: string;
+    value?: string;
+    matchType: 'is_equal' | 'contains' | 'exists';
+}
+
 type Input = {
-    method?: string;   // e.g. "GET" (case-sensitive, exact match on token)
-    url?: string;      // substring or /regex/ against full URL
-    endpoint?: string; // substring or /regex/ against pathname+search
+    method?: string;
+    url?: string;
+    endpoint?: string;
     keywords?: string[];
     logType?: LogType;
+    index?: 'first' | 'last' | number;
+    queryParams?: FieldFilter[];
+    requestHeaders?: FieldFilter[];
+    responseHeaders?: FieldFilter[];
+    requestBodyFields?: BodyFieldFilter[];
+    responseBodyFields?: BodyFieldFilter[];
 };
 
 
+const fieldFilterSchema = z.object({
+    name: z.string().describe('Name of the field (header name or query parameter name)'),
+    value: z.string().optional().describe('Value to match against (not required for "exists" matchType)'),
+    matchType: z.enum(['is_equal', 'contains', 'exists']).describe('"is_equal" for exact match, "contains" for substring match, "exists" to check if the header/param is present'),
+});
+
+const bodyFieldFilterSchema = z.object({
+    fieldPath: z.string().describe('Dot-notation path to the field in JSON body (e.g., "data.userId", "items[0].name")'),
+    value: z.string().optional().describe('Value to match against (not required for "exists" matchType)'),
+    matchType: z.enum(['is_equal', 'contains', 'exists']).describe('"is_equal" for exact match, "contains" for substring match, "exists" to check field presence'),
+});
 
 export const otto_requests = defineTabTool({
     capability: 'core',
@@ -38,7 +67,7 @@ export const otto_requests = defineTabTool({
         name: 'otto_browser_network_requests',
         title: 'Find specific network request',
         description:
-            'Search network request logs and return the LATEST matching entry that satisfies structured filters (method/url/endpoint) AND contains ALL specified keywords. URL and endpoint filters support RegExp when wrapped in /pattern/flags (e.g. "/\\/v1\\/resources$/"). Keywords are searched across method, URL, headers, and bodies (case-sensitive). Use logType to control which fields are included in the output.',
+            'Search network request logs and return a matching entry that satisfies structured filters (method/url/endpoint/queryParams/headers/bodyFields) AND contains ALL specified keywords. URL and endpoint filters support RegExp when wrapped in /pattern/flags (e.g. "/\\/v1\\/resources$/"). Keywords are searched across method, URL, headers, and bodies (case-sensitive). Use logType to control which fields are included in the output. Use index to select which match to return (default: last/newest).',
         inputSchema: z.object({
             method: z
                 .string()
@@ -73,6 +102,30 @@ export const otto_requests = defineTabTool({
                 })
                 .optional()
                 .describe('Controls what information to include in the output. If not provided, includes nothing.'),
+            index: z
+                .union([z.enum(['first', 'last']), z.number().int().min(0)])
+                .optional()
+                .describe('Select which matching request to return. "first" = oldest match, "last" = newest match (default behavior when omitted), or a 0-based index into the list of matched results sorted oldest-to-newest.'),
+            queryParams: z
+                .array(fieldFilterSchema)
+                .optional()
+                .describe('Filter by URL query parameters. ALL conditions must match. Supports "is_equal", "contains", and "exists" match types. Use "exists" to check param presence without matching a value.'),
+            requestHeaders: z
+                .array(fieldFilterSchema)
+                .optional()
+                .describe('Filter by request headers. ALL conditions must match. Header name matching is case-insensitive. Supports "is_equal", "contains", and "exists" match types. Use "exists" to check header presence without matching a value.'),
+            responseHeaders: z
+                .array(fieldFilterSchema)
+                .optional()
+                .describe('Filter by response headers. ALL conditions must match. Header name matching is case-insensitive. Supports "is_equal", "contains", and "exists" match types. Use "exists" to check header presence without matching a value.'),
+            requestBodyFields: z
+                .array(bodyFieldFilterSchema)
+                .optional()
+                .describe('Filter by fields in the request JSON body. ALL conditions must match. Use dot-notation for nested paths (e.g., "data.userId"). Supports "is_equal", "contains", and "exists" match types.'),
+            responseBodyFields: z
+                .array(bodyFieldFilterSchema)
+                .optional()
+                .describe('Filter by fields in the response JSON body. ALL conditions must match. Use dot-notation for nested paths (e.g., "data.items[0].id"). Supports "is_equal", "contains", and "exists" match types.'),
         }),
         type: 'readOnly',
     },
@@ -85,6 +138,12 @@ export const otto_requests = defineTabTool({
             url: urlFilter,
             endpoint: endpointFilter,
             keywords = [],
+            index: indexParam,
+            queryParams: queryParamsFilter = [],
+            requestHeaders: reqHeadersFilter = [],
+            responseHeaders: resHeadersFilter = [],
+            requestBodyFields: reqBodyFieldsFilter = [],
+            responseBodyFields: resBodyFieldsFilter = [],
         } = params;
 
         const logType: LogType =
@@ -98,37 +157,125 @@ export const otto_requests = defineTabTool({
         const endpointNorm = endpointFilter?.trim();
         const keywordsNorm = keywords.map((k) => k);
 
+        const hasAdvancedFilters =
+            queryParamsFilter.length > 0 ||
+            reqHeadersFilter.length > 0 ||
+            resHeadersFilter.length > 0 ||
+            reqBodyFieldsFilter.length > 0 ||
+            resBodyFieldsFilter.length > 0;
+
+        const needsCollectAll = indexParam !== undefined || hasAdvancedFilters;
+
         const resolvedRequests = [...await allRequests];
-        for (let i = resolvedRequests.length - 1; i >= 0; i--) {
-            const req = resolvedRequests[i];
-            if (!matchesStructuredFilters(req, methodNorm, urlNorm, endpointNorm)) {
-                continue;
-            }
-            const res = await req.response().catch(() => null);
-            if (keywordsNorm.length === 0) {
-                const out = await safeRender(req, res, logType);
-                if (hasBodyError(out))
+
+        if (!needsCollectAll) {
+            // Fast path: original behavior — iterate backwards, return first (latest) match
+            for (let i = resolvedRequests.length - 1; i >= 0; i--) {
+                const req = resolvedRequests[i];
+                if (!matchesStructuredFilters(req, methodNorm, urlNorm, endpointNorm))
                     continue;
-                response.addResult({ text: out });
-                return;
+
+                const res = await req.response().catch(() => null);
+
+                if (keywordsNorm.length === 0) {
+                    const out = await safeRender(req, res, logType);
+                    if (hasBodyError(out))
+                        continue;
+                    response.addResult({ text: out });
+                    return;
+                }
+
+                try {
+                    const detailed = await renderRequestDetailed(req, res, logType);
+                    if (hasBodyError(detailed))
+                        continue;
+                    if (containsAllKeywords(detailed, keywordsNorm)) {
+                        response.addResult({ text: detailed });
+                        return;
+                    }
+                } catch {
+                    const basic = renderRequest(req, res);
+                    if (containsAllKeywords(basic, keywordsNorm)) {
+                        response.addResult({ text: basic });
+                        return;
+                    }
+                }
+            }
+        } else {
+            // Collect-all path: apply all filters, collect matches, then select by index
+            const matches: Array<{ req: playwright.Request; res: playwright.Response | null; rendered: string }> = [];
+
+            for (const req of resolvedRequests) {
+                if (!matchesStructuredFilters(req, methodNorm, urlNorm, endpointNorm))
+                    continue;
+
+                if (queryParamsFilter.length > 0 && !matchesQueryParams(req, queryParamsFilter))
+                    continue;
+
+                if (reqHeadersFilter.length > 0 && !matchesFieldFilters(req.headers(), reqHeadersFilter))
+                    continue;
+
+                if (reqBodyFieldsFilter.length > 0) {
+                    let postData: string | null;
+                    try {
+                        postData = req.postData();
+                    } catch {
+                        continue;
+                    }
+                    if (!matchesBodyFieldFilters(postData, reqBodyFieldsFilter))
+                        continue;
+                }
+
+                const res = await req.response().catch(() => null);
+
+                if (resHeadersFilter.length > 0) {
+                    if (!res) continue;
+                    const headers = await res.allHeaders().catch(() => ({}));
+                    if (!matchesFieldFilters(headers, resHeadersFilter))
+                        continue;
+                }
+
+                if (resBodyFieldsFilter.length > 0) {
+                    if (!res) continue;
+                    const bodyText = await res.text().catch(() => null);
+                    if (!matchesBodyFieldFilters(bodyText, resBodyFieldsFilter))
+                        continue;
+                }
+
+                let rendered: string;
+                if (keywordsNorm.length > 0) {
+                    try {
+                        rendered = await renderRequestDetailed(req, res, logType);
+                        if (hasBodyError(rendered)) continue;
+                        if (!containsAllKeywords(rendered, keywordsNorm)) continue;
+                    } catch {
+                        rendered = renderRequest(req, res);
+                        if (!containsAllKeywords(rendered, keywordsNorm)) continue;
+                    }
+                } else {
+                    rendered = await safeRender(req, res, logType);
+                    if (hasBodyError(rendered)) continue;
+                }
+
+                matches.push({ req, res, rendered });
             }
 
-            try {
-                const detailed = await renderRequestDetailed(req, res, logType);
-                if (hasBodyError(detailed))
-                    continue;
-                const hasAll = containsAllKeywords(detailed, keywordsNorm);
-                if (hasAll) {
-                    response.addResult({ text: detailed });
-                    return;
+            if (matches.length > 0) {
+                let selectedIdx: number;
+                if (indexParam === undefined || indexParam === 'last') {
+                    selectedIdx = matches.length - 1;
+                } else if (indexParam === 'first') {
+                    selectedIdx = 0;
+                } else {
+                    selectedIdx = indexParam;
+                    if (selectedIdx < 0 || selectedIdx >= matches.length) {
+                        throw new RequestsNotFound(
+                            `Index ${selectedIdx} is out of range. Found ${matches.length} matching request(s) (valid indices: 0-${matches.length - 1}).`
+                        );
+                    }
                 }
-            } catch {
-                const basic = renderRequest(req, res);
-                const hasAll = containsAllKeywords(basic, keywordsNorm);
-                if (hasAll) {
-                    response.addResult({ text: basic });
-                    return;
-                }
+                response.addResult({ text: matches[selectedIdx].rendered });
+                return;
             }
         }
 
@@ -137,12 +284,24 @@ export const otto_requests = defineTabTool({
         if (urlFilter) parts.push(`url~="${urlFilter}"`);
         if (endpointFilter) parts.push(`endpoint~="${endpointFilter}"`);
         if (keywords.length > 0) parts.push(`keywords=[${keywords.join(', ')}]`);
+        if (queryParamsFilter.length > 0)
+            parts.push(`queryParams=[${queryParamsFilter.map(f => `${f.name}${f.matchType === 'is_equal' ? '=' : '~='}${f.value}`).join(', ')}]`);
+        if (reqHeadersFilter.length > 0)
+            parts.push(`requestHeaders=[${reqHeadersFilter.map(f => `${f.name}${f.matchType === 'is_equal' ? '=' : '~='}${f.value}`).join(', ')}]`);
+        if (resHeadersFilter.length > 0)
+            parts.push(`responseHeaders=[${resHeadersFilter.map(f => `${f.name}${f.matchType === 'is_equal' ? '=' : '~='}${f.value}`).join(', ')}]`);
+        if (reqBodyFieldsFilter.length > 0)
+            parts.push(`requestBodyFields=[${reqBodyFieldsFilter.map(f => `${f.fieldPath}:${f.matchType}`).join(', ')}]`);
+        if (resBodyFieldsFilter.length > 0)
+            parts.push(`responseBodyFields=[${resBodyFieldsFilter.map(f => `${f.fieldPath}:${f.matchType}`).join(', ')}]`);
 
         throw new RequestsNotFound(
             `No network requests found that match filters (${parts.join(', ') || 'none'}) and contain ALL keywords.`
         );
     },
 });
+
+// ─── Structured filter helpers (original) ────────────────────────────────────
 
 const REGEX_META = /[$^*+?.()|\\{}\[\]]/;
 
@@ -193,6 +352,76 @@ function matchesStructuredFilters(
     return true;
 }
 
+// ─── New filter helpers ──────────────────────────────────────────────────────
+
+function matchFieldValue(actual: string, expected: string, matchType: 'is_equal' | 'contains' | 'exists'): boolean {
+    if (matchType === 'exists') return true;
+    if (matchType === 'is_equal') return actual === expected;
+    if (matchType === 'contains') return actual.includes(expected);
+    return false;
+}
+
+function matchesQueryParams(request: playwright.Request, filters: FieldFilter[]): boolean {
+    let url: URL;
+    try {
+        url = new URL(request.url());
+    } catch {
+        return false;
+    }
+    return filters.every(filter => {
+        const paramValues = url.searchParams.getAll(filter.name);
+        if (paramValues.length === 0) return false;
+        if (filter.matchType === 'exists') return true;
+        return paramValues.some(val => matchFieldValue(val, filter.value ?? '', filter.matchType));
+    });
+}
+
+function matchesFieldFilters(headers: Record<string, string>, filters: FieldFilter[]): boolean {
+    return filters.every(filter => {
+        const targetName = filter.name.toLowerCase();
+        const headerValue = Object.entries(headers).find(
+            ([key]) => key.toLowerCase() === targetName
+        )?.[1];
+        if (headerValue === undefined) return false;
+        if (filter.matchType === 'exists') return true;
+        return matchFieldValue(headerValue, filter.value ?? '', filter.matchType);
+    });
+}
+
+function resolveFieldPath(obj: unknown, path: string): { found: boolean; value: unknown } {
+    const parts = path.replace(/\[(\d+)\]/g, '.$1').split('.');
+    let current: unknown = obj;
+    for (const part of parts) {
+        if (current == null || typeof current !== 'object')
+            return { found: false, value: undefined };
+        if (!(part in (current as Record<string, unknown>)))
+            return { found: false, value: undefined };
+        current = (current as Record<string, unknown>)[part];
+    }
+    return { found: true, value: current };
+}
+
+function matchesBodyFieldFilters(bodyText: string | null, filters: BodyFieldFilter[]): boolean {
+    if (!bodyText) return filters.length === 0;
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(bodyText);
+    } catch {
+        return false;
+    }
+    return filters.every(filter => {
+        const { found, value } = resolveFieldPath(parsed, filter.fieldPath);
+        if (filter.matchType === 'exists') return found;
+        if (!found) return false;
+        const strValue = typeof value === 'string' ? value : JSON.stringify(value);
+        if (filter.matchType === 'is_equal') return strValue === (filter.value ?? '');
+        if (filter.matchType === 'contains') return strValue.includes(filter.value ?? '');
+        return false;
+    });
+}
+
+// ─── Render helpers (original) ───────────────────────────────────────────────
+
 function hasBodyError(rendered: string): boolean {
     return rendered.includes('[Error accessing body:');
 }
@@ -220,7 +449,6 @@ async function safeRender(
     try {
         return await renderRequestDetailed(request, response, logType);
     } catch (error) {
-        // Fallback to basic JSON structure with error info
         return JSON.stringify({
             method: request.method().toUpperCase(),
             url: request.url(),
@@ -254,7 +482,6 @@ async function renderRequestDetailed(
         responseBody: null,
     };
 
-    // Include request headers if specified in logType
     if (logType.request.headers) {
         const requestHeaders = request.headers();
         if (Object.keys(requestHeaders).length > 0) {
@@ -262,7 +489,6 @@ async function renderRequestDetailed(
         }
     }
 
-    // Include request body if specified in logType
     if (logType.request.body) {
         try {
             const requestBody = request.postData();
@@ -274,7 +500,6 @@ async function renderRequestDetailed(
         }
     }
 
-    // Include response headers if specified in logType
     if (response && logType.response.headers) {
         try {
             const responseHeaders = await response.allHeaders();
@@ -286,7 +511,6 @@ async function renderRequestDetailed(
         }
     }
 
-    // Include response body if specified in logType
     if (response && logType.response.body) {
         try {
             const responseBody = await response.text();
