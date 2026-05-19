@@ -18,6 +18,7 @@ export { validate_alert_in_snapshot } from './validateAlertInSnapshot';
 export { validate_computed_styles } from './validateComputedStyles';
 export { validate_dom_assertions } from './validateDomAssertions';
 export { validate_element_in_whole_page } from './validateElementInWholePage';
+export { validate_element_visibility } from './validateElementVisibility';
 export { validate_element_order } from './validateElementOrder';
 export { validate_element_position } from './validateElementPosition';
 export { validate_icon } from './validateIcon';

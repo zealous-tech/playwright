@@ -538,7 +538,7 @@ function resolveLocator(frame: any, locator: string) {
     trimmed.startsWith('locator(')
   ) {
     try {
-      return eval(`frame.${trimmed}`);
+      return new Function('frame', `return frame.${trimmed}`)(frame);
     } catch {
       throw new Error(`Invalid locator expression: ${locator}`);
     }

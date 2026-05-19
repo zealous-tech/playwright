@@ -338,6 +338,18 @@ const validateElementInWholePageSchema = z.object({
   ),
 });
 
+const validateElementVisibilitySchema = z.object({
+  element: z.string().describe(
+      'Human-readable element description used to obtain permission to interact with the element'
+  ),
+  locator: z.string().describe(
+      'Playwright locator expression — must start with "getBy" or "locator(". Prefer semantic "getBy" locators: getByRole(\'button\', { name: \'Submit\' }), getByText(\'Hello\'), getByLabel(\'Email\'). Fall back to locator() with a CSS selector only when no suitable getBy exists: locator(\'#my-id\'), locator(\'.my-class\').'
+  ),
+  visibility: z.enum(['visible', 'not-visible']).default('visible').describe(
+      "Visibility check: 'visible' checks that the element is visible at least once (main page or any iframe); 'not-visible' checks that it does not appear in any frame"
+  ),
+});
+
 const dataExtractionSchema = z.object({
   name: z.string().describe('Variable name (will be prefixed with $$)'),
   data: z.string().describe('Data to extract from. If jsonPath is provided, should be JSON string. If jsonPath is not provided, can be any string data'),
@@ -660,6 +672,7 @@ export {
   validateExpandedSchema,
   validateTextInWholePageSchema,
   validateElementInWholePageSchema,
+  validateElementVisibilitySchema,
   dataExtractionSchema,
   waitSchema,
   validateElementPositionSchema,
