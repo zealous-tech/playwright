@@ -148,6 +148,7 @@ async function runCommand(command: string): Promise<{ stdout: string; stderr: st
     '-X', '--request',
     '-H', '--header',
     '-I', '--head',
+    '-G', '--get',
     '-s', '--silent', '--no-progress-meter',
     '--compressed',
     '-L', '--location',
