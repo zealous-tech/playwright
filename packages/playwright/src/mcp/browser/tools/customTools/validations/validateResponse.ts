@@ -15,7 +15,7 @@
  */
 import * as jp from 'jsonpath';
 import { defineTabTool } from '../../tool';
-import { compareValues } from '../helpers/helpers';
+import { compareValues, evaluateWildcardPath } from '../helpers/helpers';
 import { validateResponseSchema } from '../helpers/schemas';
 
 export const validate_response = defineTabTool({
@@ -83,6 +83,11 @@ export const validate_response = defineTabTool({
           : check.jsonPath.startsWith('[')
             ? `$${check.jsonPath}`
             : `$.${check.jsonPath}`;
+
+        const wildcardIndex = normalizedPath.indexOf('[*]');
+        if (wildcardIndex !== -1) {
+          return evaluateWildcardPath(parsedResponseData, normalizedPath, wildcardIndex, check);
+        }
 
         let actualValue: unknown;
         if (isPrimitive) {
