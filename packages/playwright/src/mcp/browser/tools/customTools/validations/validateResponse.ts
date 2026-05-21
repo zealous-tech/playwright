@@ -182,7 +182,10 @@ export const validate_response = defineTabTool({
       command: JSON.stringify({
         toolName: 'validate_response',
         arguments: {
-          checks: checks
+          checks: checks.map((check, i) => ({
+            ...check,
+            actual: results[i]?.actual,
+          }))
         }
       }),
       message: evidenceMessage
