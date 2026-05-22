@@ -415,6 +415,23 @@ const generateLocatorSchema = z.object({
   preferCssSelector: z.boolean().optional().describe('When true, prefer CSS/id-based selectors over Playwright semantic locators for getByText elements'),
 });
 
+const verifyReusableLocatorsSchema = z.object({
+  candidates: z
+    .array(
+      z.object({
+        id: z.string().describe('Stable identifier for this candidate'),
+        locator: z
+          .string()
+          .describe(
+            'Playwright locator string: CSS selector, or expression starting with getBy… or locator(…), evaluated on the active page (same rules as validation tools)',
+          ),
+      }),
+    )
+    .min(1)
+    .max(5)
+    .describe('Ordered candidates; the first that resolves and matches at least one attached element wins'),
+});
+
 const customWaitSchema = z.object({
   time: z.number().optional().describe('Maximum time to wait in seconds for text to appear/disappear. If not provided, default actionTimeout is used'),
   text: z.string().optional().describe('The text to wait for'),
@@ -682,6 +699,7 @@ export {
   validateTabExistSchema,
   validateTabCountSchema,
   generateLocatorSchema,
+  verifyReusableLocatorsSchema,
   customWaitSchema,
   ottoClickSchema,
   sectionSchema,

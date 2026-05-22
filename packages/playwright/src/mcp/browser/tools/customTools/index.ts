@@ -49,6 +49,7 @@ import {
   hover_map_section,
   select_map_seat,
   hover_map_seat,
+  verify_reusable_locators,
 } from './actions';
 
 export default [
@@ -85,4 +86,5 @@ export default [
   select_map_seat,
   hover_map_seat,
   validate_seat_section_on_map,
+  verify_reusable_locators,
 ];

@@ -531,7 +531,7 @@ async function checkLocatorVisibilityInAllFrames(
   return Promise.all(allChecks);
 }
 
-function resolveLocator(frame: any, locator: string) {
+export function resolveLocator(frame: any, locator: string) {
   const trimmed = locator.trim();
   if (
     trimmed.startsWith('getBy') ||
