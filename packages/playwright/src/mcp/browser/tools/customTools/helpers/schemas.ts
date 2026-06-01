@@ -429,6 +429,14 @@ const ottoClickSchema = z.object({
   modifiers: z.array(z.enum(['Alt', 'Control', 'ControlOrMeta', 'Meta', 'Shift'])).optional().describe('Modifier keys to press'),
 });
 
+const slideSchema = z.object({
+  element: z.string().describe('Human-readable element description used to obtain permission to interact with the element'),
+  ref: z.string().describe('Exact target element reference from the page snapshot'),
+  relativeChange: z.number().optional().describe('Amount to change the slider value by. Use this for relative adjustments (e.g. for "increase by 10" use 10, for "decrease by 5" use -5).'),
+  value: z.number().optional().describe('The exact absolute final value to set the slider to.'),
+  moveTo: z.enum(['start', 'end']).optional().describe('Slide to the absolute minimum ("start") or maximum ("end") bounds of the slider.')
+});
+
 // Union schema for all assertion arguments
 const assertionArgumentsSchema = z.discriminatedUnion('assertionType', [
   z.object({ assertionType: z.literal('toBeAttached'), ...toBeAttachedArgsSchema.shape }),
@@ -684,6 +692,7 @@ export {
   generateLocatorSchema,
   customWaitSchema,
   ottoClickSchema,
+  slideSchema,
   sectionSchema,
   seatSchema,
   validateMapNodeSchema,
