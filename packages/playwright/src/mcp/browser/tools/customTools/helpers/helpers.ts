@@ -142,7 +142,7 @@ async function runCommand(command: string): Promise<{ stdout: string; stderr: st
   const CURL_PATTERN = /curl```([\s\S]*?)```/i;
   const execFileAsync = promisify(execFile);
 
-  const SHELL_META = /[|&;><`]/;
+  const SHELL_META = /[|&><`]/;
 
   const ALLOWED_FLAGS = new Set<string>([
     '-X', '--request',
