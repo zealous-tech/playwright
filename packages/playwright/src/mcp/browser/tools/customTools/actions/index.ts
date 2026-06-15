@@ -32,3 +32,4 @@ export { hover_map_section } from './hoverMapSection';
 export { select_map_seat } from './selectMapSeat';
 export { hover_map_seat } from './hoverMapSeat';
 export { verify_reusable_locators } from './verifyReusableLocators';
+export { slide } from './slide';

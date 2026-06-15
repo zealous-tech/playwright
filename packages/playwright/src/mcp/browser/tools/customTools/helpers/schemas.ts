@@ -296,7 +296,7 @@ const validateResponseSchema = z.object({
   responseData: z.string().describe('Response data as JSON string'),
   checks: z.array(z.object({
     name: z.string().describe('Name/description of the check for logging purposes'),
-    jsonPath: z.string().describe('JSONPath expression. Examples: $.store.book[0].title (specific element), $..author (recursive descent), $.store.book[*].author (wildcard), $.store.book[?(@.price<10)] (filter), $.store.book[(@.length-1)] (script). Use $ as root, dot notation or brackets for properties. If the path ends with .length and if the value at the path is an array, the validated value will be that array\'s length.'),
+    jsonPath: z.string().describe('JSONPath expression. Examples: $.store.book[0].title (specific element), $..author (recursive descent), $.store.book[*].author (wildcard - validates each element individually, passes only if ALL elements satisfy the condition), $.store.book[?(@.price<10)] (filter), $.store.book[(@.length-1)] (script). Use $ as root, dot notation or brackets for properties. If the path ends with .length and if the value at the path is an array, the validated value will be that array\'s length. Use [*] to validate ALL elements in an array match the condition (e.g. samples[*].type[?(@.title==\'Good\')] with hasValue/true checks every hit has that workoutType).'),
     expected: z.any().optional().describe('Expected value for comparison'),
     operator: z.enum(['equals', 'not_equals', 'greater_than', 'less_than', 'hasValue', 'every_in', 'some_in']).optional().default('equals').describe('Comparison operator. hasValue checks if value exists at jsonPath (expected should be true/false)')
   })).min(1).describe('Array of validation checks to perform'),
@@ -444,6 +444,14 @@ const ottoClickSchema = z.object({
   doubleClick: z.boolean().optional().describe('Whether to perform a double click instead of a single click'),
   button: z.enum(['left', 'right', 'middle']).optional().describe('Button to click, defaults to left'),
   modifiers: z.array(z.enum(['Alt', 'Control', 'ControlOrMeta', 'Meta', 'Shift'])).optional().describe('Modifier keys to press'),
+});
+
+const slideSchema = z.object({
+  element: z.string().describe('Human-readable element description used to obtain permission to interact with the element'),
+  ref: z.string().describe('Exact target element reference from the page snapshot'),
+  relativeChange: z.number().optional().describe('Amount to change the slider value by. Use this for relative adjustments (e.g. for "increase by 10" use 10, for "decrease by 5" use -5).'),
+  value: z.number().optional().describe('The exact absolute final value to set the slider to.'),
+  moveTo: z.enum(['start', 'end']).optional().describe('Slide to the absolute minimum ("start") or maximum ("end") bounds of the slider.')
 });
 
 // Union schema for all assertion arguments
@@ -702,6 +710,7 @@ export {
   verifyReusableLocatorsSchema,
   customWaitSchema,
   ottoClickSchema,
+  slideSchema,
   sectionSchema,
   seatSchema,
   validateMapNodeSchema,
