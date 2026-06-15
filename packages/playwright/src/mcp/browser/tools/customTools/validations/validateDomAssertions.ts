@@ -70,10 +70,17 @@ export const validate_dom_assertions = defineTabTool({
           options: Object.keys(finalOptions).length > 0 ? serializeForEvidence(finalOptions) as object : {}
         });
         try {
+          // Determine if we need to use .first() to avoid strict mode violation
+          let targetLocator = locator;
+          
+          if (name === 'toBeVisible') {
+            targetLocator = locator.first();
+          }
+
           // Create the assertion with message
           const assertion = message
-            ? (negate ? expect(locator, message).not : expect(locator, message))
-            : (negate ? expect(locator).not : expect(locator));
+            ? (negate ? expect(targetLocator, message).not : expect(targetLocator, message))
+            : (negate ? expect(targetLocator).not : expect(targetLocator));
 
           // Helper function to create evidence command
 
@@ -112,6 +119,16 @@ export const validate_dom_assertions = defineTabTool({
               result.actual = 'visible';
               locatorString = await generateLocatorString(ref, locator);
               result.evidence.message = getAssertionEvidence(name, negate, locatorString, element, mainArgs, options);
+              
+              try {
+                const matchCount = await locator.count();
+                if (matchCount > 1) {
+                  result.evidence.message += `Found ${matchCount} matching element(s).`;
+                }
+              } catch (e) {
+                // Ignore count errors to not fail the already passed assertion
+              }
+              
               result.evidence.command = createEvidenceCommand(locatorString);
               break;
 
