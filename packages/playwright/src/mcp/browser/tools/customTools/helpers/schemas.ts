@@ -684,6 +684,22 @@ const validateMapNodeSchema = z.object({
   ),
 })
 
+export const DEFAULT_SCROLL_AMOUNT = 500;
+
+const scrollSchema = z.object({
+  currentElement: z.object({
+    ref: z.string().describe('Exact scrollable container element reference from the page snapshot (e.g., list, grid, modal, or any scrollable area)'),
+    element: z.string().optional().describe('Human-readable description of the scrollable container element'),
+  }).optional().describe('The scrollable element/container (e.g., list, grid, modal, or any scrollable area). If omitted, defaults to the page body/viewport.'),
+  targetElement: z.object({
+    ref: z.string().describe('Exact target element reference from the page snapshot to scroll to'),
+    element: z.string().optional().describe('Human-readable description of the target element'),
+  }).optional().describe('The target element to scroll into view. If specified, the tool scrolls until this element becomes visible. Can be combined with currentElement to scroll within a specific container to reach the target element.'),
+  direction: z.enum(['up', 'down', 'left', 'right']).optional().default('down').describe('The direction to scroll: up, down, left, or right. Ignored if targetElement is provided.'),
+  amount: z.coerce.number().optional().describe(`The scroll amount. If unit is pixels, this is the pixel amount. If unit is rows/columns, this is the count. If omitted, defaults to ${DEFAULT_SCROLL_AMOUNT} pixels. Ignored if targetElement is provided or unit is max.`),
+  unit: z.enum(['pixels', 'rows', 'columns', 'max']).optional().default('pixels').describe('The unit for the scroll amount. Use "max" to scroll to the absolute end/bottom of the container. Ignored if targetElement is provided.'),
+});
+
 export {
   fileDownloadSchema,
   elementStyleSchema,
@@ -710,6 +726,7 @@ export {
   verifyReusableLocatorsSchema,
   customWaitSchema,
   ottoClickSchema,
+  scrollSchema,
   slideSchema,
   sectionSchema,
   seatSchema,
