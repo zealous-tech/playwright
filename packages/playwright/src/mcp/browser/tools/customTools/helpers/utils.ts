@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 /* eslint-disable eqeqeq */
+import type { Locator } from 'playwright-core';
 import { CurlResponse } from '../common/common';
 import type { Context } from '../../../context';
 
@@ -24,6 +25,21 @@ const ELEMENT_ATTACHED_TIMEOUT = 15000;
 // Note: validation timeout is a custom extension, not part of standard Playwright MCP config
 function getTimeout(context?: Context): number {
   return context?.config?.timeouts?.action ?? ELEMENT_ATTACHED_TIMEOUT;
+}
+
+/** Waits for the first match to attach, then reads a serializable value (form control or text). Throws on failure. */
+async function tryReadElementValue(locator: Locator, timeout: number): Promise<void> {
+  const target = locator.first();
+  await target.waitFor({ state: 'attached', timeout });
+  await target.evaluate((el: Element) => {
+    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)
+      return el.value;
+    if (el instanceof HTMLSelectElement) {
+      const opt = el.selectedOptions?.[0];
+      return opt ? (opt.textContent ?? opt.value) : el.value;
+    }
+    return el.textContent ?? '';
+  }, { timeout });
 }
 
 const camelToKebab = (prop: string) =>
@@ -651,6 +667,7 @@ function setAriaValue(el: SVGElement | HTMLElement, val: string) {
 export {
   ELEMENT_ATTACHED_TIMEOUT,
   getTimeout,
+  tryReadElementValue,
   pickActualValue,
   parseRGBColor,
   isColorInRange,
