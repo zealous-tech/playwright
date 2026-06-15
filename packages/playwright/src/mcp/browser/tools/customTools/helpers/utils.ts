@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 /* eslint-disable eqeqeq */
+import type { Locator } from 'playwright-core';
 import { CurlResponse } from '../common/common';
 import type { Context } from '../../../context';
 
@@ -24,6 +25,21 @@ const ELEMENT_ATTACHED_TIMEOUT = 15000;
 // Note: validation timeout is a custom extension, not part of standard Playwright MCP config
 function getTimeout(context?: Context): number {
   return context?.config?.timeouts?.action ?? ELEMENT_ATTACHED_TIMEOUT;
+}
+
+/** Waits for the first match to attach, then reads a serializable value (form control or text). Throws on failure. */
+async function tryReadElementValue(locator: Locator, timeout: number): Promise<void> {
+  const target = locator.first();
+  await target.waitFor({ state: 'attached', timeout });
+  await target.evaluate((el: Element) => {
+    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)
+      return el.value;
+    if (el instanceof HTMLSelectElement) {
+      const opt = el.selectedOptions?.[0];
+      return opt ? (opt.textContent ?? opt.value) : el.value;
+    }
+    return el.textContent ?? '';
+  }, { timeout });
 }
 
 const camelToKebab = (prop: string) =>
@@ -595,9 +611,63 @@ function isHexColorInRange(actual: string, from: string, to: string): boolean {
       && ab >= Math.min(fb, tb) && ab <= Math.max(fb, tb);
 }
 
+function calculateTargetValue(element: SVGElement | HTMLElement, params: any): string {
+  const DEFAULT_MIN = 0;
+  const DEFAULT_MAX = 100;
+  const DEFAULT_STEP = 1;
+  const DEFAULT_CURRENT_VAL = 0;
+
+  let min = DEFAULT_MIN;
+  let max = DEFAULT_MAX;
+  let step = DEFAULT_STEP;
+  let currentVal = DEFAULT_CURRENT_VAL;
+
+  if (element.tagName.toLowerCase() === 'input' && (element as HTMLInputElement).type === 'range') {
+    const inputElement = element as HTMLInputElement;
+    min = inputElement.min ? Number(inputElement.min) : DEFAULT_MIN;
+    max = inputElement.max ? Number(inputElement.max) : DEFAULT_MAX;
+    step = inputElement.step ? Number(inputElement.step) : DEFAULT_STEP;
+    currentVal = Number(inputElement.value) || DEFAULT_CURRENT_VAL;
+  } else {
+    min = element.hasAttribute('aria-valuemin') ? Number(element.getAttribute('aria-valuemin')) : DEFAULT_MIN;
+    max = element.hasAttribute('aria-valuemax') ? Number(element.getAttribute('aria-valuemax')) : DEFAULT_MAX;
+    currentVal = element.hasAttribute('aria-valuenow') ? Number(element.getAttribute('aria-valuenow')) : DEFAULT_CURRENT_VAL;
+    step = DEFAULT_STEP;
+  }
+
+  let newVal = currentVal;
+
+  if (params.value !== undefined && params.value !== null) {
+    newVal = params.value;
+  } else if (params.relativeChange !== undefined && params.relativeChange !== null) {
+    newVal = currentVal + (params.relativeChange * step);
+  } else if (params.moveTo === 'start') {
+    newVal = min;
+  } else if (params.moveTo === 'end') {
+    newVal = max;
+  }
+
+  if (newVal < min) newVal = min;
+  if (newVal > max) newVal = max;
+
+  return newVal.toString();
+}
+
+function isInputElement(el: SVGElement | HTMLElement): boolean {
+  const tag = el.tagName.toLowerCase();
+  return tag === 'input' || tag === 'textarea' || (el as HTMLElement).isContentEditable;
+}
+
+function setAriaValue(el: SVGElement | HTMLElement, val: string) {
+  el.setAttribute('aria-valuenow', val);
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+  el.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
 export {
   ELEMENT_ATTACHED_TIMEOUT,
   getTimeout,
+  tryReadElementValue,
   pickActualValue,
   parseRGBColor,
   isColorInRange,
@@ -617,4 +687,7 @@ export {
   normalizeValue,
   hexToRgb,
   isHexColorInRange,
+  calculateTargetValue,
+  isInputElement,
+  setAriaValue,
 };

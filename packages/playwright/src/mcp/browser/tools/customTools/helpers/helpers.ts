@@ -16,6 +16,7 @@
 import { promisify } from 'util';
 import { expect } from '@zealous-tech/playwright/test';
 import { execFile } from 'child_process';
+import * as jp from 'jsonpath';
 import { generateLocator } from '../../utils.js';
 import { applyArrayFilter, compareValues, parseCurlStderr, ELEMENT_ATTACHED_TIMEOUT } from './utils.js';
 import { ParsedCurlResponse, ValidationPayload, ValidationResult } from '../common/common.js';
@@ -142,7 +143,7 @@ async function runCommand(command: string): Promise<{ stdout: string; stderr: st
   const CURL_PATTERN = /curl```([\s\S]*?)```/i;
   const execFileAsync = promisify(execFile);
 
-  const SHELL_META = /[|&;><`]/;
+  const SHELL_META = /[|&><`]/;
 
   const ALLOWED_FLAGS = new Set<string>([
     '-X', '--request',
@@ -531,7 +532,7 @@ async function checkLocatorVisibilityInAllFrames(
   return Promise.all(allChecks);
 }
 
-function resolveLocator(frame: any, locator: string) {
+export function resolveLocator(frame: any, locator: string) {
   const trimmed = locator.trim();
   if (
     trimmed.startsWith('getBy') ||
@@ -1257,6 +1258,97 @@ async function resolveSeatNodeId(
 
 
 
+export type WildcardCheckResult = {
+  name: string;
+  jsonPath: string;
+  expected?: any;
+  operator: string;
+  actual: unknown;
+  result: 'pass' | 'fail';
+};
+
+type WildcardCheck = { name: string; jsonPath: string; expected?: any; operator: string };
+
+function failResult(check: WildcardCheck, actual: string): WildcardCheckResult {
+  return { name: check.name, jsonPath: check.jsonPath, expected: check.expected, operator: check.operator, actual, result: 'fail' };
+}
+
+function normalizeChildPath(raw: string): string {
+  if (!raw) return '$';
+  if (raw.startsWith('.') || raw.startsWith('[')) return `$${raw}`;
+  return `$.${raw}`;
+}
+
+function resolveParentArray(data: any, parentPath: string): unknown {
+  const result = parentPath === '$' ? [data] : jp.query(data, parentPath);
+  return result.length === 1 ? result[0] : result;
+}
+
+function parseExpected(expected: any): any {
+  if (typeof expected !== 'string') return expected;
+  try {
+    const parsed = JSON.parse(expected);
+    if (typeof parsed === 'object' && parsed !== null) return parsed;
+  } catch { /* keep original string */ }
+  return expected;
+}
+
+function resolveElementValue(
+  element: any,
+  childPath: string,
+  check: WildcardCheck
+): { value?: unknown; nested?: WildcardCheckResult } {
+  if (!childPath || childPath === '$') return { value: element };
+  const nestedWildcard = childPath.indexOf('[*]');
+  if (nestedWildcard !== -1)
+    return { nested: evaluateWildcardPath(element, childPath, nestedWildcard, check) };
+  const q = jp.query(element, childPath);
+  return { value: q.length === 1 ? q[0] : q.length === 0 ? undefined : q };
+}
+
+/**
+ * Handles JSONPath expressions containing [*] wildcard by evaluating
+ * the sub-path on each element of the parent array individually.
+ * The check passes only if ALL elements satisfy the condition.
+ */
+function evaluateWildcardPath(
+  data: any,
+  normalizedPath: string,
+  wildcardIndex: number,
+  check: WildcardCheck
+): WildcardCheckResult {
+  const parentPath = normalizedPath.slice(0, wildcardIndex);
+  const childPath = normalizeChildPath(normalizedPath.slice(wildcardIndex + 3));
+
+  const parentArray = resolveParentArray(data, parentPath);
+  if (!Array.isArray(parentArray))
+    return failResult(check, `ERROR: path "${parentPath}" did not resolve to an array`);
+  if (parentArray.length === 0)
+    return failResult(check, `ERROR: array at "${parentPath}" is empty`);
+
+  const expectedValue = parseExpected(check.expected);
+  const failedIndices: number[] = [];
+
+  for (let i = 0; i < parentArray.length; i++) {
+    const resolved = resolveElementValue(parentArray[i], childPath, check);
+    if (resolved.nested) {
+      if (resolved.nested.result === 'fail') failedIndices.push(i);
+    } else {
+      if (!compareValues(resolved.value, expectedValue, check.operator).passed)
+        failedIndices.push(i);
+    }
+  }
+
+  const passed = failedIndices.length === 0;
+  return {
+    ...check,
+    actual: passed
+      ? `All ${parentArray.length} elements passed`
+      : `${failedIndices.length}/${parentArray.length} elements failed at indices: [${failedIndices.slice(0, 10).join(', ')}${failedIndices.length > 10 ? '...' : ''}]`,
+    result: passed ? 'pass' : 'fail',
+  };
+}
+
 export {
   getAllComputedStylesDirect,
   hasAlertDialog,
@@ -1265,6 +1357,7 @@ export {
   performRegexExtract,
   performRegexMatch,
   compareValues,
+  evaluateWildcardPath,
   getValueByJsonPath,
   checkElementVisibilityInAllFrames,
   checkLocatorVisibilityInAllFrames,
