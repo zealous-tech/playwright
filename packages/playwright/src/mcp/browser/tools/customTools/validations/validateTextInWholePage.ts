@@ -69,7 +69,7 @@ export const validate_text_in_whole_page = defineTabTool({
         // Count found results
         const foundResults = results.filter(r => r.found);
         actualCount = foundResults.reduce((sum, r) => sum + (r.count || 0), 0);
-        foundFrames = foundResults.map(r => `${r.frame} (${r.count})`);
+        foundFrames = foundResults.map(r => r.count === 1 ? r.frame : `${r.frame} (${r.count})`);
 
         // Determine if test passes based on matchType
         if (matchType === 'exact' || matchType === 'contains') {
@@ -86,7 +86,9 @@ export const validate_text_in_whole_page = defineTabTool({
             evidenceMessage = `The text "${displayText}" was correctly not found on the page using ${matchType} matching.`;
           } else {
             passed = false;
-            evidenceMessage = `The text "${displayText}" was found ${actualCount} time(s) on the page using ${matchType} matching in frames: ${foundFrames.join(', ')} — it should not appear.`;
+            const placesText = actualCount === 1 ? '' : ` ${actualCount} places`;
+            const frameWord = foundFrames.length === 1 ? 'frame' : 'frames';
+            evidenceMessage = `The text "${displayText}" should not appear on the page, but it was found${placesText} in ${frameWord}: ${foundFrames.join(', ')}.`;
           }
         }
 
