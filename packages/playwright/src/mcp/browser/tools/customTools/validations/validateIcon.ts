@@ -38,13 +38,27 @@ interface ExtractedIcon {
     iconData: string;
     colors: string[];
     imageLoaded: boolean;
-    visualData: string | null;
 }
 
 interface ExpectedIcon {
     iconType: IconType;
-    iconData: string;
+    iconData?: string;
     colors?: string[];
+}
+
+const DATAURI_ICON_DATA_PLACEHOLDER =
+    'Base64-encoded image data (omitted). Verify the icon via iconType and other properties, not iconData.';
+
+function isBase64IconData(iconType: IconType, iconData: string): boolean {
+    return /;base64,/i.test(iconData)
+        || (iconType === 'datauri' && iconData.startsWith('data:') && iconData.includes('base64'));
+}
+
+function summarizeIconDataForResponse(iconType: IconType, iconData: string): string {
+    if (isBase64IconData(iconType, iconData)) {
+        return DATAURI_ICON_DATA_PLACEHOLDER;
+    }
+    return iconData;
 }
 
 // ============================================================================
@@ -104,8 +118,7 @@ function extractIconFunction(element: Element, options: { includeColors: boolean
     let iconType: IconType = 'unknown';
     let iconData = '';
     let colors: string[] = [];
-    let imageLoaded = false;  // Track if image exists and is loaded
-    let visualData: string | null = null;  // Only for SVG icons (send SVG markup to LLM)
+    let imageLoaded = false;
 
     if (element.tagName.toLowerCase() === 'svg') {
         iconType = 'svg';
@@ -114,7 +127,6 @@ function extractIconFunction(element: Element, options: { includeColors: boolean
             colors = extractColors(element);
         }
         imageLoaded = true;
-        visualData = iconData;  // Send SVG markup to LLM for analysis
     }
     else if (element.querySelector('svg')) {
         const svgElement = element.querySelector('svg');
@@ -125,7 +137,6 @@ function extractIconFunction(element: Element, options: { includeColors: boolean
                 colors = extractColors(svgElement);
             }
             imageLoaded = true;
-            visualData = iconData;  // Send SVG markup to LLM for analysis
         }
     }
     else if (element.tagName.toLowerCase() === 'img') {
@@ -143,9 +154,6 @@ function extractIconFunction(element: Element, options: { includeColors: boolean
             iconData = src;  // Just the URL
         }
 
-        // For images: DO NOT send visual data, only URL
-        // LLM will analyze based on URL/filename only
-        visualData = null;
     }
     else {
         const computedStyle = window.getComputedStyle(element);
@@ -210,7 +218,6 @@ function extractIconFunction(element: Element, options: { includeColors: boolean
         iconData,
         colors: options.includeColors ? colors : [],
         imageLoaded,
-        visualData,
     };
 }
 
@@ -235,24 +242,25 @@ function compareIcons(
         comparisonDetails.push(`Icon type mismatch: expected "${expectedIcon.iconType}", got "${actualIcon.iconType}"`);
     }
 
-    // Compare icon data based on type
-    if (actualIcon.iconType === 'img' || actualIcon.iconType === 'background') {
-        // For images: EXACT URL comparison only
-        if (actualIcon.iconData !== expectedIcon.iconData) {
-            passed = false;
-            comparisonDetails.push(`Image URL mismatch: expected "${expectedIcon.iconData}", got "${actualIcon.iconData}"`);
-        }
-    } else if (actualIcon.iconType === 'svg') {
-        // For SVG: Direct comparison
-        if (actualIcon.iconData !== expectedIcon.iconData) {
-            passed = false;
-            comparisonDetails.push(`SVG content mismatch`);
-        }
-    } else {
-        // For other types (font, datauri): Direct comparison
-        if (actualIcon.iconData !== expectedIcon.iconData) {
-            passed = false;
-            comparisonDetails.push(`Icon data mismatch`);
+    // Compare icon data based on type (skipped if expectedIcon.iconData is not provided)
+    if (isBase64IconData(actualIcon.iconType, actualIcon.iconData)) {
+        // Base64 data URIs are not compared — verify via iconType and other properties
+    } else if (expectedIcon.iconData !== undefined) {
+        if (actualIcon.iconType === 'img' || actualIcon.iconType === 'background') {
+            if (actualIcon.iconData !== expectedIcon.iconData) {
+                passed = false;
+                comparisonDetails.push(`Image URL mismatch: expected "${expectedIcon.iconData}", got "${actualIcon.iconData}"`);
+            }
+        } else if (actualIcon.iconType === 'svg') {
+            if (actualIcon.iconData !== expectedIcon.iconData) {
+                passed = false;
+                comparisonDetails.push(`SVG content mismatch`);
+            }
+        } else {
+            if (actualIcon.iconData !== expectedIcon.iconData) {
+                passed = false;
+                comparisonDetails.push(`Icon data mismatch`);
+            }
         }
     }
 
@@ -312,41 +320,20 @@ function generateEvidenceMessage(
 }
 
 /**
- * Generate extraction message for LLM follow-up
+ * Generate instruction message for LLM follow-up.
+ * Extracted data is already in the `extractedIcon` field — do not repeat it here.
  */
-function generateExtractionMessage(actualIcon: ExtractedIcon, element: string): string {
-    const expectedIconForLLM = {
-        iconType: actualIcon.iconType,
-        iconData: actualIcon.iconData,
-        colors: actualIcon.colors,
-    };
-
-    let extractionMessage = '';
-
-    if (actualIcon.iconType === 'svg') {
-        // For SVG: Send SVG markup to LLM for visual analysis
-        extractionMessage = `Successfully extracted SVG icon from element "${element}".\n\n`;
-        extractionMessage += `**Icon Type:** SVG\n`;
-        extractionMessage += `**SVG Markup:** ${actualIcon.iconData.substring(0, 500)}${actualIcon.iconData.length > 500 ? '...' : ''}\n\n`;
-        extractionMessage += `**Extracted Metadata:** ${JSON.stringify(expectedIconForLLM)}\n\n`;
-        extractionMessage += `Please analyze the SVG markup to determine if it matches the validation requirement. If it matches, call validate_icon again with this data as expectedIcon to cache it.`;
-    } else if (actualIcon.iconType === 'img') {
-        // For images: Send only URL for LLM to analyze filename/path
-        extractionMessage = `Successfully extracted image icon from element "${element}".\n\n`;
-        extractionMessage += `**Icon Type:** Image\n`;
-        extractionMessage += `**Image URL:** ${actualIcon.iconData}\n`;
-        extractionMessage += `**Image Status:** ✓ Loaded and accessible\n\n`;
-        extractionMessage += `**Extracted Metadata:** ${JSON.stringify(expectedIconForLLM)}\n\n`;
-        extractionMessage += `Please analyze the URL/filename to determine if it matches the validation requirement. If it matches, call validate_icon again with this data as expectedIcon to cache it.`;
-    } else {
-        // For other types (font, background, datauri)
-        extractionMessage = `Successfully extracted ${actualIcon.iconType} icon from element "${element}".\n\n`;
-        extractionMessage += `**Icon Type:** ${actualIcon.iconType}\n`;
-        extractionMessage += `**Icon Data:** ${JSON.stringify(expectedIconForLLM)}\n\n`;
-        extractionMessage += `Please analyze the extracted data to determine if it matches the validation requirement. If it matches, call validate_icon again with this data as expectedIcon to cache it.`;
+function generateExtractionMessage(actualIcon: ExtractedIcon): string {
+    if (isBase64IconData(actualIcon.iconType, actualIcon.iconData)) {
+        return `The icon is embedded as base64 image data. Do not analyze iconData — verify the icon via iconType and colors. If it matches, call validate_icon again with extractedIcon as expectedIcon to cache it.`;
     }
-
-    return extractionMessage;
+    if (actualIcon.iconType === 'svg') {
+        return `Analyze the SVG markup in extractedIcon.iconData to determine if it matches the validation requirement. If it matches, call validate_icon again with extractedIcon as expectedIcon to cache it.`;
+    }
+    if (actualIcon.iconType === 'img') {
+        return `Analyze the image URL in extractedIcon.iconData (filename/path) to determine if it matches the validation requirement. If it matches, call validate_icon again with extractedIcon as expectedIcon to cache it.`;
+    }
+    return `Analyze the extracted data in extractedIcon to determine if it matches the validation requirement. If it matches, call validate_icon again with extractedIcon as expectedIcon to cache it.`;
 }
 
 // ============================================================================
@@ -362,9 +349,8 @@ function createEvidence(params: {
     mode?: string;
     arguments?: any;
     message: string;
-    visualData?: string | null;
-}): Array<{ command: string; message: string; visualData?: string | null }> {
-    const evidence: any = {
+}): Array<{ command: string; message: string }> {
+    return [{
         command: JSON.stringify({
             toolName: params.toolName,
             ...(params.mode && { mode: params.mode }),
@@ -372,13 +358,7 @@ function createEvidence(params: {
             ...(params.arguments && { arguments: params.arguments }),
         }),
         message: params.message,
-    };
-    
-    if (params.visualData !== undefined) {
-        evidence.visualData = params.visualData;
-    }
-    
-    return [evidence];
+    }];
 }
 
 /**
@@ -389,7 +369,7 @@ function createErrorPayload(params: {
     element: string;
     expectedIcon?: ExpectedIcon;
     actualIcon?: any;
-    evidence: Array<{ command: string; message: string; visualData?: string | null }>;
+    evidence: Array<{ command: string; message: string }>;
     error?: string;
 }) {
     return {
@@ -416,27 +396,19 @@ function createErrorPayload(params: {
 }
 
 /**
- * Create success payload structure for extraction mode
+ * Create payload structure for extraction mode
  */
 function createExtractionPayload(params: {
     ref: string;
     element: string;
     extractedIcon: { iconType: IconType; iconData: string; colors: string[] };
-    evidence: Array<{ command: string; message: string; visualData?: string | null }>;
+    message: string;
 }) {
     return {
         ref: params.ref,
         element: params.element,
         extractedIcon: params.extractedIcon,
-        summary: {
-            total: 1,
-            passed: 1,
-            failed: 0,
-            status: 'pass' as const,
-            evidence: params.evidence,
-            extractionMode: true,
-            requiresFollowUp: true,
-        },
+        message: params.message,
     };
 }
 
@@ -458,9 +430,12 @@ function createValidationPayload(params: {
         expectedIcon: params.expectedIcon,
         actualIcon: {
             iconType: params.actualIcon.iconType,
-            iconData: params.actualIcon.iconData.length > 200 
-                ? params.actualIcon.iconData.substring(0, 200) + '...' 
-                : params.actualIcon.iconData,
+            iconData: summarizeIconDataForResponse(
+                params.actualIcon.iconType,
+                params.actualIcon.iconData.length > 200 && !isBase64IconData(params.actualIcon.iconType, params.actualIcon.iconData)
+                    ? params.actualIcon.iconData.substring(0, 200) + '...'
+                    : params.actualIcon.iconData,
+            ),
             colors: params.actualIcon.colors,
             imageLoaded: params.actualIcon.imageLoaded,
         },
@@ -491,7 +466,7 @@ const validateIconSchema = z.object({
   ref: z.string().describe('Exact target element reference from the page snapshot'),
   expectedIcon: z.object({
     iconType: z.enum(['svg', 'img', 'background', 'font', 'datauri', 'unknown']).describe('Type of icon'),
-    iconData: z.string().describe('Icon data: SVG markup, image URL, font character, or data URI'),
+    iconData: z.string().optional().describe('Icon data: SVG markup, image URL, font character, or non-base64 data URI. Omit for base64 data URIs — they are not compared.'),
     colors: z.array(z.string()).optional().describe('Array of colors used in the icon (hex, rgb, or named colors)'),
   }).optional().describe('Expected icon data to validate against. If not provided, tool will extract and return current icon data for analysis. If provided, tool will validate current icon matches expected icon.'),
   ignoreColors: z.boolean().optional().default(false).describe('Whether to ignore color differences in validation'),
@@ -512,6 +487,17 @@ async function handleElementNotFound(
   expectedIcon: ExpectedIcon | undefined,
   response: any
 ): Promise<void> {
+  if (!expectedIcon) {
+    // Extraction mode — simple error
+    response.addTextResult(JSON.stringify({
+      ref,
+      element,
+      error: `UI element "${element}" not found`,
+    }, null, 2));
+    return;
+  }
+
+  // Validation mode — full error payload with evidence
   const evidence = createEvidence({
     toolName: 'validate_icon',
     locator: locatorString,
@@ -542,48 +528,29 @@ function handleExtractionMode(
 ): void {
   // Check if image loaded successfully
   if (!actualIcon.imageLoaded) {
-    const failureEvidence = createEvidence({
-      toolName: 'validate_icon',
-      mode: 'extraction',
-      locator: locatorString,
-      arguments: { ref, element },
-      message: `Failed to extract icon from element "${element}": Image not loaded or broken image detected.`,
-    });
-
-    const failurePayload = createErrorPayload({
+    response.addTextResult(JSON.stringify({
       ref,
       element,
-      evidence: failureEvidence,
-    });
-
-    response.addTextResult(JSON.stringify(failurePayload, null, 2));
+      error: `Failed to extract icon from element "${element}": Image not loaded or broken image detected.`,
+    }, null, 2));
     return;
   }
 
   // Prepare extracted icon data for LLM
   const extractedIconData = {
     iconType: actualIcon.iconType,
-    iconData: actualIcon.iconData,
+    iconData: summarizeIconDataForResponse(actualIcon.iconType, actualIcon.iconData),
     colors: actualIcon.colors,
   };
 
-  // Generate extraction message with context for LLM
-  const extractionMessage = generateExtractionMessage(actualIcon, element);
-
-  const evidence = createEvidence({
-    toolName: 'validate_icon',
-    mode: 'extraction',
-    locator: locatorString,
-    arguments: { ref, element },
-    message: extractionMessage,
-    visualData: actualIcon.visualData,
-  });
+  // Generate instruction message for LLM
+  const extractionMessage = generateExtractionMessage(actualIcon);
 
   const payload = createExtractionPayload({
     ref,
     element,
     extractedIcon: extractedIconData,
-    evidence,
+    message: extractionMessage,
   });
 
   response.addTextResult(JSON.stringify(payload, null, 2));
@@ -665,9 +632,19 @@ async function handleValidationError(
   tab: any,
   response: any
 ): Promise<void> {
-  const errorMessage = `Failed to validate icon for element "${element}". Error: ${error instanceof Error ? error.message : String(error)}`;
+  const errorMessage = error instanceof Error ? error.message : String(error);
 
-  // Try to get locator string for better error reporting
+  if (!expectedIcon) {
+    // Extraction mode — simple error
+    response.addTextResult(JSON.stringify({
+      ref,
+      element,
+      error: `Failed to extract icon for element "${element}". Error: ${errorMessage}`,
+    }, null, 2));
+    return;
+  }
+
+  // Validation mode — full error payload with evidence
   let locatorString = '';
   try {
     const { locator } = await tab.refLocator({ ref, element });
@@ -680,7 +657,7 @@ async function handleValidationError(
     toolName: 'validate_icon',
     locator: locatorString,
     arguments: { expectedIcon },
-    message: errorMessage,
+    message: `Failed to validate icon for element "${element}". Error: ${errorMessage}`,
   });
 
   const errorPayload = createErrorPayload({
@@ -688,7 +665,7 @@ async function handleValidationError(
     element,
     expectedIcon,
     evidence,
-    error: error instanceof Error ? error.message : String(error),
+    error: errorMessage,
   });
 
   response.addTextResult(JSON.stringify(errorPayload, null, 2));
