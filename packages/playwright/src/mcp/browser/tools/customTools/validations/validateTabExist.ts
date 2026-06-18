@@ -44,6 +44,31 @@ export const validate_tab_exist = defineTabTool({
         isUrlRegex = false;
       }
 
+      // Determine if title is a valid regex
+      let titleRegex: RegExp | undefined;
+      let isTitleRegex = false;
+      if (title) {
+        try {
+          titleRegex = new RegExp(title);
+          isTitleRegex = true;
+        } catch {
+          isTitleRegex = false;
+        }
+      }
+
+      // Title matching respects exactMatch the same way URL matching does:
+      // - exactMatch true  -> require an exact title equality
+      // - exactMatch false -> allow regex or partial (contains) title match
+      const matchesTitle = (header: string): boolean => {
+        if (!title)
+          return true;
+        if (exactMatch)
+          return header === title;
+        const regexMatch = isTitleRegex ? titleRegex!.test(header) : false;
+        const includes = header.includes(title) || title.includes(header);
+        return regexMatch || includes;
+      };
+
       // Extract tab info using the correct page methods
       const tabsWithInfo = await Promise.all(
           allTabs.map(async (tabItem: any, index: number) => {
@@ -72,7 +97,7 @@ export const validate_tab_exist = defineTabTool({
 
       // Search for tab with matching URL
       foundTab = tabsWithInfo.find((tabInfo: any) => {
-        const titleMatch = title ? tabInfo.header === title : true;
+        const titleMatch = matchesTitle(tabInfo.header);
         if (exactMatch) {
           searchType = 'exact';
           return tabInfo.url === url && titleMatch;
