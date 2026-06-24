@@ -27,10 +27,12 @@ function getTimeout(context?: Context): number {
   return context?.config?.timeouts?.action ?? ELEMENT_ATTACHED_TIMEOUT;
 }
 
-/** Waits for the first match to attach, then reads a serializable value (form control or text). Throws on failure. */
+/** Checks the first match exists right now (no waiting), then reads a serializable value (form control or text). Throws on failure. */
 async function tryReadElementValue(locator: Locator, timeout: number): Promise<void> {
   const target = locator.first();
-  await target.waitFor({ state: 'attached', timeout });
+  // Immediate existence check — do not wait for the element to appear.
+  if (await target.count() === 0)
+    throw new Error('Locator did not match any element');
   await target.evaluate((el: Element) => {
     if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)
       return el.value;
