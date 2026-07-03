@@ -22,6 +22,12 @@ import { applyArrayFilter, compareValues, parseCurlStderr, ELEMENT_ATTACHED_TIME
 import { ParsedCurlResponse, ValidationPayload, ValidationResult } from '../common/common.js';
 import type { Page } from 'playwright-core';
 
+export function isLocatorCode(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  const trimmed = value.trim();
+  return trimmed.startsWith('getBy') || trimmed.startsWith('locator');
+}
+
 export const DEFAULT_MAP_SELECTOR = "div[role='img'][aria-label*='Map']";
 export const DEFAULT_CONTAINER_SELECTOR =
   ".seatmap-viewer, div:has(>div[id='inventory-viewer-container'])";
@@ -77,14 +83,13 @@ function getAlertDialogText(snapshotContent: string): string | null {
 
 /**
  * Generate locator string from ref and locator
- * If ref starts with ###code, extracts the code directly
+ * If ref is a locator, extracts the code directly.
  * Otherwise, generates locator string using generateLocator
  */
 async function generateLocatorString(ref: string, locator: any, preferCssSelector: boolean = false): Promise<string> {
-  const isLocatorCode = ref && ref.startsWith('###code');
-  if (isLocatorCode) {
-    const locatorCode = ref.match(/###code(.+)/)?.[1]?.trim() || '';
-    return locatorCode || '';
+  const locatorCode = isLocatorCode(ref);
+  if (locatorCode) {
+    return ref.trim();
   }
   return await generateLocator(locator, preferCssSelector);
 }

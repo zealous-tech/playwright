@@ -24,6 +24,7 @@ import { ModalState } from './tools/tool';
 import { handleDialog } from './tools/dialogs';
 import { uploadFile } from './tools/files';
 import { requireOrImport } from '../../transform/transform';
+import { isLocatorCode } from './tools/customTools/helpers/helpers';
 
 import type { Context } from './context';
 import type { Page } from '../../../../playwright-core/src/client/page';
@@ -336,25 +337,17 @@ export class Tab extends EventEmitter<TabEventsInterface> {
   async refLocator(params: { element?: string, ref: string }): Promise<{ locator: Locator, resolved: string }> {
     await this._initializedPromise;
     // Check if ref contains code information
-    if (params.ref && params.ref.startsWith('###code')) {
-      const codeMatch = params.ref.match(/###code(.+)/);
-      if (codeMatch) {
-        const code = codeMatch[1].trim();
-        // Check if it's a Playwright command (starts with getBy or locator)
-        if (code.startsWith('getBy') || code.startsWith('locator')) {
-          try {
-            const getLocator = new Function('page', `return page.${code}`);
-            let locator = getLocator(this.page);
-            if (params.element)
-              locator = locator.describe(params.element);
-            //const { resolvedSelector } = await locator._resolveSelector();
-            return { locator, resolved: ''};
-          } catch (error) {
-            throw new Error(`Failed to execute Playwright command "${code}": ${error instanceof Error ? error.message : String(error)}`);
-          }
-        } else {
-          throw new Error(`unknown Playwright command: ${code}`);
-        }
+    if (isLocatorCode(params.ref)) {
+      const code = params.ref.trim();
+      try {
+        const getLocator = new Function('page', `return page.${code}`);
+        let locator = getLocator(this.page);
+        if (params.element)
+          locator = locator.describe(params.element);
+        //const { resolvedSelector } = await locator._resolveSelector();
+        return { locator, resolved: ''};
+      } catch (error) {
+        throw new Error(`Failed to execute Playwright command "${code}": ${error instanceof Error ? error.message : String(error)}`);
       }
     }
     // If ref provided, get locator using ref
