@@ -56,6 +56,23 @@ jobs:
       - name: Build all packages
         working-directory: ./
         run: npm run build
+      - name: Bundle forked playwright-core into playwright package
+        working-directory: ./
+        run: |
+          # Workspace links are not enough for bundledDependencies: materialize a real copy.
+          node utils/pack_package.js playwright-core ./playwright-core.tgz
+          rm -rf packages/playwright/node_modules/playwright-core
+          mkdir -p packages/playwright/node_modules/playwright-core
+          tar -xzf ./playwright-core.tgz -C packages/playwright/node_modules/playwright-core --strip-components=1
+          test -f packages/playwright/node_modules/playwright-core/package.json
+          test -f packages/playwright/node_modules/playwright-core/lib/generated/injectedScriptSource.js
+          # Sanity check: AI snapshot mode must use refs: "all" from our fork.
+          if ! grep -Fq 'refs: "all"' packages/playwright/node_modules/playwright-core/lib/generated/injectedScriptSource.js; then
+            echo "ERROR: bundled playwright-core still has interactable refs mode"
+            grep -n 'refs: "' packages/playwright/node_modules/playwright-core/lib/generated/injectedScriptSource.js | head
+            exit 1
+          fi
+          echo "Bundled playwright-core version: $(jq -r .version packages/playwright/node_modules/playwright-core/package.json)"
       - name: Publish playwright package
         working-directory: ./packages/playwright
         run: npm publish
