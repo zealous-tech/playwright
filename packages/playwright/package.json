@@ -67,6 +67,9 @@
     "jsonpath": "^1.1.1",
     "playwright-core": "1.58.0"
   },
+  "bundledDependencies": [
+    "playwright-core"
+  ],
   "optionalDependencies": {
     "fsevents": "2.3.2"
   }
