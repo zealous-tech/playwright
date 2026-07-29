@@ -320,6 +320,21 @@ const validateTextInWholePageSchema = z.object({
   ),
 });
 
+const validateNotificationSchema = z.object({
+  element: z.string().describe(
+      'Human-readable description of the notification being validated (e.g. "success toast").'
+  ),
+  expectedText: z.string().describe(
+      'Expected notification text. Single string, or a JSON-stringified array of strings (e.g. "[\"Saved\", \"Updated\"]") combined with OR.'
+  ),
+  matchType: z.enum(['exact', 'contains', 'not-contains']).default('contains').describe(
+      "Match type: 'contains' substring match (default), 'exact' full match, 'not-contains' asserts the notification did NOT appear."
+  ),
+  withinMs: z.number().int().positive().optional().default(15000).describe(
+      'Lookback window in milliseconds. Notifications captured within this window are considered even if they have already disappeared from the DOM.'
+  ),
+});
+
 const validateElementInWholePageSchema = z.object({
   element: z.string().describe(
       'Human-readable element description used to obtain permission to interact with the element'
@@ -712,6 +727,7 @@ export {
   validateResponseSchema,
   validateExpandedSchema,
   validateTextInWholePageSchema,
+  validateNotificationSchema,
   validateElementInWholePageSchema,
   validateElementVisibilitySchema,
   dataExtractionSchema,

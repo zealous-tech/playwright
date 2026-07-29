@@ -17,6 +17,7 @@
 import {
   validate_computed_styles,
   validate_text_in_whole_page,
+  validate_notification,
   validate_element_in_whole_page,
   validate_element_visibility,
   validate_dom_assertions,
@@ -62,6 +63,7 @@ export default [
   extract_image_urls,
   validate_computed_styles,
   validate_text_in_whole_page,
+  validate_notification,
   validate_element_in_whole_page,
   validate_element_visibility,
   validate_dom_assertions,
