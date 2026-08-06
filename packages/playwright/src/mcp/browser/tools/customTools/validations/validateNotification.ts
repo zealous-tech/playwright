@@ -135,7 +135,17 @@ export const validate_notification = defineTabTool({
         }
       }
 
+      // Was ANY notification observed at all (regardless of whether its text matched)? Used to tell
+      // "nothing appeared" (empty validation — nothing to assert against) apart from "a notification
+      // appeared but its text was different" (a genuine validation failure).
+      const anyNotificationObserved = uniqueCaptured.length > 0 || liveCount > 0;
+      const observerNote = observerInstalled
+        ? ''
+        : ' (notification observer was not installed on this page, so only the live DOM was checked)';
+
       let passed = false;
+      // True only when no notification of any kind appeared, so there was nothing to validate.
+      let emptyValidation = false;
       let evidenceMessage = '';
       if (matchType === 'not-contains') {
         passed = !bufferPresent && liveCount === 0;
@@ -160,11 +170,16 @@ export const validate_notification = defineTabTool({
           if (liveCount > 0)
             parts.push(`present on the page in frame(s): ${liveFrames.join(', ')}`);
           evidenceMessage = `Notification containing "${displayText}" was ${parts.join(' and ')}.`;
+        } else if (!anyNotificationObserved) {
+          // Nothing appeared — report as an empty validation so it is not cached as a real
+          // notification assertion (there was nothing on the page to assert against).
+          emptyValidation = true;
+          evidenceMessage = `No notification appeared on the page within ${withinMs}ms, so there was nothing to validate against "${displayText}"${observerNote}.`;
         } else {
-          const note = observerInstalled
-            ? ''
-            : ' (notification observer was not installed on this page, so only the live DOM was checked)';
-          evidenceMessage = `No notification containing "${displayText}" was captured within ${withinMs}ms or found on the page using ${matchType} matching${note}.`;
+          // A notification DID appear, but its text did not match — a genuine mismatch failure.
+          const actual = uniqueCaptured.map(n => `"${n.text}"`).join(', ');
+          const expectation = matchType === 'exact' ? 'exact text' : 'text containing';
+          evidenceMessage = `A notification appeared but its text did not match. Expected ${expectation} "${displayText}", but the notification(s) that actually appeared were: ${actual}.`;
         }
       }
 
@@ -191,6 +206,10 @@ export const validate_notification = defineTabTool({
           passed: passed ? 1 : 0,
           failed: passed ? 0 : 1,
           status: passed ? 'pass' : 'fail',
+          // When true the check failed because NO notification appeared at all (nothing to assert
+          // against), as opposed to a notification appearing with mismatched text. The bridge uses
+          // this to record the validation as an empty (un-automated) one rather than a real failure.
+          emptyValidation,
           evidence,
         },
         checks: [
@@ -202,6 +221,7 @@ export const validate_notification = defineTabTool({
             capturedCount: bufferHits.length,
             liveCount,
             capturedNotifications: uniqueCaptured.map(n => n.text),
+            emptyValidation,
             result: passed ? 'pass' : 'fail',
           },
         ],
