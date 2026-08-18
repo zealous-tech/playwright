@@ -16,47 +16,16 @@
 // @ZEALOUS UPDATE
 import { defineTabTool } from '../../tool';
 import { checkTextExistenceInAllFrames, collectAllFrames, resolveLocator } from '../helpers/helpers';
+import {
+  isSemanticLocator,
+  normalizeLocatorForCompare,
+  stripLocatorPrefix,
+  toLocatorExpression,
+} from '../helpers/notificationBuffer';
 import { getTimeout } from '../helpers/utils';
 import { validateNotificationSchema } from '../helpers/schemas';
 
 type CapturedNotification = { text: string; role: string; ts: number; locator?: string };
-
-/**
- * Wrap a raw selector captured by the in-page observer into a Playwright locator expression.
- *
- * The observer records a genuine, DOM-verified CSS selector (e.g. `.Toastify__toast`) — already an
- * expression when it starts with `getBy`/`locator(`, otherwise a bare CSS selector that we wrap as
- * `locator("...")` so downstream resolution (and the reusable-locator cache) treats it uniformly.
- */
-function toLocatorExpression(rawSelector: string): string {
-  const trimmed = rawSelector.trim();
-  if (!trimmed) return '';
-  if (trimmed.startsWith('getBy') || trimmed.startsWith('locator(')) return trimmed;
-  return `locator(${JSON.stringify(trimmed)})`;
-}
-
-/**
- * Reduce a locator expression to a comparable selector string. Strips an optional `###code` prefix
- * and unwraps `locator("...")` / `locator('...')` down to the bare CSS; other forms (e.g. getBy*)
- * are returned trimmed as-is. Used to compare a caller-provided locator against the observer-captured
- * one so an edited/garbage locator can be rejected.
- */
-function normalizeLocatorForCompare(raw: string): string {
-  let s = String(raw).trim();
-  if (s.startsWith('###code')) s = s.slice('###code'.length).trim();
-  const m = s.match(/^locator\(\s*(['"])([\s\S]*)\1\s*\)$/);
-  if (m) return m[2].trim();
-  return s;
-}
-
-/**
- * A "semantic" locator (getByRole/getByText/…) is a best-effort first guess (e.g. from the model)
- * that we do NOT strictly verify — it gets replaced by the real observer-captured selector when
- * cached. Only concrete/CSS locators are held to the captured-selector match.
- */
-function isSemanticLocator(raw: string): boolean {
-  return String(raw).trim().replace(/^###code/, '').trim().startsWith('getBy');
-}
 
 /**
  * Best-effort live-DOM lookup for a notification via an explicit Playwright locator.
@@ -122,14 +91,7 @@ export const validate_notification = defineTabTool({
     // `locator` is required, but stay defensive: the hub may rewrite a reusable locator to a
     // "###code<expr>" form, so strip that prefix to get the bare Playwright expression. A missing or
     // blank value is treated as absent (the buffer + text search still cover validation).
-    const locator: string | undefined = (() => {
-      if (typeof rawLocator !== 'string') return undefined;
-      const stripped = rawLocator.startsWith('###code')
-        ? rawLocator.slice('###code'.length)
-        : rawLocator;
-      const trimmed = stripped.trim();
-      return trimmed.length > 0 ? trimmed : undefined;
-    })();
+    const locator: string | undefined = stripLocatorPrefix(rawLocator);
 
     const expectedText: string | string[] = (() => {
       const trimmed = rawExpectedText.trim();

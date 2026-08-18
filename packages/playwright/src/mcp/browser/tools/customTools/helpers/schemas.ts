@@ -71,7 +71,24 @@ const validateStylesSchema = z.object({
       ),
   ref: z
       .string()
-      .describe('Exact target element reference from the page snapshot'),
+      .optional()
+      .describe(
+          'Snapshot ref (e.g. e12) or ###code Playwright locator. For a toast (with notificationText): ###code locator, never a snapshot e-ref. A concrete ###codelocator must match the observer-captured notification locator.'
+      ),
+  notificationText: z
+      .string()
+      .optional()
+      .describe(
+          'Toast/snackbar/notification message. Pass with ref as a ###code locator. Uses appear-time captured styles.'
+      ),
+  withinMs: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe(
+          'Lookback window in milliseconds for notificationText (default 15000). Ignored for live elements.'
+      ),
   checks: z
       .array(styleCheckSchema)
       .min(1)
