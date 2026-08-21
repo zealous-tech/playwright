@@ -71,7 +71,24 @@ const validateStylesSchema = z.object({
       ),
   ref: z
       .string()
-      .describe('Exact target element reference from the page snapshot'),
+      .optional()
+      .describe(
+          'Snapshot ref (e.g. e12) or ###code Playwright locator. For a toast (with notificationText): ###code locator, never a snapshot e-ref. A concrete ###codelocator must match the observer-captured notification locator.'
+      ),
+  notificationText: z
+      .string()
+      .optional()
+      .describe(
+          'Toast/snackbar/notification message. Pass with ref as a ###code locator. Uses appear-time captured styles.'
+      ),
+  withinMs: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe(
+          'Lookback window in milliseconds for notificationText (default 15000). Ignored for live elements.'
+      ),
   checks: z
       .array(styleCheckSchema)
       .min(1)
@@ -332,6 +349,9 @@ const validateNotificationSchema = z.object({
   ),
   withinMs: z.number().int().positive().optional().default(15000).describe(
       'Lookback window in milliseconds. Notifications captured within this window are considered even if they have already disappeared from the DOM.'
+  ),
+  locator: z.string().min(1).describe(
+      'REQUIRED best-effort Playwright locator for the notification element — must start with "getBy" or "locator(". ALWAYS provide one, even if the toast has already auto-dismissed and is NOT in the current snapshot; derive it from the notification type/text, not a live snapshot ref. Prefer, in order: getByRole(\'alert\'), getByText(\'<expected text>\'), then a container selector (e.g. locator(\'.Toastify__toast\'), locator(\'.toast\'), locator(\'[role=alert]\')). The live-captured notification buffer is the primary source for text/presence (so a vanished toast can still pass). An in-page observer also captures a REAL, DOM-verified locator when the toast appears; the system prefers/caches that over this best-effort value when available. If you supply a concrete locator("…") / CSS selector, it MUST match that observer-captured locator or the validation fails (wrong/edited locators do not silently pass). Semantic getBy* values are treated as a first guess and are replaced by the observer-captured locator when caching. NEVER put expectedText inside locator or drop expectedText when providing a locator — both are always sent together.'
   ),
 });
 

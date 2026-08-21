@@ -25,6 +25,11 @@ import { z } from 'playwright-core/lib/mcpBundle';
 import { expect } from '@zealous-tech/playwright/test';
 import { defineTabTool } from '../../tool';
 import { generateLocatorString } from '../helpers/helpers';
+import {
+  lookupNotification,
+  notificationLocatorExpressions,
+  readNotifications,
+} from '../helpers/notificationBuffer';
 import { getTimeout } from '../helpers/utils';
 
 // ============================================================================
@@ -159,21 +164,30 @@ function extractIconFunction(element: Element, options: { includeColors: boolean
         const computedStyle = window.getComputedStyle(element);
         const backgroundImage = computedStyle.backgroundImage;
 
-        if (backgroundImage && backgroundImage !== 'none') {
-            const urlMatch = backgroundImage.match(/url\(['"]?([^'"]*?)['"]?\)/);
-            if (urlMatch && urlMatch[1]) {
-                const bgUrl = urlMatch[1];
-                if (bgUrl.startsWith('data:')) {
-                    iconType = 'datauri';
-                    iconData = bgUrl;
-                } else {
-                    iconType = 'background';
-                    iconData = bgUrl;
-                }
-                imageLoaded = true;  // Assume background images are loaded
-                if (options.includeColors) {
-                    colors = extractColors(element);
-                }
+        const firstUrl = (v: string): string => {
+            if (!v || v === 'none') return '';
+            const m = v.match(/url\(['"]?([^'"]*?)['"]?\)/);
+            return (m && m[1]) ? m[1] : '';
+        };
+        const maskOrBgUrl =
+            firstUrl(computedStyle.getPropertyValue('mask-image')) ||
+            firstUrl(computedStyle.getPropertyValue('-webkit-mask-image')) ||
+            firstUrl(computedStyle.getPropertyValue('mask')) ||
+            firstUrl(computedStyle.getPropertyValue('--t-icon')) ||
+            firstUrl(computedStyle.getPropertyValue('--tui-icon')) ||
+            firstUrl(backgroundImage);
+
+        if (maskOrBgUrl) {
+            if (maskOrBgUrl.startsWith('data:')) {
+                iconType = 'datauri';
+                iconData = maskOrBgUrl;
+            } else {
+                iconType = 'background';
+                iconData = maskOrBgUrl;
+            }
+            imageLoaded = true;
+            if (options.includeColors) {
+                colors = extractColors(element);
             }
         }
         else {
@@ -181,12 +195,13 @@ function extractIconFunction(element: Element, options: { includeColors: boolean
             const iconFontPatterns = [
                 /^fa-/, /^fas-/, /^far-/, /^fal-/, /^fab-/,
                 /^material-icons/, /^mi-/,
-                /^icon-/, /^glyphicon-/,
+                /^icon-/, /^glyphicon-/, /^t-icon/, /^tui-icon/,
             ];
 
+            const tag = element.tagName.toLowerCase();
             const hasIconFont = classList.some(cls =>
                 iconFontPatterns.some(pattern => pattern.test(cls))
-            );
+            ) || tag === 'tui-icon' || tag === 'mat-icon' || tag === 'ion-icon';
 
             if (hasIconFont) {
                 iconType = 'font';
@@ -371,11 +386,13 @@ function createErrorPayload(params: {
     actualIcon?: any;
     evidence: Array<{ command: string; message: string }>;
     error?: string;
+    resolvedLocator?: string;
 }) {
     return {
         ref: params.ref,
         element: params.element,
         ...(params.expectedIcon && { expectedIcon: params.expectedIcon }),
+        ...(params.resolvedLocator ? { resolvedLocator: params.resolvedLocator } : {}),
         actualIcon: params.actualIcon || null,
         summary: {
             total: 1,
@@ -403,12 +420,14 @@ function createExtractionPayload(params: {
     element: string;
     extractedIcon: { iconType: IconType; iconData: string; colors: string[] };
     message: string;
+    resolvedLocator?: string;
 }) {
     return {
         ref: params.ref,
         element: params.element,
         extractedIcon: params.extractedIcon,
         message: params.message,
+        ...(params.resolvedLocator ? { resolvedLocator: params.resolvedLocator } : {}),
     };
 }
 
@@ -423,11 +442,13 @@ function createValidationPayload(params: {
     passed: boolean;
     comparisonDetails: string[];
     evidence: Array<{ command: string; message: string }>;
+    resolvedLocator?: string;
 }) {
     return {
         ref: params.ref,
         element: params.element,
         expectedIcon: params.expectedIcon,
+        ...(params.resolvedLocator ? { resolvedLocator: params.resolvedLocator } : {}),
         actualIcon: {
             iconType: params.actualIcon.iconType,
             iconData: summarizeIconDataForResponse(
@@ -463,7 +484,9 @@ function createValidationPayload(params: {
 
 const validateIconSchema = z.object({
   element: z.string().describe('Human-readable element description used to obtain permission to interact with the element'),
-  ref: z.string().describe('Exact target element reference from the page snapshot'),
+  ref: z.string().optional().describe('Snapshot ref (e.g. e12) or ###code Playwright locator. For a toast icon (with notificationText): ###code locator, never a snapshot e-ref. A concrete ###codelocator must match the observer-captured notification locator.'),
+  notificationText: z.string().optional().describe('Toast/snackbar/notification message. Pass with ref as a ###code locator. Uses the appear-time captured icon. Keep both on the follow-up call with expectedIcon.'),
+  withinMs: z.number().int().positive().optional().describe('Lookback window in milliseconds for notificationText (default 15000). Ignored for live elements.'),
   expectedIcon: z.object({
     iconType: z.enum(['svg', 'img', 'background', 'font', 'datauri', 'unknown']).describe('Type of icon'),
     iconData: z.string().optional().describe('Icon data: SVG markup, image URL, font character, or non-base64 data URI. Omit for base64 data URIs — they are not compared.'),
@@ -524,7 +547,9 @@ function handleExtractionMode(
   element: string,
   actualIcon: ExtractedIcon,
   locatorString: string,
-  response: any
+  response: any,
+  notificationText?: string,
+  resolvedLocator?: string
 ): void {
   // Check if image loaded successfully
   if (!actualIcon.imageLoaded) {
@@ -543,14 +568,22 @@ function handleExtractionMode(
     colors: actualIcon.colors,
   };
 
-  // Generate instruction message for LLM
-  const extractionMessage = generateExtractionMessage(actualIcon);
+  // Generate extraction message with context for LLM
+  let extractionMessage = generateExtractionMessage(actualIcon);
+  if (notificationText) {
+    const followUpRef = resolvedLocator
+      ? (resolvedLocator.startsWith('###code') ? resolvedLocator : `###code${resolvedLocator}`)
+      : ref;
+    extractionMessage += `\n\nThis icon was captured from the transient notification "${notificationText}". On the follow-up call keep notificationText: ${JSON.stringify(notificationText)} and ref: ${JSON.stringify(followUpRef)}. Call validate_icon ONLY with expectedIcon — do NOT call validate_notification again.`;
+  }
+
 
   const payload = createExtractionPayload({
     ref,
     element,
     extractedIcon: extractedIconData,
     message: extractionMessage,
+    resolvedLocator,
   });
 
   response.addTextResult(JSON.stringify(payload, null, 2));
@@ -567,7 +600,8 @@ function handleValidationMode(
   expectedIcon: ExpectedIcon,
   ignoreColors: boolean,
   locatorString: string,
-  response: any
+  response: any,
+  resolvedLocator?: string
 ): void {
   // Check if image is loaded (critical for img types)
   if (actualIcon.iconType === 'img' && !actualIcon.imageLoaded) {
@@ -615,6 +649,7 @@ function handleValidationMode(
     passed,
     comparisonDetails,
     evidence,
+    resolvedLocator,
   });
 
   response.addTextResult(JSON.stringify(payload, null, 2));
@@ -671,20 +706,103 @@ async function handleValidationError(
   response.addTextResult(JSON.stringify(errorPayload, null, 2));
 }
 
+const NOTIFICATION_BUFFER_REF = 'notification-buffer';
+const DEFAULT_NOTIFICATION_LOOKBACK_MS = 15000;
+
+async function handleNotificationMode(
+  tab: any,
+  element: string,
+  notificationText: string,
+  withinMs: number,
+  expectedIcon: ExpectedIcon | undefined,
+  ignoreColors: boolean,
+  response: any,
+  ref?: string
+): Promise<void> {
+  const { notifications, observerInstalled } = await readNotifications(tab.page, withinMs, {
+    includeIcon: true,
+    matchText: notificationText,
+  });
+  const { hit, locatorMismatch } = lookupNotification(notifications, notificationText, ref);
+  const { toast, icon } = notificationLocatorExpressions(hit);
+  const resolvedLocator = toast || ref;
+  const locatorString = icon || toast || `notificationBuffer(${JSON.stringify(notificationText)})`;
+  const payloadRef = ref || NOTIFICATION_BUFFER_REF;
+
+  if (locatorMismatch || !hit || !hit.icon || typeof hit.icon.iconData !== 'string') {
+    let message: string;
+    if (locatorMismatch)
+      message = `A notification containing "${notificationText}" DID appear, but it was not found via the provided locator (${ref}). The notification's real locator is ${toast || 'unknown'}.`;
+    else if (!observerInstalled)
+      message = `Cannot validate the icon of notification "${notificationText}": the notification observer was not installed on this page.`;
+    else if (!hit)
+      message = `No notification containing "${notificationText}" was captured within ${withinMs}ms, so its icon could not be validated.`;
+    else
+      message = `Notification "${hit.text}" was captured, but it had no icon at the moment it appeared.`;
+
+    response.addTextResult(JSON.stringify(createErrorPayload({
+      ref: payloadRef,
+      element,
+      expectedIcon,
+      evidence: createEvidence({
+        toolName: 'validate_icon',
+        locator: locatorString,
+        arguments: { notificationText, withinMs, expectedIcon, ...(ref ? { ref } : {}) },
+        message,
+      }),
+      resolvedLocator,
+    }), null, 2));
+    return;
+  }
+
+  const actualIcon: ExtractedIcon = {
+    iconType: hit.icon.iconType,
+    iconData: hit.icon.iconData,
+    colors: ignoreColors ? [] : (hit.icon.colors || []),
+    imageLoaded: true,
+
+  };
+
+  if (!expectedIcon)
+    handleExtractionMode(payloadRef, element, actualIcon, locatorString, response, notificationText, resolvedLocator);
+  else
+    handleValidationMode(payloadRef, element, actualIcon, expectedIcon, ignoreColors, locatorString, response, resolvedLocator);
+}
+
 export const validate_icon = defineTabTool({
   capability: 'core',
   schema: {
     name: 'validate_icon',
     title: 'Validate Icon',
-    description: 'Extract and/or validate icon data. If expectedIcon is not provided, extracts current icon data for LLM analysis. If expectedIcon is provided, validates current icon matches expected icon (compares type, data, and colors; size differences are ignored).',
+    description: 'Extract and/or validate icon data. Without expectedIcon, extracts current icon data. With expectedIcon, compares type, data, and colors. For a toast/notification icon, pass notificationText and ref as a ###code locator (not a snapshot e-ref).',
     inputSchema: validateIconSchema,
     type: 'readOnly',
   },
   handle: async (tab, params, response) => {
-    const { ref, element, expectedIcon, ignoreColors } = validateIconSchema.parse(params);
-    
+    const { ref, element, expectedIcon, ignoreColors, notificationText, withinMs } = validateIconSchema.parse(params);
+
     await tab.waitForCompletion(async () => {
       try {
+        if (notificationText) {
+          await handleNotificationMode(tab, element, notificationText, withinMs ?? DEFAULT_NOTIFICATION_LOOKBACK_MS, expectedIcon, ignoreColors, response, ref);
+          return;
+        }
+
+        if (!ref) {
+          const evidence = createEvidence({
+            toolName: 'validate_icon',
+            arguments: { element, expectedIcon },
+            message: `Cannot validate icon for "${element}": provide "ref" for a page element, or "notificationText" with a ###code locator in "ref" for a toast/notification icon.`,
+          });
+          response.addTextResult(JSON.stringify(createErrorPayload({
+            ref: '',
+            element,
+            expectedIcon,
+            evidence,
+          }), null, 2));
+          return;
+        }
+
         // Step 1: Locate the element
         const { locator } = await tab.refLocator({ ref, element });
 
@@ -714,7 +832,7 @@ export const validate_icon = defineTabTool({
 
       } catch (error) {
         // Handle any unexpected errors
-        await handleValidationError(ref, element, expectedIcon, error, tab, response);
+        await handleValidationError(ref ?? NOTIFICATION_BUFFER_REF, element, expectedIcon, error, tab, response);
       }
     });
   },
