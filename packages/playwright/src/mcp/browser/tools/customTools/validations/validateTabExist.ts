@@ -13,7 +13,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+import { expect } from '@zealous-tech/playwright/test';
 import { defineTabTool } from '../../tool';
+import { getTimeout } from '../helpers/utils';
 import { validateTabExistSchema } from '../helpers/schemas';
 
 export const validate_tab_exist = defineTabTool({
@@ -31,9 +33,8 @@ export const validate_tab_exist = defineTabTool({
     try {
       // Get all tabs information from context
       const context = tab.context;
-      const allTabs = context.tabs();
 
-      // Determine if url is a valid regex
+      // Determine if url is a valid regex (used by both the scan and the native URL wait)
       let urlRegex: RegExp;
       let isUrlRegex = false;
 
@@ -69,65 +70,87 @@ export const validate_tab_exist = defineTabTool({
         return regexMatch || includes;
       };
 
-      // Extract tab info using the correct page methods
-      const tabsWithInfo = await Promise.all(
-          allTabs.map(async (tabItem: any, index: number) => {
-            try {
-              const tabUrl = await tabItem.page.url();
-              const tabTitle = await tabItem.page.title();
-              return { index, header: tabTitle, url: tabUrl };
-            } catch {
-              return { index, header: 'Unknown', url: 'unknown' };
-            }
-          })
-      );
+      // Mirror the tool's URL-matching semantics so the native wait predicate stays consistent
+      // with the tab scan below.
+      const matchesUrl = (candidateUrl: string): boolean => {
+        if (exactMatch)
+          return candidateUrl === url;
+        const regexMatch = isUrlRegex ? urlRegex!.test(candidateUrl) : false;
+        const includes = candidateUrl.includes(url) || url.includes(candidateUrl);
+        return regexMatch || includes;
+      };
 
-      console.log('All tabs info:', tabsWithInfo);
+      // One-shot evaluation of the tab state across all tabs. Pure so it can be re-run after waiting.
+      const evaluateOnce = async () => {
+        const allTabs = context.tabs();
 
-      // Find current tab URL
-      let currentTabUrl = '';
-      try {
-        currentTabUrl = await tab.page.url();
-      } catch (error) {
-        console.log('Could not determine current tab URL:', error);
-      }
+        // Extract tab info using the correct page methods
+        const tabsWithInfo = await Promise.all(
+            allTabs.map(async (tabItem: any, index: number) => {
+              try {
+                const tabUrl = await tabItem.page.url();
+                const tabTitle = await tabItem.page.title();
+                return { index, header: tabTitle, url: tabUrl };
+              } catch {
+                return { index, header: 'Unknown', url: 'unknown' };
+              }
+            })
+        );
 
-      let foundTab: any = null;
-      let searchType = '';
-
-      // Search for tab with matching URL
-      foundTab = tabsWithInfo.find((tabInfo: any) => {
-        const titleMatch = matchesTitle(tabInfo.header);
-        if (exactMatch) {
-          searchType = 'exact';
-          return tabInfo.url === url && titleMatch;
+        // Find current tab URL
+        let currentTabUrl = '';
+        try {
+          currentTabUrl = await tab.page.url();
+        } catch (error) {
+          console.log('Could not determine current tab URL:', error);
         }
-        const regexMatch = isUrlRegex ? urlRegex!.test(tabInfo.url) : false;
-        const includes = tabInfo.url.includes(url) || url.includes(tabInfo.url);
-        searchType = includes ? 'partial' : 'regex';
-        return (regexMatch || includes) && titleMatch;
-      });
 
-      const isFound = !!foundTab;
+        let searchType = '';
 
-      // Check if found tab is current tab (if isCurrent is specified)
-      let isCurrentTab = false;
-      if (isFound && isCurrent !== undefined)
-        isCurrentTab = (foundTab as any).url === currentTabUrl;
+        // Search for tab with matching URL
+        const foundTab: any = tabsWithInfo.find((tabInfo: any) => {
+          const titleMatch = matchesTitle(tabInfo.header);
+          if (exactMatch) {
+            searchType = 'exact';
+            return tabInfo.url === url && titleMatch;
+          }
+          const regexMatch = isUrlRegex ? urlRegex!.test(tabInfo.url) : false;
+          const includes = tabInfo.url.includes(url) || url.includes(tabInfo.url);
+          searchType = includes ? 'partial' : 'regex';
+          return (regexMatch || includes) && titleMatch;
+        });
 
+        const isFound = !!foundTab;
 
-      // Determine final result based on matchType and isCurrent
-      let status: string;
-      if (matchType === 'exist') {
-        const urlMatch = isFound;
+        // Check if found tab is current tab (if isCurrent is specified)
+        let isCurrentTab = false;
+        if (isFound && isCurrent !== undefined)
+          isCurrentTab = (foundTab as any).url === currentTabUrl;
+
+        // Determine final result based on matchType and isCurrent
         const currentMatch = isCurrent === undefined ? true : (isCurrent ? isCurrentTab : !isCurrentTab);
-        status = (urlMatch && currentMatch) ? 'pass' : 'fail';
-      } else { // matchType === 'not-exist'
-        const urlMatch = !isFound;
-        const currentMatch = isCurrent === undefined ? true : (isCurrent ? isCurrentTab : !isCurrentTab);
-        status = (urlMatch && currentMatch) ? 'pass' : 'fail';
+        const urlMatch = matchType === 'exist' ? isFound : !isFound;
+        const status = (urlMatch && currentMatch) ? 'pass' : 'fail';
+
+        return { tabsWithInfo, currentTabUrl, foundTab, isFound, isCurrentTab, searchType, status };
+      };
+
+      let evaluation = await evaluateOnce();
+      if (evaluation.status !== 'pass') {
+        try {
+          const urlAssertion = expect(tab.page);
+          const predicate = (u: URL) => matchesUrl(u.href);
+          if (matchType === 'exist')
+            await urlAssertion.toHaveURL(predicate, { timeout: getTimeout(context) });
+          else
+            await urlAssertion.not.toHaveURL(predicate, { timeout: getTimeout(context) });
+        } catch {
+          // Timed out waiting for the URL condition; the final evaluation reports the failure.
+        }
+        evaluation = await evaluateOnce();
       }
 
+      const { tabsWithInfo, currentTabUrl, foundTab, isFound, isCurrentTab, searchType, status } = evaluation;
       // Generate evidence message
       let evidence = '';
       let currentInfo = '';

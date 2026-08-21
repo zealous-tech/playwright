@@ -15,6 +15,7 @@
  */
 export { otto_wait_for } from './ottoWaitFor';
 export { data_extraction } from './dataExtraction';
+export { text_extraction } from './textExtraction';
 export { dynamic_switch } from './dynamicSwitch';
 export { extract_image_urls } from './extractImageUrls';
 export { extract_svg_from_element } from './extractSvgFromElement';
