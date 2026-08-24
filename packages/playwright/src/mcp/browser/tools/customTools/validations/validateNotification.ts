@@ -88,8 +88,7 @@ export const validate_notification = defineTabTool({
     const { element, expectedText: rawExpectedText, matchType, withinMs, locator: rawLocator } =
       validateNotificationSchema.parse(params);
 
-    // `locator` is required, but stay defensive: the hub may rewrite a reusable locator to a
-    // "###code<expr>" form, so strip that prefix to get the bare Playwright expression. A missing or
+    // `locator` is required, but stay defensive. A missing or
     // blank value is treated as absent (the buffer + text search still cover validation).
     const locator: string | undefined = stripLocatorPrefix(rawLocator);
 

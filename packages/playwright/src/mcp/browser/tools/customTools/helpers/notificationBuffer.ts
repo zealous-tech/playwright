@@ -59,8 +59,7 @@ function normalize(s: string): string {
 export function stripLocatorPrefix(raw: unknown): string | undefined {
   if (typeof raw !== 'string')
     return undefined;
-  const stripped = raw.startsWith('###code') ? raw.slice('###code'.length) : raw;
-  const trimmed = stripped.trim();
+  const trimmed = String(raw).trim();
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
@@ -75,8 +74,6 @@ export function toLocatorExpression(rawSelector: string): string {
 
 export function normalizeLocatorForCompare(raw: string): string {
   let s = String(raw).trim();
-  if (s.startsWith('###code'))
-    s = s.slice('###code'.length).trim();
   const m = s.match(/^locator\(\s*(['"])([\s\S]*)\1\s*\)$/);
   if (m)
     return m[2].trim();
@@ -84,7 +81,7 @@ export function normalizeLocatorForCompare(raw: string): string {
 }
 
 export function isSemanticLocator(raw: string): boolean {
-  return String(raw).trim().replace(/^###code/, '').trim().startsWith('getBy');
+  return String(raw).trim().startsWith('getBy');
 }
 
 function capturedSelectors(n: CapturedNotification): string[] {

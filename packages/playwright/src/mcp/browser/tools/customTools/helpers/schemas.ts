@@ -73,13 +73,13 @@ const validateStylesSchema = z.object({
       .string()
       .optional()
       .describe(
-          'Snapshot ref (e.g. e12) or ###code Playwright locator. For a toast (with notificationText): ###code locator, never a snapshot e-ref. A concrete ###codelocator must match the observer-captured notification locator.'
+          'Snapshot ref (e.g. e12) or Playwright locator. For a toast (with notificationText): Playwright locator, never a snapshot e-ref. A concrete locator must match the observer-captured notification locator.'
       ),
   notificationText: z
       .string()
       .optional()
       .describe(
-          'Toast/snackbar/notification message. Pass with ref as a ###code locator. Uses appear-time captured styles.'
+          'Toast/snackbar/notification message. Pass with ref as a Playwright locator. Uses appear-time captured styles.'
       ),
   withinMs: z
       .number()

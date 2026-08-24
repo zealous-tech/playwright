@@ -147,7 +147,7 @@ export const validate_computed_styles = defineTabTool({
     name: 'validate_computed_styles',
     title: 'Validate computed styles of element',
     description:
-      "Validate element's CSS computed styles against expected values using isEqual / notEqual / inRange operators. Supports RGB color range validation. For a toast/notification, pass notificationText and ref as a ###code locator (not a snapshot e-ref).",
+      "Validate element's CSS computed styles against expected values using isEqual / notEqual / inRange operators. Supports RGB color range validation. For a toast/notification, pass notificationText and ref as a Playwright locator (not a snapshot e-ref).",
     inputSchema: validateStylesSchema,
     type: 'readOnly',
   },
@@ -243,7 +243,7 @@ export const validate_computed_styles = defineTabTool({
       if (!ref) {
         const evidence = checks.map(check => ({
           command: createEvidenceCommand('', check.name, check.operator, check.expected),
-          message: `CSS Property "${check.name}" validation failed: provide "ref" for a page element, or "notificationText" with a ###code locator in "ref" for a toast/notification`,
+          message: `CSS Property "${check.name}" validation failed: provide "ref" for a page element, or "notificationText" with a Playwright locator in "ref" for a toast/notification`,
         }));
         const payload = buildUnavailablePayload({ ref: '', element, checks, evidence });
         console.log('Validate Computed Styles (no target):', payload);

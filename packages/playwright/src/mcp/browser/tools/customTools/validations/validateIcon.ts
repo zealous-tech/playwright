@@ -484,8 +484,8 @@ function createValidationPayload(params: {
 
 const validateIconSchema = z.object({
   element: z.string().describe('Human-readable element description used to obtain permission to interact with the element'),
-  ref: z.string().optional().describe('Snapshot ref (e.g. e12) or ###code Playwright locator. For a toast icon (with notificationText): ###code locator, never a snapshot e-ref. A concrete ###codelocator must match the observer-captured notification locator.'),
-  notificationText: z.string().optional().describe('Toast/snackbar/notification message. Pass with ref as a ###code locator. Uses the appear-time captured icon. Keep both on the follow-up call with expectedIcon.'),
+  ref: z.string().optional().describe('Snapshot ref (e.g. e12) or Playwright locator. For a toast icon (with notificationText): Playwright locator, never a snapshot e-ref. A concrete locator must match the observer-captured notification locator.'),
+  notificationText: z.string().optional().describe('Toast/snackbar/notification message. Pass with ref as a Playwright locator. Uses the appear-time captured icon. Keep both on the follow-up call with expectedIcon.'),
   withinMs: z.number().int().positive().optional().describe('Lookback window in milliseconds for notificationText (default 15000). Ignored for live elements.'),
   expectedIcon: z.object({
     iconType: z.enum(['svg', 'img', 'background', 'font', 'datauri', 'unknown']).describe('Type of icon'),
@@ -571,9 +571,7 @@ function handleExtractionMode(
   // Generate extraction message with context for LLM
   let extractionMessage = generateExtractionMessage(actualIcon);
   if (notificationText) {
-    const followUpRef = resolvedLocator
-      ? (resolvedLocator.startsWith('###code') ? resolvedLocator : `###code${resolvedLocator}`)
-      : ref;
+    const followUpRef = resolvedLocator ? resolvedLocator : ref;
     extractionMessage += `\n\nThis icon was captured from the transient notification "${notificationText}". On the follow-up call keep notificationText: ${JSON.stringify(notificationText)} and ref: ${JSON.stringify(followUpRef)}. Call validate_icon ONLY with expectedIcon — do NOT call validate_notification again.`;
   }
 
@@ -774,7 +772,7 @@ export const validate_icon = defineTabTool({
   schema: {
     name: 'validate_icon',
     title: 'Validate Icon',
-    description: 'Extract and/or validate icon data. Without expectedIcon, extracts current icon data. With expectedIcon, compares type, data, and colors. For a toast/notification icon, pass notificationText and ref as a ###code locator (not a snapshot e-ref).',
+    description: 'Extract and/or validate icon data. Without expectedIcon, extracts current icon data. With expectedIcon, compares type, data, and colors. For a toast/notification icon, pass notificationText and ref as a Playwright locator (not a snapshot e-ref).',
     inputSchema: validateIconSchema,
     type: 'readOnly',
   },
@@ -792,7 +790,7 @@ export const validate_icon = defineTabTool({
           const evidence = createEvidence({
             toolName: 'validate_icon',
             arguments: { element, expectedIcon },
-            message: `Cannot validate icon for "${element}": provide "ref" for a page element, or "notificationText" with a ###code locator in "ref" for a toast/notification icon.`,
+            message: `Cannot validate icon for "${element}": provide "ref" for a page element, or "notificationText" with a Playwright locator in "ref" for a toast/notification icon.`,
           });
           response.addTextResult(JSON.stringify(createErrorPayload({
             ref: '',
