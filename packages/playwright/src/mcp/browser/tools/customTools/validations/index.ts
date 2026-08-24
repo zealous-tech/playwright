@@ -26,4 +26,5 @@ export { validate_response } from './validateResponse';
 export { validate_tab_count } from './validateTabCount';
 export { validate_tab_exist } from './validateTabExist';
 export { validate_text_in_whole_page } from './validateTextInWholePage';
+export { validate_notification } from './validateNotification';
 export { validate_seat_section_on_map } from './validateMapNode';

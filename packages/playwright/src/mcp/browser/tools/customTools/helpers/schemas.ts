@@ -71,7 +71,24 @@ const validateStylesSchema = z.object({
       ),
   ref: z
       .string()
-      .describe('Exact target element reference from the page snapshot'),
+      .optional()
+      .describe(
+          'Snapshot ref (e.g. e12) or Playwright locator. For a toast (with notificationText): Playwright locator, never a snapshot e-ref. A concrete locator must match the observer-captured notification locator.'
+      ),
+  notificationText: z
+      .string()
+      .optional()
+      .describe(
+          'Toast/snackbar/notification message. Pass with ref as a Playwright locator. Uses appear-time captured styles.'
+      ),
+  withinMs: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe(
+          'Lookback window in milliseconds for notificationText (default 15000). Ignored for live elements.'
+      ),
   checks: z
       .array(styleCheckSchema)
       .min(1)
@@ -320,6 +337,24 @@ const validateTextInWholePageSchema = z.object({
   ),
 });
 
+const validateNotificationSchema = z.object({
+  element: z.string().describe(
+      'Human-readable description of the notification being validated (e.g. "success toast").'
+  ),
+  expectedText: z.string().describe(
+      'Expected notification text. Single string, or a JSON-stringified array of strings (e.g. "[\"Saved\", \"Updated\"]") combined with OR.'
+  ),
+  matchType: z.enum(['exact', 'contains', 'not-contains']).default('contains').describe(
+      "Match type: 'contains' substring match (default), 'exact' full match, 'not-contains' asserts the notification did NOT appear."
+  ),
+  withinMs: z.number().int().positive().optional().default(15000).describe(
+      'Lookback window in milliseconds. Notifications captured within this window are considered even if they have already disappeared from the DOM.'
+  ),
+  locator: z.string().min(1).describe(
+      'REQUIRED best-effort Playwright locator for the notification element — must start with "getBy" or "locator(". ALWAYS provide one, even if the toast has already auto-dismissed and is NOT in the current snapshot; derive it from the notification type/text, not a live snapshot ref. Prefer, in order: getByRole(\'alert\'), getByText(\'<expected text>\'), then a container selector (e.g. locator(\'.Toastify__toast\'), locator(\'.toast\'), locator(\'[role=alert]\')). The live-captured notification buffer is the primary source for text/presence (so a vanished toast can still pass). An in-page observer also captures a REAL, DOM-verified locator when the toast appears; the system prefers/caches that over this best-effort value when available. If you supply a concrete locator("…") / CSS selector, it MUST match that observer-captured locator or the validation fails (wrong/edited locators do not silently pass). Semantic getBy* values are treated as a first guess and are replaced by the observer-captured locator when caching. NEVER put expectedText inside locator or drop expectedText when providing a locator — both are always sent together.'
+  ),
+});
+
 const validateElementInWholePageSchema = z.object({
   element: z.string().describe(
       'Human-readable element description used to obtain permission to interact with the element'
@@ -354,6 +389,20 @@ const dataExtractionSchema = z.object({
   name: z.string().describe('Variable name (will be prefixed with $$)'),
   data: z.string().describe('Data to extract from. If jsonPath is provided, should be JSON string. If jsonPath is not provided, can be any string data'),
   jsonPath: z.string().optional().describe('JSONPath expression. Examples: $.store.book[0].title (specific element), $..author (recursive descent), $.store.book[*].author (wildcard), $.store.book[?(@.price<10)] (filter), $.store.book[(@.length-1)] (script). Use $ as root, dot notation or brackets for properties. If the path ends with .length and if the value at the path is an array, the extracted value will be that array\'s length.'),
+});
+
+const textExtractionSchema = z.object({
+  name: z.string().describe('Variable name to store the extracted text under (referenced later as ${name})'),
+  data: z.string().optional().describe('Plain text source to extract from (e.g. ${lastAPIResponse}, ${lastNetworkRequests}, a previously stored variable, or a literal string). Provide this OR (ref + element) — when data is provided, the page element is ignored.'),
+  ref: z.string().optional().describe('Exact target element reference from the page snapshot whose text content will be read. Provide this together with "element" when extracting from the page instead of inline "data".'),
+  element: z.string().optional().describe('Human-readable element description used to obtain permission to interact with the element. Required when "ref" is provided.'),
+  regex: z.string().optional().describe('Optional regular expression (JS source, without slashes) applied to the source text. If the pattern has a capture group, group 1 is stored; otherwise the full match is stored. Prefer this over hard-coding extracted values so the step stays cachable.'),
+  regexFlags: z.string().optional().describe('Optional regex flags (e.g. "i", "s", "m"). The global flag is ignored — only the first match is used.'),
+  startIndex: z.number().int().optional().describe('Optional inclusive character start index. Applied to the source text before the regex (if any).'),
+  endIndex: z.number().int().optional().describe('Optional exclusive character end index. Applied to the source text before the regex (if any).'),
+  useInnerText: z.boolean().optional().default(false).describe('When true, reads element.innerText (rendered text) instead of textContent (raw text). Only applies when reading from a page element (ref).'),
+}).refine(params => (params.data !== undefined) || (params.ref !== undefined && params.element !== undefined), {
+  message: 'Provide either "data" (inline plain text) or both "ref" and "element" (page element) as the text source',
 });
 
 const waitSchema = z.object({
@@ -712,9 +761,11 @@ export {
   validateResponseSchema,
   validateExpandedSchema,
   validateTextInWholePageSchema,
+  validateNotificationSchema,
   validateElementInWholePageSchema,
   validateElementVisibilitySchema,
   dataExtractionSchema,
+  textExtractionSchema,
   waitSchema,
   validateElementPositionSchema,
   validateElementOrderSchema,
